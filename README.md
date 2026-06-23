@@ -1,2 +1,2 @@
 # Questbook_Dajeon
-A location-based tourism quest game where users explore Daejeon, collect badges, and unlock new Kkumdori character forms.
+대전을 탐험하며 배지를 모으고, 새로운 꿈돌이 캐릭터를 획득하는 위치 기반 관광 퀘스트 게임
