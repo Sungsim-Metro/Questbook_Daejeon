@@ -1,0 +1,542 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>모험가의 수첩 3단 목업</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&display=swap');
+
+:root {
+  --ink: #2d3a32;
+  --sub: #756b5b;
+  --paper: #fffaf0;
+  --paper-2: #fffdf7;
+  --paper-line: #eadfcb;
+  --green: #03c75a;
+  --green-dark: #0a8f48;
+  --green-soft: #e8f8ee;
+  --green-mid: #70bd88;
+  --gold: #ead18b;
+  --clay: #d39172;
+  --lavender: #9d91bf;
+  --road: rgba(135, 122, 96, .25);
+  --line: rgba(94, 78, 54, .16);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Gaegu', 'Noto Sans KR', system-ui, sans-serif;
+  color: var(--ink);
+  word-break: keep-all;
+  overflow-wrap: normal;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(3,199,90,.18), transparent 27%),
+    radial-gradient(circle at 82% 16%, rgba(234,209,139,.24), transparent 30%),
+    #f5efe2;
+}
+
+.adv-wrap {
+  width: min(1060px, 100%);
+  margin: 0 auto;
+  padding: 30px 20px 42px;
+}
+
+.brand-head {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 8px;
+}
+
+.app-icon {
+  width: 72px;
+  height: 72px;
+  position: relative;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #13d86b, #079447);
+  box-shadow: 0 14px 28px rgba(3, 199, 90, .24), inset 0 0 0 1px rgba(255,255,255,.28);
+}
+
+.icon-page {
+  position: absolute;
+  left: 19px;
+  top: 15px;
+  width: 35px;
+  height: 43px;
+  border-radius: 9px;
+  background: #fffaf0;
+  box-shadow: inset 0 0 0 2px rgba(45,58,50,.1), 4px 3px 0 rgba(0,0,0,.08);
+}
+
+.icon-page::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: 13px;
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(10,143,72,.3);
+  box-shadow: 0 8px 0 rgba(10,143,72,.22), 0 16px 0 rgba(10,143,72,.16);
+}
+
+.icon-leaf {
+  position: absolute;
+  right: 12px;
+  top: 11px;
+  width: 22px;
+  height: 22px;
+  transform: rotate(-18deg);
+}
+
+.icon-leaf::before,
+.icon-leaf::after {
+  content: '';
+  position: absolute;
+  border-radius: 100% 0 100% 0;
+  background: #c9f56d;
+}
+
+.icon-leaf::before { width: 12px; height: 20px; left: 2px; top: 1px; }
+.icon-leaf::after { width: 10px; height: 17px; right: 1px; top: 5px; transform: rotate(44deg); }
+
+.mock-title {
+  margin: 0;
+  font-size: clamp(30px, 3.2vw, 42px);
+  line-height: .98;
+  font-weight: 700;
+  color: #2d3a32;
+}
+
+.mock-subtitle {
+  margin: 0 0 28px;
+  text-align: center;
+  color: var(--sub);
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 26px;
+  align-items: start;
+}
+
+.col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.section-title {
+  margin: 0 0 12px;
+  padding: 6px 18px 7px;
+  min-width: 166px;
+  text-align: center;
+  border-radius: 999px;
+  background: #fff7df;
+  border: 1px solid rgba(94,78,54,.13);
+  box-shadow: 0 7px 18px rgba(94,78,54,.07);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  color: #5b503e;
+  white-space: nowrap;
+}
+
+.device {
+  width: 252px;
+  border-radius: 34px;
+  padding: 8px;
+  position: relative;
+  background: linear-gradient(145deg, #323b36, #17201b 58%, #48524c);
+  box-shadow: 0 28px 58px rgba(3,199,90,.15), 0 18px 34px rgba(94,78,54,.14), inset 0 0 0 1px rgba(255,255,255,.14);
+}
+
+.device::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 58px;
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(255,255,255,.16);
+  transform: translateX(-50%);
+}
+
+.screen {
+  height: 510px;
+  overflow: hidden;
+  border-radius: 25px;
+  background: var(--paper);
+  position: relative;
+}
+
+.screen::before {
+  content: '';
+  position: absolute;
+  inset: 51px 0 56px;
+  background: linear-gradient(var(--paper-line) 1px, transparent 1px) 0 17px / 100% 29px;
+  opacity: .56;
+  pointer-events: none;
+}
+
+.screen::after {
+  content: '';
+  position: absolute;
+  top: 51px;
+  bottom: 56px;
+  left: 18px;
+  width: 2px;
+  background: rgba(211, 145, 114, .25);
+  pointer-events: none;
+}
+
+.hdr {
+  min-height: 51px;
+  padding: 13px 13px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--green), var(--green-dark));
+}
+
+.hdr-mark {
+  width: 27px;
+  height: 27px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,.2);
+  border: 1px solid rgba(255,255,255,.28);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.hdr-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.hdr-lv {
+  padding: 4px 9px 5px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fffdf5;
+  color: var(--green-dark);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.page-tag {
+  position: absolute;
+  right: 0;
+  top: 70px;
+  z-index: 4;
+  padding: 8px 5px;
+  border-radius: 10px 0 0 10px;
+  background: var(--gold);
+  color: #5b4c32;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  writing-mode: vertical-rl;
+  box-shadow: -4px 5px 12px rgba(94,78,54,.12);
+}
+
+.tabbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  height: 56px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: center;
+  background: rgba(255,253,245,.96);
+  border-top: 1px solid rgba(94,78,54,.09);
+  box-shadow: 0 -12px 28px rgba(94,78,54,.08);
+}
+
+.tab {
+  min-width: 0;
+  text-align: center;
+  color: #8a7f6e;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tab i {
+  display: block;
+  margin-bottom: 3px;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tab.on { color: var(--green-dark); }
+
+.map-area {
+  height: 280px;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.55) 1px, transparent 1px) 0 0 / 38px 38px,
+    linear-gradient(0deg, rgba(255,255,255,.55) 1px, transparent 1px) 0 0 / 38px 38px,
+    linear-gradient(160deg, #e7f8ed 0%, #fffaf0 49%, #eef7e6 100%);
+}
+
+.path { position: absolute; background: var(--road); border-radius: 99px; }
+.river { position: absolute; width: 122px; height: 24px; border-radius: 999px; background: linear-gradient(90deg, #b5ded5, #7fc7af); box-shadow: 0 0 0 9px rgba(3,199,90,.09); }
+.park-area { position: absolute; border-radius: 20px; background: rgba(3,199,90,.15); border: 1px dashed rgba(10,143,72,.36); }
+.park-label { position: absolute; color: #38704f; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+
+.marker {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  filter: drop-shadow(0 6px 8px rgba(45,58,50,.16));
+}
+
+.marker-pin {
+  width: 31px;
+  height: 31px;
+  border-radius: 50% 50% 50% 9px;
+  display: grid;
+  place-items: center;
+  border: 3px solid rgba(255,255,255,.96);
+  transform: rotate(-45deg);
+}
+
+.marker-pin span { color: #fff; font-size: 13px; line-height: 1; font-weight: 700; transform: rotate(45deg); }
+.marker-label { margin-top: 5px; padding: 3px 7px 4px; border-radius: 999px; background: rgba(255,253,245,.94); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.my-dot { position: absolute; width: 15px; height: 15px; border-radius: 50%; background: var(--green-dark); border: 3px solid #fff; box-shadow: 0 0 0 9px rgba(3,199,90,.18); }
+.map-legend { position: absolute; right: 8px; bottom: 8px; padding: 7px 8px; border-radius: 12px; background: rgba(255,253,245,.91); border: 1px solid var(--line); color: #5f655d; font-size: 13px; line-height: 1.25; font-weight: 700; white-space: nowrap; }
+
+.map-card {
+  position: relative;
+  z-index: 1;
+  margin: 9px 10px 0;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 12px 24px rgba(3,199,90,.06), 0 5px 12px rgba(94,78,54,.05);
+}
+
+.map-card::before { content: '오늘 메모'; position: absolute; right: 12px; top: -9px; padding: 2px 8px 3px; border-radius: 999px; background: #f5e9bd; color: #74633e; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.mc-icon { width: 36px; height: 36px; flex: 0 0 auto; border-radius: 15px; display: grid; place-items: center; background: var(--green-soft); color: var(--green-dark); border: 1px solid rgba(10,143,72,.16); font-size: 13px; line-height: 1; font-weight: 700; }
+.mc-copy { flex: 1; min-width: 0; }
+.mc-title { color: var(--ink); font-size: 13px; line-height: 1.05; font-weight: 700; white-space: nowrap; }
+.mc-sub { margin-top: 3px; color: var(--sub); font-size: 13px; line-height: 1.05; font-weight: 700; white-space: nowrap; }
+.mc-btn { flex: 0 0 auto; padding: 7px 8px 8px; border-radius: 12px; background: var(--green-dark); color: #fff; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; box-shadow: 0 7px 14px rgba(10,143,72,.21); }
+
+.quest-strip { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; padding: 9px 10px 0; }
+.quest-mini { min-height: 58px; padding: 7px 4px; text-align: center; background: var(--paper-2); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 4px 12px rgba(94,78,54,.04); transform: rotate(-1deg); }
+.quest-mini:nth-child(2) { transform: rotate(1deg); }
+.quest-mini span { display: block; font-size: 13px; line-height: 1; font-weight: 700; }
+.quest-mini b { display: block; margin: 3px 0 1px; color: var(--ink); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.quest-mini small { color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+
+.badge-bg {
+  height: 454px;
+  padding: 24px 16px 64px;
+  position: relative;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(255,255,255,.16), transparent 25%), linear-gradient(160deg, var(--green), var(--green-dark) 72%);
+}
+
+.badge-bg::before { content: 'STAMP PAGE'; position: absolute; left: 14px; top: 58px; color: rgba(255,255,255,.28); font-size: 13px; line-height: 1; font-weight: 700; letter-spacing: .04em; transform: rotate(-8deg); }
+.badge-title-txt { color: #fff; font-size: 13px; line-height: 1; font-weight: 700; letter-spacing: .04em; }
+.badge-sub { margin: 7px 0 15px; color: #eefbf3; font-size: 13px; line-height: 1.1; font-weight: 700; white-space: nowrap; }
+.badge-circle { width: 108px; height: 108px; margin: 0 auto 10px; border-radius: 36px; display: grid; place-items: center; color: var(--green-dark); background: linear-gradient(145deg, #fffdf7, #e9faef); border: 5px solid rgba(255,255,255,.9); box-shadow: 0 18px 32px rgba(45,58,50,.17), 0 0 0 12px rgba(255,255,255,.13); font-size: 38px; line-height: 1; font-weight: 700; transform: rotate(-4deg); }
+.badge-name { color: #fff; font-size: 25px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.badge-type { margin-top: 5px; color: #eefbf3; font-size: 13px; line-height: 1.1; font-weight: 700; white-space: nowrap; }
+.xp-pill { display: inline-flex; align-items: center; justify-content: center; margin: 12px 0 10px; padding: 7px 16px 8px; border-radius: 999px; background: var(--paper-2); color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; box-shadow: 0 8px 16px rgba(45,58,50,.12); }
+.mini-badges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 2px 0 11px; }
+.mb { padding: 7px 5px; border-radius: 16px; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.15); }
+.mb.locked { opacity: .5; filter: grayscale(1); }
+.mb-e { display: block; color: #fff; font-size: 19px; line-height: 1; font-weight: 700; }
+.mb-n { display: block; margin-top: 3px; color: #fff; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.stamp-title { margin: 2px 0 7px; color: #eefbf3; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.stamp-row { display: flex; justify-content: center; gap: 7px; }
+.stamp { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 11px; font-size: 13px; line-height: 1; font-weight: 700; }
+.stamp.done { color: var(--green-dark); background: var(--paper-2); border: 1px solid rgba(255,255,255,.9); transform: rotate(-5deg); }
+.stamp.done:nth-child(2) { transform: rotate(6deg); }
+.stamp.empty { background: rgba(255,255,255,.08); border: 1px dashed rgba(255,255,255,.34); }
+.verify-box { position: relative; z-index: 1; margin: -52px 12px 0; padding: 10px 12px; border-radius: 17px; background: var(--paper-2); border: 1px solid var(--line); color: var(--ink); box-shadow: 0 12px 22px rgba(45,58,50,.09); }
+.verify-box b { display: block; font-size: 13px; line-height: 1.05; font-weight: 700; white-space: nowrap; }
+.verify-box span { display: block; margin-top: 3px; color: var(--sub); font-size: 13px; line-height: 1.05; font-weight: 700; white-space: nowrap; }
+.next-btn { position: relative; z-index: 1; margin: 8px 12px 0; padding: 10px 12px 11px; border-radius: 16px; text-align: center; background: var(--green-dark); color: #fff; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; box-shadow: 0 9px 18px rgba(10,143,72,.2); }
+
+.nb-bg { position: relative; z-index: 1; height: 403px; padding: 12px 11px 64px; background: transparent; }
+.p-row { display: flex; align-items: center; gap: 7px; padding: 9px; border-radius: 19px; background: var(--paper-2); border: 1px solid var(--line); box-shadow: 0 12px 24px rgba(3,199,90,.05), 0 4px 12px rgba(94,78,54,.04); }
+.avatar { width: 40px; height: 40px; flex: 0 0 auto; border-radius: 17px; display: grid; place-items: center; background: var(--green-soft); color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; }
+.p-copy { flex: 1; min-width: 0; }
+.p-name { color: var(--ink); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.p-sub { margin-top: 4px; color: var(--sub); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.xp-num { flex: 0 0 auto; color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.xp-caption { display: flex; justify-content: space-between; margin: 11px 2px 6px; color: #7a6a4d; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.xp-bar { height: 9px; overflow: hidden; border-radius: 999px; background: #eadfc9; }
+.xp-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green), var(--green-dark)); }
+.panel-title { margin: 14px 2px 8px; color: #5f523d; font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.bg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.bg-item { min-height: 54px; padding: 7px 3px; text-align: center; border-radius: 16px; background: var(--paper-2); border: 1px solid var(--line); box-shadow: 0 4px 12px rgba(94,78,54,.04); transform: rotate(-1deg); }
+.bg-item:nth-child(even) { transform: rotate(1deg); }
+.bg-item.locked { opacity: .42; filter: grayscale(1); }
+.bg-e { display: block; color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; }
+.bg-n { display: block; margin-top: 4px; color: var(--ink); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.log-item { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; padding: 8px 9px; border-radius: 16px; background: var(--paper-2); border: 1px solid var(--line); box-shadow: 0 4px 12px rgba(94,78,54,.04); }
+.li-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 12px; display: grid; place-items: center; background: var(--green-soft); color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; }
+.li-copy { flex: 1; min-width: 0; }
+.li-name { color: var(--ink); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.li-time { margin-top: 3px; color: var(--sub); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+.li-badge { flex: 0 0 auto; margin-left: auto; padding: 4px 7px 5px; border-radius: 999px; background: var(--green-soft); color: var(--green-dark); font-size: 13px; line-height: 1; font-weight: 700; white-space: nowrap; }
+
+
+.icon-face {
+  position: absolute;
+  left: 8px;
+  bottom: 7px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255,255,255,.82);
+  font-family: system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.marker-pin span,
+.mc-icon,
+.badge-circle,
+.mb-e,
+.stamp,
+.avatar,
+.bg-e,
+.li-icon {
+  font-family: system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+}
+@media (max-width: 860px) {
+  .brand-head { flex-direction: column; gap: 10px; }
+  .row { grid-template-columns: 1fr; gap: 30px; }
+  .device { width: min(292px, 100%); }
+  .screen { height: 622px; }
+  .map-area { height: 356px; }
+  .badge-bg { height: 565px; }
+  .nb-bg { height: 514px; }
+}
+</style>
+</head>
+<body>
+<main class="adv-wrap">
+  <div class="brand-head">
+    <div class="app-icon" aria-label="모험가의 수첩 앱 아이콘"><div class="icon-page"></div><div class="icon-leaf"></div><div class="icon-face">😊</div></div>
+    <h1 class="mock-title">모험가의 수첩</h1>
+  </div>
+  <p class="mock-subtitle">노트에 꾹꾹 눌러 쓴 것처럼, 차곡차곡 쌓이는 탐험 기록</p>
+
+  <div class="row">
+    <section class="col">
+      <p class="section-title">지도 페이지</p>
+      <div class="device"><div class="screen">
+        <div class="hdr"><span class="hdr-mark">✦</span><span class="hdr-title">탐험 메모</span><span class="hdr-lv">Lv.3</span></div>
+        <div class="page-tag">MAP</div>
+        <div class="map-area">
+          <div class="river" style="top:225px;left:-22px;transform:rotate(-9deg)"></div>
+          <div class="path" style="top:0;bottom:0;left:128px;width:7px"></div>
+          <div class="path" style="top:117px;left:0;right:0;height:7px"></div>
+          <div class="path" style="top:185px;left:58px;width:138px;height:7px;transform:rotate(-24deg)"></div>
+          <div class="park-area" style="top:25px;left:13px;width:102px;height:76px"></div>
+          <div class="park-label" style="top:38px;left:24px">솔바람 숲</div>
+          <div class="marker" style="top:38px;left:34px"><div class="marker-pin" style="background:var(--green-dark)"><span>🌳</span></div><div class="marker-label">나무 관찰</div></div>
+          <div class="marker" style="top:78px;left:154px"><div class="marker-pin" style="background:var(--green-mid)"><span>🧪</span></div><div class="marker-label">과학관</div></div>
+          <div class="marker" style="top:145px;left:70px"><div class="marker-pin" style="background:var(--clay)"><span>🗼</span></div><div class="marker-label">시계탑</div></div>
+          <div class="marker" style="top:205px;left:169px"><div class="marker-pin" style="background:var(--lavender)"><span>💡</span></div><div class="marker-label">전망대</div></div>
+          <div class="my-dot" style="top:122px;left:124px"></div>
+          <div class="map-legend"><div>내 위치</div><div>퀘스트</div></div>
+        </div>
+        <div class="map-card"><div class="mc-icon">🌳</div><div class="mc-copy"><div class="mc-title">솔바람 숲 체크인</div><div class="mc-sub">단서 기록 · +50 XP</div></div><div class="mc-btn">기록</div></div>
+        <div class="quest-strip"><div class="quest-mini"><span>🧪</span><b>과학관</b><small>+80 XP</small></div><div class="quest-mini"><span>🗼</span><b>시계탑</b><small>+40 XP</small></div><div class="quest-mini"><span>💡</span><b>전망대</b><small>+60 XP</small></div></div>
+        <nav class="tabbar"><div class="tab on"><i>⌖</i><span>지도</span></div><div class="tab"><i>✓</i><span>퀘스트</span></div><div class="tab"><i>▤</i><span>수첩</span></div><div class="tab"><i>●</i><span>MY</span></div></nav>
+      </div></div>
+    </section>
+
+    <section class="col">
+      <p class="section-title">스탬프 페이지</p>
+      <div class="device"><div class="screen" style="background:var(--green-dark)">
+        <div class="hdr" style="background:var(--green-dark)"><span class="hdr-mark">★</span><span class="hdr-title">스탬프 획득</span></div>
+        <div class="page-tag">STAMP</div>
+        <div class="badge-bg">
+          <div class="badge-title-txt">NOTE STAMP</div>
+          <div class="badge-sub">새 기록이 붙었어요</div>
+          <div class="badge-circle">🌳</div>
+          <div class="badge-name">초록 탐험가</div>
+          <div class="badge-type">자연 관찰 노트</div>
+          <div class="xp-pill">+50 XP 적립</div>
+          <div class="mini-badges"><div class="mb"><span class="mb-e">&#127795;</span><span class="mb-n">초록</span></div><div class="mb"><span class="mb-e">&#128508;</span><span class="mb-n">시간</span></div><div class="mb locked"><span class="mb-e">&#128161;</span><span class="mb-n">미발견</span></div></div>
+          <div class="stamp-title">모험 수첩 스탬프</div>
+          <div class="stamp-row"><div class="stamp done">🌳</div><div class="stamp done">🗼</div><div class="stamp done">🧪</div><div class="stamp empty"></div><div class="stamp empty"></div></div>
+        </div>
+        <div class="verify-box"><b>GPS 인증 완료 · 1.2km</b><span>09:41 · 숲 반경 50m 도착</span></div>
+        <div class="next-btn">다음 페이지 채우기</div>
+      </div></div>
+    </section>
+
+    <section class="col">
+      <p class="section-title">수첩 페이지</p>
+      <div class="device"><div class="screen">
+        <div class="hdr"><span class="hdr-mark">▣</span><span class="hdr-title">탐험 노트</span><span class="hdr-lv">Lv.3</span></div>
+        <div class="page-tag">NOTE</div>
+        <div class="nb-bg">
+          <div class="p-row"><div class="avatar">😊</div><div class="p-copy"><div class="p-name">꼬마 탐험가</div><div class="p-sub">퀘스트 7개 · 8.3km</div></div><div class="xp-num">320XP</div></div>
+          <div class="xp-caption"><span>Lv.4까지 남은 페이지</span><span>64%</span></div>
+          <div class="xp-bar"><div class="xp-fill" style="width:64%"></div></div>
+          <div class="panel-title">붙여둔 배지</div>
+          <div class="bg-grid"><div class="bg-item"><span class="bg-e">🌳</span><span class="bg-n">초록</span></div><div class="bg-item"><span class="bg-e">🗼</span><span class="bg-n">시간</span></div><div class="bg-item"><span class="bg-e">🧪</span><span class="bg-n">과학</span></div><div class="bg-item locked"><span class="bg-e">💡</span><span class="bg-n">전망</span></div></div>
+          <div class="panel-title">탐험 메모</div>
+          <div class="log-item"><span class="li-icon">🌳</span><div class="li-copy"><div class="li-name">솔바람 숲 체크인</div><div class="li-time">오늘 09:41</div></div><span class="li-badge">완료</span></div>
+          <div class="log-item"><span class="li-icon">🗼</span><div class="li-copy"><div class="li-name">시계탑의 비밀</div><div class="li-time">어제 14:20</div></div><span class="li-badge">완료</span></div>
+          <div class="log-item"><span class="li-icon">🧪</span><div class="li-copy"><div class="li-name">중앙과학관</div><div class="li-time">어제 11:05</div></div><span class="li-badge">완료</span></div>
+        </div>
+        <nav class="tabbar"><div class="tab"><i>⌖</i><span>지도</span></div><div class="tab"><i>✓</i><span>퀘스트</span></div><div class="tab on"><i>▤</i><span>수첩</span></div><div class="tab"><i>●</i><span>MY</span></div></nav>
+      </div></div>
+    </section>
+  </div>
+</main>
+</body>
+</html>
+
+
+
+
+
+
