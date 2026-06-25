@@ -53,5 +53,5 @@ QUESTBOOK_PORT=8000
 QUESTBOOK_PUBLIC_URL=http://100.87.116.106:8000
 ```
 
-NAVER Cloud Platform 콘솔에서 Maps 애플리케이션의 Web 서비스 URL 또는 Referer 허용 목록에 Tailscale 주소 `http://100.87.116.106:8000`, 로컬 주소 `http://127.0.0.1:8000`, 배포 도메인을 등록해야 Dynamic Map이 정상 로드된다. 키가 비어 있거나 도메인 설정이 맞지 않으면 지도 페이지는 기존 목업 지도로 fallback된다.
+NAVER Cloud Platform 콘솔에서 Maps 애플리케이션의 Web 서비스 URL 또는 Referer 허용 목록에 Tailscale 주소 `http://100.87.116.106:8000` (단순 예시), 로컬 주소 `http://127.0.0.1:8000`, 배포 도메인을 등록해야 Dynamic Map이 정상 로드된다. 키가 비어 있거나 도메인 설정이 맞지 않으면 지도 페이지는 기존 목업 지도로 fallback된다.
 
