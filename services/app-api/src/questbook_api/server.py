@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from questbook_api.application.baseline_service import BaselineQuestbookService
 from questbook_api.domain.auth.tokens import create_access_token, verify_access_token
-from questbook_api.infrastructure.cache import TourPlaceMemoryCache
+from questbook_api.infrastructure.cache import TourPlaceRedisCache
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.tourapi.client import TourApiClient
 from questbook_api.settings import AppSettings
@@ -46,7 +46,7 @@ class AppState:
     # 변수 의미: 관계형 저장소다.
     repository: QuestbookRepository
     # 변수 의미: TourAPI 임시 캐시다.
-    cache: TourPlaceMemoryCache
+    cache: TourPlaceRedisCache
     # 변수 의미: baseline 유스케이스 서비스다.
     service: BaselineQuestbookService
 
@@ -399,8 +399,13 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             return {
                 "status": "ok",
                 "service": "questbook-app-api",
-                "database": {"ok": state.repository.is_healthy(), "path": str(state.settings.database_path)},
-                "cache": {"entries": state.cache.size(), "ttlSeconds": state.cache.default_ttl_seconds},
+                "database": {"ok": state.repository.is_healthy(), "engine": "postgresql"},
+                "cache": {
+                    "ok": state.cache.is_healthy(),
+                    "engine": "redis",
+                    "entries": state.cache.size(),
+                    "ttlSeconds": state.cache.default_ttl_seconds,
+                },
                 "externalApis": {"tourapi": state.service.tour_client.status()},
             }
 
@@ -618,12 +623,12 @@ def build_state(settings: AppSettings) -> AppState:
     역할: 저장소, 캐시, 외부 API 클라이언트, 유스케이스 서비스를 구성한다.
     호출 예시: state = build_state(AppSettings.from_env())
     """
-    # 변수 의미: SQLite 저장소다.
-    repository = QuestbookRepository(settings.database_path)
+    # 변수 의미: PostgreSQL 저장소다.
+    repository = QuestbookRepository(settings.database_url)
     repository.initialize()
     repository.ensure_user("demo-user")
-    # 변수 의미: 유저 단위 TourAPI 인메모리 캐시다.
-    cache = TourPlaceMemoryCache(settings.cache_ttl_seconds)
+    # 변수 의미: 유저 단위 TourAPI Redis 캐시다.
+    cache = TourPlaceRedisCache(settings.redis_url, settings.cache_ttl_seconds)
     # 변수 의미: TourAPI 조회 클라이언트다.
     tour_client = TourApiClient(settings.tourapi_service_key)
     # 변수 의미: baseline 유스케이스 서비스다.

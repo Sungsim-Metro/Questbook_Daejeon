@@ -88,8 +88,6 @@ class AppSettings:
     host: str
     # 변수 의미: 앱 API 바인드 포트다.
     port: int
-    # 변수 의미: SQLite 데이터베이스 파일 경로다.
-    database_path: Path
     # 변수 의미: PostgreSQL 전환 후 사용할 데이터베이스 접속 URL이다.
     database_url: str
     # 변수 의미: Redis 전환 후 사용할 캐시 접속 URL이다.
@@ -115,16 +113,9 @@ class AppSettings:
         역할: baseline 앱 API의 기본 실행 설정을 만든다.
         호출 예시: settings = AppSettings.from_env()
         """
-        # 변수 의미: 데이터베이스 기본 디렉토리다.
-        default_data_dir = REPOSITORY_ROOT / ".questbook"
-        # 변수 의미: 데이터베이스 기본 파일 경로다.
-        default_database_path = default_data_dir / "baseline.sqlite3"
-        # 변수 의미: 환경 변수에서 읽은 DB 경로 문자열이다.
-        database_path_value = get_env("QUESTBOOK_DATABASE_PATH", str(default_database_path))
         return cls(
             host=get_env("QUESTBOOK_APP_API_HOST", "127.0.0.1"),
             port=get_int_env("QUESTBOOK_APP_API_PORT", 8100, 1, 65535),
-            database_path=Path(database_path_value).expanduser(),
             database_url=get_env(
                 "QUESTBOOK_DATABASE_URL",
                 "postgresql://questbook:questbook_local_password@127.0.0.1:5432/questbook",
