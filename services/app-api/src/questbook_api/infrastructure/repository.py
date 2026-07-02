@@ -1,13 +1,14 @@
-# Questbook baseline SQLite 저장소와 트랜잭션을 담당한다.
+# Questbook baseline PostgreSQL 저장소와 트랜잭션을 담당한다.
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-from pathlib import Path
-import sqlite3
 from threading import RLock
 from typing import Any
 from uuid import uuid4
+
+import psycopg
+from psycopg.rows import dict_row
 
 
 def now_iso() -> str:
@@ -30,9 +31,9 @@ def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:16]}"
 
 
-# 변수 의미: baseline SQLite 스키마 생성 SQL이다.
+# 변수 의미: baseline PostgreSQL 스키마 생성 SQL이다.
 SCHEMA_SQL = """
-PRAGMA foreign_keys = ON;
+-- Questbook baseline PostgreSQL 스키마를 정의한다.
 
 CREATE TABLE IF NOT EXISTS categories (
   code TEXT PRIMARY KEY,
@@ -167,7 +168,7 @@ CREATE TABLE IF NOT EXISTS adventure_notes (
   place_name TEXT NOT NULL,
   summary TEXT NOT NULL,
   badges_json TEXT NOT NULL,
-  distance_km REAL NOT NULL,
+  distance_km DOUBLE PRECISION NOT NULL,
   share_image_url TEXT,
   created_at TEXT NOT NULL
 );
@@ -245,28 +246,25 @@ GGUMDORI_SEEDS = [
 
 class QuestbookRepository:
     """
-    입력: SQLite 데이터베이스 파일 경로.
+    입력: PostgreSQL 데이터베이스 접속 URL.
     출력: baseline 관계형 저장소 객체.
     역할: 사용자, 퀘스트, 뱃지, 수첩, 꿈돌이 상태를 하나의 DB에서 관리한다.
-    호출 예시: repository = QuestbookRepository(Path(\".questbook/baseline.sqlite3\"))
+    호출 예시: repository = QuestbookRepository("postgresql://questbook:password@127.0.0.1:5432/questbook")
     """
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(self, database_url: str) -> None:
         """
-        입력: SQLite 데이터베이스 파일 경로.
+        입력: PostgreSQL 접속 URL.
         출력: 없음.
-        역할: DB 디렉토리와 연결 객체를 준비한다.
-        호출 예시: repository = QuestbookRepository(settings.database_path)
+        역할: 단일 연결과 동시성 잠금을 준비한다.
+        호출 예시: repository = QuestbookRepository(settings.database_url)
         """
-        # 변수 의미: SQLite 데이터베이스 파일 경로다.
-        self.database_path = database_path
+        # 변수 의미: PostgreSQL 접속 URL이다.
+        self.database_url = database_url
         # 변수 의미: DB 접근 동시성을 보호하는 잠금이다.
         self._lock = RLock()
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        # 변수 의미: SQLite 연결 객체다.
-        self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA foreign_keys = ON")
+        # 변수 의미: PostgreSQL 연결 객체다.
+        self._connection = psycopg.connect(database_url, row_factory=dict_row, autocommit=True)
 
     def initialize(self) -> None:
         """
@@ -275,10 +273,19 @@ class QuestbookRepository:
         역할: 스키마를 만들고 기준 데이터를 seed한다.
         호출 예시: repository.initialize()
         """
-        with self._lock:
-            self._connection.executescript(SCHEMA_SQL)
+        with self._lock, self._connection.transaction():
+            self._connection.execute(SCHEMA_SQL)
             self._seed_reference_data()
-            self._connection.commit()
+
+    def close(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: PostgreSQL 연결을 닫는다.
+        호출 예시: repository.close()
+        """
+        with self._lock:
+            self._connection.close()
 
     def is_healthy(self) -> bool:
         """
@@ -288,8 +295,11 @@ class QuestbookRepository:
         호출 예시: ok = repository.is_healthy()
         """
         with self._lock:
-            # 변수 의미: SQLite 단순 조회 결과다.
-            result = self._connection.execute("SELECT 1 AS ok").fetchone()
+            try:
+                # 변수 의미: PostgreSQL 단순 조회 결과다.
+                result = self._connection.execute("SELECT 1 AS ok").fetchone()
+            except psycopg.Error:
+                return False
             return bool(result and result["ok"] == 1)
 
     def _seed_reference_data(self) -> None:
@@ -299,26 +309,30 @@ class QuestbookRepository:
         역할: 카테고리, 뱃지, 꿈돌이 기준 데이터를 삽입한다.
         호출 예시: self._seed_reference_data()
         """
-        self._connection.executemany(
-            "INSERT OR IGNORE INTO categories(code, name, description, sort_order) VALUES (?, ?, ?, ?)",
-            CATEGORY_SEEDS,
-        )
-        self._connection.executemany(
-            """
-            INSERT OR IGNORE INTO badge_definitions(
-              id, category_code, name, tier, required_xp, icon, color, sort_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            BADGE_SEEDS,
-        )
-        self._connection.executemany(
-            """
-            INSERT OR IGNORE INTO ggumdori_variants(
-              id, name, theme_category, tier, unlock_condition, image_ref, description, rarity, sort_order
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            GGUMDORI_SEEDS,
-        )
+        # 변수 의미: seed 삽입에 사용하는 커서다.
+        with self._connection.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO categories(code, name, description, sort_order) VALUES (%s, %s, %s, %s) ON CONFLICT (code) DO NOTHING",
+                CATEGORY_SEEDS,
+            )
+            cursor.executemany(
+                """
+                INSERT INTO badge_definitions(
+                  id, category_code, name, tier, required_xp, icon, color, sort_order
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                BADGE_SEEDS,
+            )
+            cursor.executemany(
+                """
+                INSERT INTO ggumdori_variants(
+                  id, name, theme_category, tier, unlock_condition, image_ref, description, rarity, sort_order
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                GGUMDORI_SEEDS,
+            )
 
     def ensure_user(self, user_id: str = "demo-user") -> dict[str, Any]:
         """
@@ -327,32 +341,34 @@ class QuestbookRepository:
         역할: baseline에서 소셜 로그인 전 기본 사용자를 준비한다.
         호출 예시: user = repository.ensure_user(\"demo-user\")
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 현재 시각 문자열이다.
             current_time = now_iso()
             self._connection.execute(
                 """
-                INSERT OR IGNORE INTO users(id, nickname, avatar, created_at, last_active_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO users(id, nickname, avatar, created_at, last_active_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
                 """,
                 (user_id, "꼬마 탐험가", "✦", current_time, current_time),
             )
             self._connection.execute(
                 """
-                INSERT OR IGNORE INTO preferences(user_id, categories_json, distance_range_meters, pace, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO preferences(user_id, categories_json, distance_range_meters, pace, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO NOTHING
                 """,
                 (user_id, json.dumps(["nature", "science", "downtown"], ensure_ascii=False), 5000, "보통", current_time),
             )
             self._connection.execute(
                 """
-                INSERT OR IGNORE INTO level_progress(user_id, current_level, current_xp, total_xp, next_level_required_xp)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO level_progress(user_id, current_level, current_xp, total_xp, next_level_required_xp)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO NOTHING
                 """,
                 (user_id, 1, 0, 0, 100),
             )
-            self._connection.execute("UPDATE users SET last_active_at = ? WHERE id = ?", (current_time, user_id))
-            self._connection.commit()
+            self._connection.execute("UPDATE users SET last_active_at = %s WHERE id = %s", (current_time, user_id))
             return self.get_user(user_id)
 
     def link_user_account(
@@ -369,12 +385,12 @@ class QuestbookRepository:
         역할: OAuth/OIDC 실연동 전에도 provider 기반 사용자 식별 구조를 유지한다.
         호출 예시: account = repository.link_user_account(\"demo-user\", \"demo-social\", \"demo-user\", \"꼬마 탐험가\", None)
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 현재 시각 문자열이다.
             current_time = now_iso()
             # 변수 의미: 기존 provider 계정 row다.
             existing_row = self._connection.execute(
-                "SELECT * FROM user_accounts WHERE provider = ? AND provider_user_id = ?",
+                "SELECT * FROM user_accounts WHERE provider = %s AND provider_user_id = %s",
                 (provider, provider_user_id),
             ).fetchone()
             if existing_row is None:
@@ -384,7 +400,7 @@ class QuestbookRepository:
                     """
                     INSERT INTO user_accounts(
                       id, user_id, provider, provider_user_id, email, display_name, created_at, last_login_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (account_id, user_id, provider, provider_user_id, email, display_name, current_time, current_time),
                 )
@@ -393,13 +409,12 @@ class QuestbookRepository:
                 self._connection.execute(
                     """
                     UPDATE user_accounts
-                    SET user_id = ?, email = ?, display_name = ?, last_login_at = ?
-                    WHERE id = ?
+                    SET user_id = %s, email = %s, display_name = %s, last_login_at = %s
+                    WHERE id = %s
                     """,
                     (user_id, email, display_name, current_time, account_id),
                 )
-            self._connection.commit()
-            return dict(self._connection.execute("SELECT * FROM user_accounts WHERE id = ?", (account_id,)).fetchone())
+            return dict(self._connection.execute("SELECT * FROM user_accounts WHERE id = %s", (account_id,)).fetchone())
 
     def record_user_consent(
         self,
@@ -417,14 +432,20 @@ class QuestbookRepository:
         """
         if not age_confirmed or not privacy_consent or not location_consent:
             raise ValueError("all baseline consents are required")
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 동의 기록 시각이다.
             consented_at = now_iso()
             self._connection.execute(
                 """
-                INSERT OR REPLACE INTO user_consents(
+                INSERT INTO user_consents(
                   user_id, age_confirmed, privacy_consent, location_consent, consent_version, consented_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                  age_confirmed = EXCLUDED.age_confirmed,
+                  privacy_consent = EXCLUDED.privacy_consent,
+                  location_consent = EXCLUDED.location_consent,
+                  consent_version = EXCLUDED.consent_version,
+                  consented_at = EXCLUDED.consented_at
                 """,
                 (
                     user_id,
@@ -435,7 +456,6 @@ class QuestbookRepository:
                     consented_at,
                 ),
             )
-            self._connection.commit()
             return self.get_user_consent(user_id)
 
     def get_user_consent(self, user_id: str) -> dict[str, Any]:
@@ -448,7 +468,7 @@ class QuestbookRepository:
         with self._lock:
             # 변수 의미: 사용자 동의 row다.
             row = self._connection.execute(
-                "SELECT * FROM user_consents WHERE user_id = ?",
+                "SELECT * FROM user_consents WHERE user_id = %s",
                 (user_id,),
             ).fetchone()
             if row is None:
@@ -486,7 +506,7 @@ class QuestbookRepository:
                 FROM users u
                 JOIN level_progress lp ON lp.user_id = u.id
                 JOIN preferences p ON p.user_id = u.id
-                WHERE u.id = ?
+                WHERE u.id = %s
                 """,
                 (user_id,),
             ).fetchone()
@@ -495,12 +515,12 @@ class QuestbookRepository:
 
             # 변수 의미: 완료한 퀘스트 수다.
             completion_count = self._connection.execute(
-                "SELECT COUNT(*) AS count FROM quest_completions WHERE user_id = ?",
+                "SELECT COUNT(*) AS count FROM quest_completions WHERE user_id = %s",
                 (user_id,),
             ).fetchone()["count"]
             # 변수 의미: 획득한 뱃지 수다.
             earned_badge_count = self._connection.execute(
-                "SELECT COUNT(*) AS count FROM user_badges WHERE user_id = ? AND earned_at IS NOT NULL",
+                "SELECT COUNT(*) AS count FROM user_badges WHERE user_id = %s AND earned_at IS NOT NULL",
                 (user_id,),
             ).fetchone()["count"]
             return {
@@ -547,12 +567,12 @@ class QuestbookRepository:
         역할: contentId 기반으로 기존 퀘스트를 재사용하거나 새 템플릿 퀘스트를 저장한다.
         호출 예시: quest = repository.get_or_create_reusable_quest(user_id, quest_data)
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 기존 공용 퀘스트 row다.
             existing_row = self._connection.execute(
                 """
                 SELECT * FROM reusable_quests
-                WHERE place_content_id = ? AND category_code = ? AND type = ?
+                WHERE place_content_id = %s AND category_code = %s AND type = %s
                 """,
                 (quest_data["placeContentId"], quest_data["categoryCode"], quest_data["type"]),
             ).fetchone()
@@ -569,7 +589,7 @@ class QuestbookRepository:
                   id, title, description, type, category_code, reward_xp, verification_type,
                   place_content_id, place_name, source, review_status, created_for_user_id,
                   is_reusable, reuse_count, completion_count, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     quest_id,
@@ -590,8 +610,7 @@ class QuestbookRepository:
                     created_at,
                 ),
             )
-            self._connection.commit()
-            return dict(self._connection.execute("SELECT * FROM reusable_quests WHERE id = ?", (quest_id,)).fetchone())
+            return dict(self._connection.execute("SELECT * FROM reusable_quests WHERE id = %s", (quest_id,)).fetchone())
 
     def get_or_create_user_quest_instance(self, user_id: str, reusable_quest_id: str, expires_at: str) -> dict[str, Any]:
         """
@@ -600,12 +619,12 @@ class QuestbookRepository:
         역할: 같은 사용자의 진행 중 퀘스트 상태를 재사용하고 없으면 추천 상태로 만든다.
         호출 예시: instance = repository.get_or_create_user_quest_instance(user_id, quest_id, expires_at)
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 아직 완료되지 않은 기존 인스턴스 row다.
             existing_row = self._connection.execute(
                 """
                 SELECT * FROM user_quest_instances
-                WHERE user_id = ? AND reusable_quest_id = ? AND status IN ('recommended', 'accepted', 'in_progress')
+                WHERE user_id = %s AND reusable_quest_id = %s AND status IN ('recommended', 'accepted', 'in_progress')
                 ORDER BY recommended_at DESC
                 LIMIT 1
                 """,
@@ -622,16 +641,15 @@ class QuestbookRepository:
                 """
                 INSERT INTO user_quest_instances(
                   id, user_id, reusable_quest_id, status, recommended_at, accepted_at, expires_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (instance_id, user_id, reusable_quest_id, "recommended", recommended_at, None, expires_at, None),
             )
             self._connection.execute(
-                "UPDATE reusable_quests SET reuse_count = reuse_count + 1 WHERE id = ?",
+                "UPDATE reusable_quests SET reuse_count = reuse_count + 1 WHERE id = %s",
                 (reusable_quest_id,),
             )
-            self._connection.commit()
-            return dict(self._connection.execute("SELECT * FROM user_quest_instances WHERE id = ?", (instance_id,)).fetchone())
+            return dict(self._connection.execute("SELECT * FROM user_quest_instances WHERE id = %s", (instance_id,)).fetchone())
 
     def get_instance_with_quest(self, user_id: str, instance_id: str) -> dict[str, Any] | None:
         """
@@ -651,7 +669,7 @@ class QuestbookRepository:
                        rq.place_content_id, rq.place_name, rq.source
                 FROM user_quest_instances uqi
                 JOIN reusable_quests rq ON rq.id = uqi.reusable_quest_id
-                WHERE uqi.user_id = ? AND uqi.id = ?
+                WHERE uqi.user_id = %s AND uqi.id = %s
                 """,
                 (user_id, instance_id),
             ).fetchone()
@@ -664,18 +682,17 @@ class QuestbookRepository:
         역할: 추천 상태 퀘스트를 진행 상태로 바꾼다.
         호출 예시: instance = repository.accept_quest(user_id, instance_id)
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 갱신 시각 문자열이다.
             accepted_at = now_iso()
             self._connection.execute(
                 """
                 UPDATE user_quest_instances
-                SET status = 'accepted', accepted_at = COALESCE(accepted_at, ?)
-                WHERE id = ? AND user_id = ? AND status IN ('recommended', 'accepted', 'in_progress')
+                SET status = 'accepted', accepted_at = COALESCE(accepted_at, %s)
+                WHERE id = %s AND user_id = %s AND status IN ('recommended', 'accepted', 'in_progress')
                 """,
                 (accepted_at, instance_id, user_id),
             )
-            self._connection.commit()
             # 변수 의미: 갱신 후 인스턴스 row다.
             instance = self.get_instance_with_quest(user_id, instance_id)
             if instance is None:
@@ -695,7 +712,7 @@ class QuestbookRepository:
         역할: QuestCompletion, LevelProgress, UserBadge, UserGgumdori, AdventureNote를 하나의 트랜잭션으로 갱신한다.
         호출 예시: result = repository.complete_quest(user_id, instance, verification, 0.2)
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
             # 변수 의미: 완료 시각 문자열이다.
             completed_at = now_iso()
             # 변수 의미: 완료 기록 ID다.
@@ -704,84 +721,79 @@ class QuestbookRepository:
             note_id = make_id("note")
             # 변수 의미: 획득 XP다.
             earned_xp = int(instance["reward_xp"])
-            self._connection.execute("BEGIN")
-            try:
-                # 변수 의미: 완료 상태 전이 UPDATE 커서다.
-                transition_cursor = self._connection.execute(
-                    """
-                    UPDATE user_quest_instances
-                    SET status = 'completed', completed_at = ?
-                    WHERE id = ? AND user_id = ? AND status != 'completed'
-                    """,
-                    (completed_at, instance["instance_id"], user_id),
-                )
-                if transition_cursor.rowcount != 1:
-                    self._connection.rollback()
-                    return None
-                self._connection.execute(
-                    """
-                    INSERT INTO quest_completions(
-                      id, user_id, user_quest_instance_id, reusable_quest_id, completed_at,
-                      earned_xp, verification_result_json, photo_ref, note_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        completion_id,
-                        user_id,
-                        instance["instance_id"],
-                        instance["reusable_quest_id"],
-                        completed_at,
-                        earned_xp,
-                        json.dumps(verification_result, ensure_ascii=False),
-                        None,
-                        note_id,
-                    ),
-                )
-                self._connection.execute(
-                    "UPDATE reusable_quests SET completion_count = completion_count + 1 WHERE id = ?",
-                    (instance["reusable_quest_id"],),
-                )
-                # 변수 의미: 갱신 후 레벨 진행도다.
-                level = self._update_level_progress(user_id, earned_xp)
-                # 변수 의미: 갱신된 뱃지와 새로 획득한 뱃지 목록이다.
-                badge_result = self._update_badges(user_id, instance["category_code"], earned_xp, completed_at)
-                # 변수 의미: 새로 해금된 꿈돌이 목록이다.
-                unlocked_ggumdori = self._unlock_ggumdori(user_id, badge_result["earnedBadges"], completed_at)
-                # 변수 의미: 수첩에 기록할 뱃지 이름 목록이다.
-                badge_names = [badge["name"] for badge in badge_result["earnedBadges"]] or [badge["name"] for badge in badge_result["progressBadges"][:1]]
-                self._connection.execute(
-                    """
-                    INSERT INTO adventure_notes(
-                      id, user_id, reusable_quest_id, quest_completion_id, place_name,
-                      summary, badges_json, distance_km, share_image_url, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        note_id,
-                        user_id,
-                        instance["reusable_quest_id"],
-                        completion_id,
-                        instance["place_name"],
-                        f"{instance['title']} 완료로 {earned_xp} XP를 획득했습니다.",
-                        json.dumps(badge_names, ensure_ascii=False),
-                        distance_km,
-                        None,
-                        completed_at,
-                    ),
-                )
-                self._connection.commit()
-            except Exception:
-                self._connection.rollback()
-                raise
-            return {
-                "completionId": completion_id,
-                "noteId": note_id,
-                "earnedXp": earned_xp,
-                "level": level,
-                "badges": badge_result,
-                "unlockedGgumdori": unlocked_ggumdori,
-                "completedAt": completed_at,
-            }
+            # 변수 의미: 완료 상태 전이 UPDATE 커서다.
+            transition_cursor = self._connection.execute(
+                """
+                UPDATE user_quest_instances
+                SET status = 'completed', completed_at = %s
+                WHERE id = %s AND user_id = %s AND status != 'completed'
+                """,
+                (completed_at, instance["instance_id"], user_id),
+            )
+            if transition_cursor.rowcount != 1:
+                return None
+            self._connection.execute(
+                """
+                INSERT INTO quest_completions(
+                  id, user_id, user_quest_instance_id, reusable_quest_id, completed_at,
+                  earned_xp, verification_result_json, photo_ref, note_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    completion_id,
+                    user_id,
+                    instance["instance_id"],
+                    instance["reusable_quest_id"],
+                    completed_at,
+                    earned_xp,
+                    json.dumps(verification_result, ensure_ascii=False),
+                    None,
+                    note_id,
+                ),
+            )
+            self._connection.execute(
+                "UPDATE reusable_quests SET completion_count = completion_count + 1 WHERE id = %s",
+                (instance["reusable_quest_id"],),
+            )
+            # 변수 의미: 갱신 후 레벨 진행도다.
+            level = self._update_level_progress(user_id, earned_xp)
+            # 변수 의미: 갱신된 뱃지와 새로 획득한 뱃지 목록이다.
+            badge_result = self._update_badges(user_id, instance["category_code"], earned_xp, completed_at)
+            # 변수 의미: 새로 해금된 꿈돌이 목록이다.
+            unlocked_ggumdori = self._unlock_ggumdori(user_id, badge_result["earnedBadges"], completed_at)
+            # 변수 의미: 수첩에 기록할 뱃지 이름 목록이다.
+            badge_names = [badge["name"] for badge in badge_result["earnedBadges"]] or [
+                badge["name"] for badge in badge_result["progressBadges"][:1]
+            ]
+            self._connection.execute(
+                """
+                INSERT INTO adventure_notes(
+                  id, user_id, reusable_quest_id, quest_completion_id, place_name,
+                  summary, badges_json, distance_km, share_image_url, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    note_id,
+                    user_id,
+                    instance["reusable_quest_id"],
+                    completion_id,
+                    instance["place_name"],
+                    f"{instance['title']} 완료로 {earned_xp} XP를 획득했습니다.",
+                    json.dumps(badge_names, ensure_ascii=False),
+                    distance_km,
+                    None,
+                    completed_at,
+                ),
+            )
+        return {
+            "completionId": completion_id,
+            "noteId": note_id,
+            "earnedXp": earned_xp,
+            "level": level,
+            "badges": badge_result,
+            "unlockedGgumdori": unlocked_ggumdori,
+            "completedAt": completed_at,
+        }
 
     def _update_level_progress(self, user_id: str, earned_xp: int) -> dict[str, Any]:
         """
@@ -792,7 +804,7 @@ class QuestbookRepository:
         """
         # 변수 의미: 현재 레벨 진행도 row다.
         row = self._connection.execute(
-            "SELECT current_level, total_xp FROM level_progress WHERE user_id = ?",
+            "SELECT current_level, total_xp FROM level_progress WHERE user_id = %s",
             (user_id,),
         ).fetchone()
         # 변수 의미: 새 누적 XP다.
@@ -806,8 +818,8 @@ class QuestbookRepository:
         self._connection.execute(
             """
             UPDATE level_progress
-            SET current_level = ?, current_xp = ?, total_xp = ?, next_level_required_xp = ?
-            WHERE user_id = ?
+            SET current_level = %s, current_xp = %s, total_xp = %s, next_level_required_xp = %s
+            WHERE user_id = %s
             """,
             (current_level, current_xp, total_xp, next_level_required_xp, user_id),
         )
@@ -828,7 +840,7 @@ class QuestbookRepository:
         """
         # 변수 의미: 카테고리의 뱃지 정의 목록이다.
         badge_rows = self._connection.execute(
-            "SELECT * FROM badge_definitions WHERE category_code = ? ORDER BY tier",
+            "SELECT * FROM badge_definitions WHERE category_code = %s ORDER BY tier",
             (category_code,),
         ).fetchall()
         # 변수 의미: 진행 상태 뱃지 목록이다.
@@ -838,7 +850,7 @@ class QuestbookRepository:
         for badge_row in badge_rows:
             # 변수 의미: 기존 사용자 뱃지 row다.
             user_badge_row = self._connection.execute(
-                "SELECT * FROM user_badges WHERE user_id = ? AND badge_definition_id = ?",
+                "SELECT * FROM user_badges WHERE user_id = %s AND badge_definition_id = %s",
                 (user_id, badge_row["id"]),
             ).fetchone()
             if user_badge_row is None:
@@ -851,7 +863,7 @@ class QuestbookRepository:
                 self._connection.execute(
                     """
                     INSERT INTO user_badges(id, user_id, badge_definition_id, progress_xp, earned_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
                     (user_badge_id, user_id, badge_row["id"], 0, None),
                 )
@@ -868,8 +880,8 @@ class QuestbookRepository:
             self._connection.execute(
                 """
                 UPDATE user_badges
-                SET progress_xp = ?, earned_at = ?
-                WHERE user_id = ? AND badge_definition_id = ?
+                SET progress_xp = %s, earned_at = %s
+                WHERE user_id = %s AND badge_definition_id = %s
                 """,
                 (progress_xp, new_earned_at, user_id, badge_row["id"]),
             )
@@ -902,7 +914,7 @@ class QuestbookRepository:
         for badge in earned_badges:
             # 변수 의미: 뱃지 조건에 맞는 꿈돌이 row다.
             variant_row = self._connection.execute(
-                "SELECT * FROM ggumdori_variants WHERE theme_category = ? AND tier = ?",
+                "SELECT * FROM ggumdori_variants WHERE theme_category = %s AND tier = %s",
                 (badge["categoryCode"], badge["tier"]),
             ).fetchone()
             if variant_row is None:
@@ -912,16 +924,20 @@ class QuestbookRepository:
             # 변수 의미: 사용자 꿈돌이 insert 실행 결과다.
             cursor = self._connection.execute(
                 """
-                INSERT OR IGNORE INTO user_ggumdori(id, user_id, variant_id, unlocked_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO user_ggumdori(id, user_id, variant_id, unlocked_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id, variant_id) DO NOTHING
                 """,
                 (user_ggumdori_id, user_id, variant_row["id"], unlocked_at),
             )
             if cursor.rowcount > 0:
                 self._connection.execute(
                     """
-                    INSERT OR REPLACE INTO ggumdori_selection(user_id, selected_variant_id, updated_at)
-                    VALUES (?, ?, ?)
+                    INSERT INTO ggumdori_selection(user_id, selected_variant_id, updated_at)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                      selected_variant_id = EXCLUDED.selected_variant_id,
+                      updated_at = EXCLUDED.updated_at
                     """,
                     (user_id, variant_row["id"], unlocked_at),
                 )
@@ -942,7 +958,7 @@ class QuestbookRepository:
                 SELECT bd.id, bd.category_code, bd.name, bd.tier, bd.required_xp, bd.icon, bd.color,
                        COALESCE(ub.progress_xp, 0) AS progress_xp, ub.earned_at
                 FROM badge_definitions bd
-                LEFT JOIN user_badges ub ON ub.badge_definition_id = bd.id AND ub.user_id = ?
+                LEFT JOIN user_badges ub ON ub.badge_definition_id = bd.id AND ub.user_id = %s
                 ORDER BY bd.sort_order
                 """,
                 (user_id,),
@@ -977,7 +993,7 @@ class QuestbookRepository:
                 SELECT id, reusable_quest_id, quest_completion_id, place_name, summary,
                        badges_json, distance_km, share_image_url, created_at
                 FROM adventure_notes
-                WHERE user_id = ?
+                WHERE user_id = %s
                 ORDER BY created_at DESC
                 """,
                 (user_id,),
@@ -1007,7 +1023,7 @@ class QuestbookRepository:
         with self._lock:
             # 변수 의미: 선택된 꿈돌이 row다.
             selected_row = self._connection.execute(
-                "SELECT selected_variant_id FROM ggumdori_selection WHERE user_id = ?",
+                "SELECT selected_variant_id FROM ggumdori_selection WHERE user_id = %s",
                 (user_id,),
             ).fetchone()
             # 변수 의미: 전체 꿈돌이 변형과 사용자 해금 상태 row 목록이다.
@@ -1015,7 +1031,7 @@ class QuestbookRepository:
                 """
                 SELECT gv.*, ug.unlocked_at
                 FROM ggumdori_variants gv
-                LEFT JOIN user_ggumdori ug ON ug.variant_id = gv.id AND ug.user_id = ?
+                LEFT JOIN user_ggumdori ug ON ug.variant_id = gv.id AND ug.user_id = %s
                 ORDER BY gv.sort_order
                 """,
                 (user_id,),
@@ -1053,7 +1069,7 @@ class QuestbookRepository:
                 SELECT rq.category_code, COUNT(*) AS completion_count
                 FROM quest_completions qc
                 JOIN reusable_quests rq ON rq.id = qc.reusable_quest_id
-                WHERE qc.user_id = ?
+                WHERE qc.user_id = %s
                 GROUP BY rq.category_code
                 """,
                 (user_id,),
@@ -1067,7 +1083,7 @@ class QuestbookRepository:
                 SELECT bd.category_code, bd.tier, bd.required_xp,
                        COALESCE(ub.progress_xp, 0) AS progress_xp, ub.earned_at
                 FROM badge_definitions bd
-                LEFT JOIN user_badges ub ON ub.badge_definition_id = bd.id AND ub.user_id = ?
+                LEFT JOIN user_badges ub ON ub.badge_definition_id = bd.id AND ub.user_id = %s
                 ORDER BY bd.category_code, bd.tier
                 """,
                 (user_id,),
