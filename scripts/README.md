@@ -14,7 +14,7 @@
 uv run python scripts/backup_postgres.py
 ```
 
-복원 명령은 비밀번호가 포함된 URL을 명령 인자로 넘기지 않는 방식을 우선한다. 로컬 compose 기본값은 다음과 같다.
+복원 명령은 비밀번호가 포함된 URL을 명령 인자로 넘기지 않는 방식을 우선한다. 아래 명령은 로컬 compose 기본 비밀번호 예시다. 운영 또는 개인 비밀번호는 쉘 히스토리에 남지 않도록 `.pgpass`나 세션 전용 환경 변수를 사용한다.
 
 ```bash
 PGPASSWORD=questbook_local_password pg_restore --clean --host 127.0.0.1 --port 5432 --username questbook --dbname questbook .questbook/backups/<file>.dump

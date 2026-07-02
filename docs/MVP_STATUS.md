@@ -6,7 +6,7 @@
 
 현재 저장소는 기존 정적 모바일 웹 프로토타입과 baseline 분리 구현을 함께 가진다. 기존 루트 HTML 화면은 제출용 목업 흐름을 보존하고, 새 baseline 구현은 `apps/user-web`, `services/web-gateway`, `services/app-api` 아래에서 설계서의 확장 이전 구조를 실제 실행 가능한 형태로 구현한다.
 
-baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 SQLite 저장소, 앱 서버 인메모리 캐시를 포함한다. 다만 목표 운영 데이터베이스는 PostgreSQL, 서버 캐시는 Redis로 확정했다. 한국관광공사 TourAPI 키가 없으면 대전 fallback 장소 후보로 흐름을 검증하고, 키가 있으면 앱 서버가 TourAPI를 호출한다. OpenAPI 원본 응답 전체는 영구 DB에 저장하지 않고, 추천 계산에 필요한 최소 필드만 유저 단위 30분 Redis 캐시에 둘 계획이다.
+baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 PostgreSQL 저장소, Redis 30분 TTL 캐시를 포함한다. 한국관광공사 TourAPI 키가 없으면 대전 fallback 장소 후보로 흐름을 검증하고, 키가 있으면 앱 서버가 TourAPI를 호출한다. OpenAPI 원본 응답 전체는 영구 DB에 저장하지 않고, 추천 계산에 필요한 최소 필드만 유저 단위 Redis 캐시에 30분 동안 보관한다.
 
 현재 구현은 다음 요소로 구성된다.
 
@@ -19,12 +19,12 @@ baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 SQ
 - 사용자 모바일 웹/PWA baseline
 - 웹 게이트웨이 baseline
 - Python 앱 API baseline
-- SQLite 관계형 저장소 baseline(PostgreSQL 마이그레이션 전 임시 구현)
-- 유저 단위 30분 TourAPI 임시 캐시(Redis 마이그레이션 전 인메모리 구현)
+- PostgreSQL 관계형 저장소 baseline
+- 유저 단위 30분 TourAPI Redis 임시 캐시
 - demo-social 로그인, 필수 동의·만 14세 확인 기록, stateless Bearer 토큰
 - 웹 게이트웨이 gzip 압축과 보안 헤더
 - NCP baseline 토폴로지 매니페스트
-- SQLite 백업 스크립트(PostgreSQL 전환 전 로컬 baseline 보조)
+- PostgreSQL 백업 스크립트
 - 템플릿 기반 `ReusableQuest` 생성과 재사용
 - `UserQuestInstance` 사용자별 퀘스트 상태
 - GPS 반경 기반 퀘스트 완료 처리
@@ -85,12 +85,12 @@ baseline 분리 서버는 다음 파일로 구성된다.
 - `services/app-api/src/questbook_api/server.py`: 앱 API HTTP 서버
 - `services/app-api/src/questbook_api/application/baseline_service.py`: 추천, 퀘스트 수락, 완료 유스케이스
 - `services/app-api/src/questbook_api/domain/auth/tokens.py`: stateless access token 발급과 검증
-- `services/app-api/src/questbook_api/infrastructure/repository.py`: SQLite baseline 스키마, seed, 트랜잭션
-- `services/app-api/src/questbook_api/infrastructure/cache.py`: Redis 전환 전 유저 단위 30분 인메모리 캐시
+- `services/app-api/src/questbook_api/infrastructure/repository.py`: PostgreSQL 스키마, seed, 트랜잭션
+- `services/app-api/src/questbook_api/infrastructure/cache.py`: 유저 단위 30분 Redis 캐시
 - `services/app-api/src/questbook_api/integrations/tourapi/client.py`: TourAPI 호출과 fallback
 - `infra/nginx/questbook-baseline.conf`: 운영 웹 서버 baseline 설정 예시
 - `infra/ncp/baseline-topology.yaml`: NCP VPC/subnet baseline 토폴로지
-- `scripts/backup_sqlite.py`: PostgreSQL 전환 전 SQLite baseline 백업 스크립트
+- `scripts/backup_postgres.py`: 로컬 PostgreSQL baseline 백업 스크립트
 
 ## 4. 현재 파일 구조
 
@@ -104,10 +104,12 @@ baseline 분리 서버는 다음 파일로 구성된다.
 ├─ 모험가의_수첩_3단_목업.html
 ├─ server.py
 ├─ README.md
-├─ Design.md
-├─ PROJECT_DESIGN.md
-├─ MVP_STATUS.md
 ├─ .env.example
+├─ docs/
+│  ├─ Design.md
+│  ├─ IMPLEMENTATION_STRUCTURE.md
+│  ├─ MVP_STATUS.md
+│  └─ PROJECT_DESIGN.md
 ├─ apps/
 │  └─ user-web/
 │     ├─ public/
@@ -130,6 +132,8 @@ baseline 분리 서버는 다음 파일로 구성된다.
 │  ├─ migrations/001_baseline_schema.sql
 │  └─ seeds/baseline_reference_data.md
 ├─ scripts/
+│  ├─ backup_postgres.py
+│  ├─ check_local_data_services.py
 │  └─ run_baseline.py
 ├─ tests/
 │  └─ smoke/test_baseline_http.py
@@ -160,15 +164,13 @@ baseline 분리 서버는 다음 파일로 구성된다.
 - 목업 퀘스트: 방문형, 이동형, 소비형, 테마형, 활동형
 - 목업 수첩 기록: 완료 기록과 추천 대기 기록
 
-baseline 분리 구현은 현재 SQLite에 사용자, 선호도, 레벨, 뱃지, 공용 퀘스트, 사용자별 퀘스트 인스턴스, 완료 기록, 수첩 기록, 꿈돌이 해금 상태를 저장한다. 운영 목표는 같은 논리 모델을 PostgreSQL로 이전하는 것이다. TourAPI 장소 후보는 영구 저장하지 않고, 현재는 앱 서버 인메모리 캐시에 보관하며 다음 단계에서 Redis 30분 TTL 캐시로 이전한다.
+baseline 분리 구현은 현재 PostgreSQL에 사용자, 선호도, 레벨, 뱃지, 공용 퀘스트, 사용자별 퀘스트 인스턴스, 완료 기록, 수첩 기록, 꿈돌이 해금 상태를 저장한다. TourAPI 장소 후보는 영구 저장하지 않고, 앱 서버의 Redis 캐시에 유저 단위 30분 TTL로 보관한다.
 
 ## 6. 현재 미구현 범위
 
 다음 기능은 baseline 이후 확장 또는 운영 단계로 남아 있다.
 
 - 네이버·구글 OAuth/OIDC 소셜 로그인 실연동
-- SQLite baseline 저장소의 PostgreSQL 마이그레이션
-- 앱 서버 인메모리 TourAPI 캐시의 Redis 마이그레이션
 - refresh 토큰 처리와 실제 provider token 보관 정책
 - HTTPS 운영 인증서와 HSTS 운영 적용
 - 정식 개인정보 처리방침 게시와 동의 철회 UI
@@ -186,10 +188,6 @@ baseline 분리 구현은 현재 SQLite에 사용자, 선호도, 레벨, 뱃지,
 
 ### 7.1 baseline 운영화
 
-- SQLite baseline 스키마를 PostgreSQL 마이그레이션 파일로 이전한다.
-- SQLite repository를 PostgreSQL 연결 계층으로 교체한다.
-- 앱 서버 인메모리 TourAPI 캐시를 Redis 30분 TTL 캐시로 교체한다.
-- 로컬·CI 검증 환경에 PostgreSQL과 Redis 실행 구성을 추가한다.
 - demo-social 로그인 경계를 네이버·구글 OAuth/OIDC provider로 교체한다.
 - refresh 토큰 갱신과 동의 철회 흐름을 추가한다.
 - HTTPS 운영 설정과 HSTS를 배포 환경에 적용한다.
@@ -220,6 +218,7 @@ baseline 분리 구현은 현재 SQLite에 사용자, 선호도, 레벨, 뱃지,
 - 로컬 실행 명령으로 정적 화면과 지도 페이지가 열린다.
 - NAVER Maps API Key가 없을 때 목업 지도 fallback이 동작한다.
 - NAVER REST API Key가 브라우저에 노출되지 않는다.
+- Docker Compose로 PostgreSQL과 Redis를 기동한 뒤 baseline이 실행된다.
 - baseline 실행 명령으로 사용자 PWA와 앱 API가 함께 열린다.
 - `/api/health`가 웹 게이트웨이 경유로 정상 응답한다.
 - `/api/auth/demo-login`이 만 14세 이상 확인, 개인정보 동의, 위치정보 동의 후 Bearer token을 발급한다.

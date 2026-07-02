@@ -88,9 +88,9 @@ class AppSettings:
     host: str
     # 변수 의미: 앱 API 바인드 포트다.
     port: int
-    # 변수 의미: PostgreSQL 전환 후 사용할 데이터베이스 접속 URL이다.
+    # 변수 의미: PostgreSQL 데이터베이스 접속 URL이다.
     database_url: str
-    # 변수 의미: Redis 전환 후 사용할 캐시 접속 URL이다.
+    # 변수 의미: Redis 캐시 접속 URL이다.
     redis_url: str
     # 변수 의미: TourAPI 임시 캐시 TTL 초 단위 값이다.
     cache_ttl_seconds: int

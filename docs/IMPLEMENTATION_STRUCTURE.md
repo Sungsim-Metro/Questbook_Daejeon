@@ -12,7 +12,7 @@
 - OpenAPI 응답은 사용자, 위치 권역, 카테고리 기준의 Redis 30분 임시 캐시에만 둔다.
 - API Key, access token, secret 값은 코드와 저장소에 넣지 않는다.
 - 운영 데이터베이스는 PostgreSQL, 서버 캐시는 Redis로 확정한다.
-- 현재 SQLite baseline 스키마는 PostgreSQL 마이그레이션으로 전환할 대상이다.
+- baseline 스키마는 PostgreSQL 마이그레이션과 앱 API 내장 초기화 SQL이 같은 정의를 사용한다.
 
 ## 디렉토리 역할
 
@@ -75,7 +75,7 @@ scripts/             개발, 검수, 배포 보조 스크립트
 4. `ReusableQuest`와 `UserQuestInstance`를 분리해 목업 퀘스트를 실제 추천 후보로 교체할 준비를 한다.
 5. `apps/user-web`에 현재 루트 정적 MVP를 옮겨 심을 때는 한 번에 이동하지 않고 화면 단위로 복제 후 검증한다.
 6. `database/migrations`에 사용자, 선호도, 퀘스트, 뱃지, 수첩 기준 PostgreSQL 스키마를 추가한다.
-7. 현재 SQLite repository와 앱 서버 인메모리 캐시를 PostgreSQL/Redis 어댑터로 교체한다.
+7. PostgreSQL repository와 Redis 캐시를 기준으로 추천, 완료, 기록 흐름을 검증한다.
 8. 파트너와 리워드 기능은 MVP 이후 확장 단계로 남기되, 디렉토리와 모델 경계는 유지한다.
 
 ## 검수 기준

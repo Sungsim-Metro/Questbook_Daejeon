@@ -15,7 +15,7 @@ src/questbook_api/
 tests/             앱 API 테스트
 ```
 
-## 우선 구현 대상
+## 구현된 baseline 구성
 
 1. 헬스체크와 설정 로딩
 2. TourAPI 클라이언트
@@ -25,4 +25,32 @@ tests/             앱 API 테스트
 6. `UserQuestInstance` 생성
 7. 퀘스트 완료 트랜잭션
 
-OpenAPI 원본 응답 전체를 PostgreSQL에 저장하지 않고, `contentId`와 표시명 같은 최소 참조값만 공용 퀘스트 자산에 남긴다. 현재 SQLite/인메모리 baseline 구현은 PostgreSQL/Redis 연결 계층으로 교체할 예정이다.
+OpenAPI 원본 응답 전체를 PostgreSQL에 저장하지 않고, `contentId`와 표시명 같은 최소 참조값만 공용 퀘스트 자산에 남긴다. TourAPI 추천 후보는 유저 단위 Redis 30분 TTL 캐시에만 임시 보관한다.
+
+## 로컬 실행
+
+앱 API는 로컬 PostgreSQL과 Redis가 먼저 실행되어 있어야 한다.
+
+```bash
+docker compose -f ../../infra/local/postgres-redis.compose.yaml up -d
+uv run python ../../scripts/check_local_data_services.py
+PYTHONPATH=src uv run python -m questbook_api.server
+```
+
+저장소 루트에서 웹 게이트웨이까지 함께 실행할 때는 다음 명령을 사용한다.
+
+```bash
+docker compose -f infra/local/postgres-redis.compose.yaml up -d
+uv run --project services/app-api python scripts/run_baseline.py
+```
+
+## 환경 변수
+
+| 이름 | 기본값 | 설명 |
+| --- | --- | --- |
+| `QUESTBOOK_DATABASE_URL` | `postgresql://questbook:questbook_local_password@127.0.0.1:5432/questbook` | baseline PostgreSQL 접속 URL |
+| `QUESTBOOK_REDIS_URL` | `redis://127.0.0.1:6379/0` | TourAPI 임시 캐시 Redis URL |
+| `QUESTBOOK_CACHE_TTL_SECONDS` | `1800` | Redis 캐시 TTL(초) |
+| `QUESTBOOK_APP_API_HOST` | `127.0.0.1` | 앱 API 바인드 호스트 |
+| `QUESTBOOK_APP_API_PORT` | `8100` | 앱 API 바인드 포트 |
+| `TOURAPI_SERVICE_KEY` | 빈 값 | 한국관광공사 TourAPI 서비스 키. 비어 있으면 fallback 데이터 사용 |

@@ -59,10 +59,12 @@ MVP 단계에서는 뱃지, 모험 수첩, 꿈돌이 도감 같은 비금전 보
 - 기존 정적 MVP: 루트의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py`
 - baseline 분리 구현: `apps/user-web`, `services/web-gateway`, `services/app-api`
 
-baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, 저장소, 캐시 계층을 분리한다. 현재 로컬 baseline은 SQLite와 앱 서버 인메모리 캐시로 실행되지만, 목표 운영 데이터베이스는 PostgreSQL, 서버 캐시는 Redis로 확정한다.
+baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 baseline 실행 전에는 Docker Compose로 PostgreSQL과 Redis를 먼저 기동한다.
 
 ```bash
-python3 scripts/run_baseline.py
+docker compose -f infra/local/postgres-redis.compose.yaml up -d
+uv run --project services/app-api python scripts/check_local_data_services.py
+uv run --project services/app-api python scripts/run_baseline.py
 ```
 
 실행 후 같은 PC에서는 `http://127.0.0.1:8000/`로 접속한다. 앱 API는 기본적으로 `http://127.0.0.1:8100`에서 실행되고, 웹 게이트웨이가 `/api` 요청을 앱 API로 프록시한다. 첫 화면에서는 demo-social 로그인과 만 14세 이상 확인, 개인정보·위치정보 수집·이용 동의 후 Bearer token을 받아 API를 호출한다.
@@ -70,13 +72,13 @@ python3 scripts/run_baseline.py
 baseline 검수 명령은 다음과 같다.
 
 ```bash
-PYTHONPATH=services/app-api/src python3 -m unittest discover services/app-api/tests
-python3 -m unittest discover tests/smoke
+docker compose -f infra/local/postgres-redis.compose.yaml up -d
+uv run --project services/app-api pytest services/app-api/tests tests/smoke -v
 node --check apps/user-web/src/app.js
 node --check apps/user-web/public/service-worker.js
 ```
 
-PostgreSQL과 Redis 로컬 개발 서비스는 Docker Compose로 준비한다. 현재 앱 로직은 아직 SQLite와 인메모리 캐시를 사용하지만, 다음 마이그레이션 작업을 위해 같은 서버에서 PostgreSQL과 Redis 접속 가능 여부를 먼저 확인할 수 있다.
+PostgreSQL과 Redis 로컬 개발 서비스는 Docker Compose로 준비한다. 접속 URL 기본값은 `.env.example`과 `infra/local/postgres-redis.compose.yaml`에 맞춰져 있다.
 
 ```bash
 docker compose -f infra/local/postgres-redis.compose.yaml up -d
@@ -87,7 +89,7 @@ uv run --project services/app-api python scripts/check_local_data_services.py
 
 - `infra/nginx/questbook-baseline.conf`: 정적 PWA 제공, gzip 압축, 보안 헤더, `/api` 프록시 예시
 - `infra/ncp/baseline-topology.yaml`: 설계서의 NCP VPC/subnet baseline 토폴로지
-- `scripts/backup_sqlite.py`: PostgreSQL 전환 전 로컬 baseline SQLite 백업 스크립트
+- `scripts/backup_postgres.py`: 로컬 baseline PostgreSQL 백업 스크립트
 
 기존 정적 MVP의 지도 페이지는 NAVER Maps Dynamic Map을 사용한다. 브라우저에는 `NAVER_MAPS_API_KEY_ID`만 전달하고, `NAVER_MAPS_API_KEY`는 로컬 서버의 Geocoding, Reverse Geocoding 프록시에서만 사용한다.
 
