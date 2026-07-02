@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from tempfile import TemporaryDirectory
 from threading import Barrier, Thread
 import unittest
 
@@ -11,13 +10,19 @@ import unittest
 # 변수 의미: 테스트에서 앱 API 패키지를 import하기 위한 src 경로다.
 APP_API_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(APP_API_SRC))
+# 변수 의미: 테스트 헬퍼 모듈이 있는 디렉토리 경로다.
+TESTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TESTS_DIR))
+
+import data_services
 
 from questbook_api.application.baseline_service import BaselineQuestbookService
-from questbook_api.infrastructure.cache import TourPlaceMemoryCache
+from questbook_api.infrastructure.cache import TourPlaceRedisCache
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.tourapi.client import TourApiClient
 
 
+@unittest.skipUnless(data_services.SERVICES_AVAILABLE, "local PostgreSQL/Redis not available")
 class BaselineQuestbookServiceTest(unittest.TestCase):
     """
     입력: unittest 실행 컨텍스트.
@@ -30,19 +35,19 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
         """
         입력: 없음.
         출력: 없음.
-        역할: 테스트용 임시 DB와 서비스를 준비한다.
+        역할: 테스트용 PostgreSQL 스키마와 Redis 캐시를 초기화한다.
         호출 예시: self.setUp()
         """
-        # 변수 의미: 테스트 임시 디렉토리 컨텍스트다.
-        self.temp_dir = TemporaryDirectory()
-        # 변수 의미: 테스트용 SQLite DB 경로다.
-        database_path = Path(self.temp_dir.name) / "test.sqlite3"
+        # 변수 의미: 테스트 DB 접속 URL이다.
+        self.database_url = data_services.ensure_test_database()
+        data_services.reset_database(self.database_url)
+        data_services.reset_redis(data_services.TEST_REDIS_URL)
         # 변수 의미: 테스트용 저장소다.
-        self.repository = QuestbookRepository(database_path)
+        self.repository = QuestbookRepository(self.database_url)
         self.repository.initialize()
         self.repository.ensure_user("demo-user")
-        # 변수 의미: 테스트용 인메모리 캐시다.
-        self.cache = TourPlaceMemoryCache(default_ttl_seconds=1800)
+        # 변수 의미: 테스트용 Redis 캐시다.
+        self.cache = TourPlaceRedisCache(data_services.TEST_REDIS_URL, default_ttl_seconds=1800)
         # 변수 의미: API 키 없는 fallback TourAPI 클라이언트다.
         self.tour_client = TourApiClient("")
         # 변수 의미: 테스트 대상 baseline 서비스다.
@@ -52,10 +57,10 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
         """
         입력: 없음.
         출력: 없음.
-        역할: 테스트 임시 디렉토리를 정리한다.
+        역할: 저장소 연결을 닫는다.
         호출 예시: self.tearDown()
         """
-        self.temp_dir.cleanup()
+        self.repository.close()
 
     def test_recommendations_use_user_scoped_cache(self) -> None:
         """

@@ -3,7 +3,10 @@ name = "questbook-app-api"
 version = "0.1.0"
 description = "Questbook Daejeon application API service scaffold."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "psycopg[binary]>=3.2,<4",
+    "redis>=5,<7",
+]
 
 [project.scripts]
 questbook-api = "questbook_api.server:main"
@@ -11,3 +14,8 @@ questbook-api = "questbook_api.server:main"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
