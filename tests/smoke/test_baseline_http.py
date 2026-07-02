@@ -21,6 +21,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 APP_API_SRC = REPOSITORY_ROOT / "services" / "app-api" / "src"
 # 변수 의미: 웹 게이트웨이 실행 파일 경로다.
 GATEWAY_SCRIPT = REPOSITORY_ROOT / "services" / "web-gateway" / "gateway.py"
+# 변수 의미: 스모크 테스트용 PostgreSQL 접속 URL이다.
+TEST_DATABASE_URL = os.environ.get(
+    "QUESTBOOK_TEST_DATABASE_URL",
+    "postgresql://questbook:questbook_local_password@127.0.0.1:5432/questbook_test",
+)
+# 변수 의미: 스모크 테스트용 Redis 접속 URL이다.
+TEST_REDIS_URL = os.environ.get("QUESTBOOK_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 
 
 def find_free_port() -> int:
@@ -34,6 +41,83 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _database_name_from_url(url: str) -> str:
+    """
+    입력: PostgreSQL 접속 URL.
+    출력: URL에서 추출한 데이터베이스 이름.
+    역할: 파괴적 스키마 초기화 전에 테스트 DB 이름을 확인한다.
+    호출 예시: database_name = _database_name_from_url(TEST_DATABASE_URL)
+    """
+    from urllib.parse import urlparse
+
+    return urlparse(url).path.lstrip("/")
+
+
+def _assert_test_database_url(url: str) -> str:
+    """
+    입력: 스모크 테스트용 PostgreSQL 접속 URL.
+    출력: 검증된 테스트 DB 이름.
+    역할: 운영 또는 개발 DB public 스키마를 실수로 삭제하지 않게 한다.
+    호출 예시: database_name = _assert_test_database_url(TEST_DATABASE_URL)
+    """
+    # 변수 의미: URL에서 추출한 데이터베이스 이름이다.
+    database_name = _database_name_from_url(url)
+    if database_name != "questbook_test" and not database_name.endswith("_test"):
+        raise ValueError("smoke test database URL must point to questbook_test or a *_test database")
+    return database_name
+
+
+def _assert_test_redis_url(url: str) -> None:
+    """
+    입력: 스모크 테스트용 Redis 접속 URL.
+    출력: 없음.
+    역할: 운영 또는 개발 Redis DB를 실수로 flushdb 하지 않게 한다.
+    호출 예시: _assert_test_redis_url(TEST_REDIS_URL)
+    """
+    from urllib.parse import urlparse
+
+    # 변수 의미: URL에서 추출한 Redis DB 번호 문자열이다.
+    database_token = urlparse(url).path.lstrip("/") or "0"
+    if database_token != "15":
+        raise ValueError("smoke test Redis URL must use database 15")
+
+
+def prepare_data_services() -> bool:
+    """
+    입력: 없음.
+    출력: PostgreSQL과 Redis 준비 성공 여부.
+    역할: 테스트 DB를 만들고 스키마와 Redis를 초기화하며, 스택 미가동 시 False를 반환한다.
+    호출 예시: available = prepare_data_services()
+    """
+    import psycopg
+    from psycopg import sql
+    import redis
+
+    _assert_test_redis_url(TEST_REDIS_URL)
+    # 변수 의미: URL에서 추출하고 검증한 테스트 DB 이름이다.
+    database_name = _assert_test_database_url(TEST_DATABASE_URL)
+
+    try:
+        # 변수 의미: 관리용 questbook DB 접속 URL이다.
+        admin_url = TEST_DATABASE_URL.rsplit("/", 1)[0] + "/questbook"
+        with psycopg.connect(admin_url, autocommit=True, connect_timeout=2) as connection:
+            # 변수 의미: 테스트 DB 존재 여부 row다.
+            exists = connection.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (database_name,)
+            ).fetchone()
+            if exists is None:
+                connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+
+        with psycopg.connect(TEST_DATABASE_URL, autocommit=True, connect_timeout=2) as connection:
+            connection.execute("DROP SCHEMA IF EXISTS public CASCADE")
+            connection.execute("CREATE SCHEMA public")
+
+        redis.Redis.from_url(TEST_REDIS_URL, socket_connect_timeout=2, socket_timeout=2).flushdb()
+    except (psycopg.OperationalError, redis.ConnectionError, redis.TimeoutError):
+        return False
+    return True
 
 
 def fetch_json(
@@ -80,14 +164,14 @@ def wait_for_json(url: str, timeout_seconds: float = 8.0) -> dict[str, object]:
     raise RuntimeError(f"server did not become ready: {url}") from last_error
 
 
-def terminate_process(process: subprocess.Popen[bytes]) -> None:
+def terminate_process(process: subprocess.Popen[bytes] | None) -> None:
     """
     입력: 종료할 서버 프로세스.
     출력: 없음.
     역할: smoke 테스트가 띄운 서버를 정리한다.
     호출 예시: terminate_process(process)
     """
-    if process.poll() is not None:
+    if process is None or process.poll() is not None:
         return
     process.terminate()
     try:
@@ -112,71 +196,104 @@ class BaselineHttpSmokeTest(unittest.TestCase):
         역할: 테스트용 앱 API와 웹 게이트웨이를 시작한다.
         호출 예시: BaselineHttpSmokeTest.setUpClass()
         """
-        # 변수 의미: 테스트 임시 디렉토리다.
-        cls.temp_dir = tempfile.TemporaryDirectory()
-        # 변수 의미: 테스트 앱 API 포트다.
-        cls.app_port = find_free_port()
-        # 변수 의미: 테스트 웹 게이트웨이 포트다.
-        cls.web_port = find_free_port()
-        # 변수 의미: 테스트용 SQLite DB 경로다.
-        cls.database_path = Path(cls.temp_dir.name) / "baseline-smoke.sqlite3"
-        # 변수 의미: 서버 프로세스가 사용할 환경 변수다.
-        cls.environment = os.environ.copy()
-        # 변수 의미: 기존 PYTHONPATH 값이다.
-        existing_pythonpath = cls.environment.get("PYTHONPATH", "")
-        cls.environment["PYTHONPATH"] = (
-            f"{APP_API_SRC}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(APP_API_SRC)
-        )
-        cls.environment["QUESTBOOK_DATABASE_PATH"] = str(cls.database_path)
-        cls.environment["QUESTBOOK_APP_API_HOST"] = "127.0.0.1"
-        cls.environment["QUESTBOOK_APP_API_PORT"] = str(cls.app_port)
-        cls.environment["QUESTBOOK_APP_API_BASE_URL"] = f"http://127.0.0.1:{cls.app_port}"
-        cls.environment["QUESTBOOK_WEB_HOST"] = "127.0.0.1"
-        cls.environment["QUESTBOOK_WEB_PORT"] = str(cls.web_port)
+        if not prepare_data_services():
+            raise unittest.SkipTest("local PostgreSQL/Redis not available")
 
-        # 변수 의미: 앱 API 서버 프로세스다.
-        cls.app_process = subprocess.Popen(
-            [sys.executable, "-m", "questbook_api.server"],
-            cwd=REPOSITORY_ROOT,
-            env=cls.environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        wait_for_json(f"http://127.0.0.1:{cls.app_port}/api/health")
-        # 변수 의미: 웹 게이트웨이 서버 프로세스다.
-        cls.gateway_process = subprocess.Popen(
-            [sys.executable, str(GATEWAY_SCRIPT)],
-            cwd=REPOSITORY_ROOT,
-            env=cls.environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        wait_for_json(f"http://127.0.0.1:{cls.web_port}/api/health")
-        # 변수 의미: demo-social 로그인 응답이다.
-        login_payload = fetch_json(
-            f"http://127.0.0.1:{cls.web_port}/api/auth/demo-login",
-            method="POST",
-            payload={
-                "providerUserId": "demo-user",
-                "displayName": "꼬마 탐험가",
-                "ageConfirmed": True,
-                "privacyConsent": True,
-                "locationConsent": True,
-            },
-        )
-        cls.access_token = str(login_payload["accessToken"])
+        # 변수 의미: 테스트 서버 프로세스 시작 실패 시 정리할 기본값이다.
+        cls.app_process: subprocess.Popen[bytes] | None = None
+        cls.gateway_process: subprocess.Popen[bytes] | None = None
+        # 변수 의미: 서버 로그 파일 핸들 목록이다.
+        cls.log_handles: list[object] = []
+        # 변수 의미: 스모크 테스트 서버 로그 파일 경로다.
+        cls.app_log_path = Path(tempfile.gettempdir()) / f"questbook-smoke-app-{os.getpid()}.log"
+        cls.gateway_log_path = Path(tempfile.gettempdir()) / f"questbook-smoke-gateway-{os.getpid()}.log"
+
+        try:
+            # 변수 의미: 테스트 앱 API 포트다.
+            cls.app_port = find_free_port()
+            # 변수 의미: 테스트 웹 게이트웨이 포트다.
+            cls.web_port = find_free_port()
+            # 변수 의미: 서버 프로세스가 사용할 환경 변수다.
+            cls.environment = os.environ.copy()
+            # 변수 의미: 기존 PYTHONPATH 값이다.
+            existing_pythonpath = cls.environment.get("PYTHONPATH", "")
+            cls.environment["PYTHONPATH"] = (
+                f"{APP_API_SRC}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(APP_API_SRC)
+            )
+            cls.environment["QUESTBOOK_DATABASE_URL"] = TEST_DATABASE_URL
+            cls.environment["QUESTBOOK_REDIS_URL"] = TEST_REDIS_URL
+            cls.environment["QUESTBOOK_APP_API_HOST"] = "127.0.0.1"
+            cls.environment["QUESTBOOK_APP_API_PORT"] = str(cls.app_port)
+            cls.environment["QUESTBOOK_APP_API_BASE_URL"] = f"http://127.0.0.1:{cls.app_port}"
+            cls.environment["QUESTBOOK_WEB_HOST"] = "127.0.0.1"
+            cls.environment["QUESTBOOK_WEB_PORT"] = str(cls.web_port)
+
+            # 변수 의미: 앱 API 서버 로그 파일 핸들이다.
+            app_log = cls.app_log_path.open("wb")
+            cls.log_handles.append(app_log)
+            # 변수 의미: 앱 API 서버 프로세스다.
+            cls.app_process = subprocess.Popen(
+                [sys.executable, "-m", "questbook_api.server"],
+                cwd=REPOSITORY_ROOT,
+                env=cls.environment,
+                stdout=app_log,
+                stderr=subprocess.STDOUT,
+            )
+            wait_for_json(f"http://127.0.0.1:{cls.app_port}/api/health")
+
+            # 변수 의미: 웹 게이트웨이 서버 로그 파일 핸들이다.
+            gateway_log = cls.gateway_log_path.open("wb")
+            cls.log_handles.append(gateway_log)
+            # 변수 의미: 웹 게이트웨이 서버 프로세스다.
+            cls.gateway_process = subprocess.Popen(
+                [sys.executable, str(GATEWAY_SCRIPT)],
+                cwd=REPOSITORY_ROOT,
+                env=cls.environment,
+                stdout=gateway_log,
+                stderr=subprocess.STDOUT,
+            )
+            wait_for_json(f"http://127.0.0.1:{cls.web_port}/api/health")
+            # 변수 의미: demo-social 로그인 응답이다.
+            login_payload = fetch_json(
+                f"http://127.0.0.1:{cls.web_port}/api/auth/demo-login",
+                method="POST",
+                payload={
+                    "providerUserId": "demo-user",
+                    "displayName": "꼬마 탐험가",
+                    "ageConfirmed": True,
+                    "privacyConsent": True,
+                    "locationConsent": True,
+                },
+            )
+            cls.access_token = str(login_payload["accessToken"])
+        except Exception as error:
+            cls._cleanup_processes()
+            raise RuntimeError(
+                f"smoke server startup failed; app log: {cls.app_log_path}; gateway log: {cls.gateway_log_path}"
+            ) from error
+
+    @classmethod
+    def _cleanup_processes(cls) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 시작된 테스트 서버 프로세스와 로그 핸들을 정리한다.
+        호출 예시: cls._cleanup_processes()
+        """
+        terminate_process(getattr(cls, "gateway_process", None))
+        terminate_process(getattr(cls, "app_process", None))
+        for handle in getattr(cls, "log_handles", []):
+            handle.close()
 
     @classmethod
     def tearDownClass(cls) -> None:
         """
         입력: 없음.
         출력: 없음.
-        역할: 테스트용 서버 프로세스와 임시 디렉토리를 정리한다.
+        역할: 테스트용 서버 프로세스를 정리한다.
         호출 예시: BaselineHttpSmokeTest.tearDownClass()
         """
-        terminate_process(cls.gateway_process)
-        terminate_process(cls.app_process)
-        cls.temp_dir.cleanup()
+        cls._cleanup_processes()
 
     def test_gateway_serves_pwa_and_proxies_api(self) -> None:
         """
