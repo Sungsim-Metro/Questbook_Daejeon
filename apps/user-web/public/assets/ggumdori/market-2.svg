@@ -1,0 +1,15 @@
+<!-- 지역 상권 2단계 꿈돌이 완성 이미지입니다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">제빵 꿈돌이</title>
+  <desc id="desc">빵 모자를 쓰고 장바구니를 든 지역 상권 테마 탐험 마스코트</desc>
+  <rect width="160" height="160" rx="36" fill="#fff2d8"/>
+  <ellipse cx="80" cy="47" rx="42" ry="23" fill="#d99a3d"/>
+  <circle cx="80" cy="76" r="40" fill="#7bdc91"/>
+  <circle cx="66" cy="72" r="6" fill="#1d2b28"/>
+  <circle cx="94" cy="72" r="6" fill="#1d2b28"/>
+  <path d="M66 95q14 12 28 0" fill="none" stroke="#1d2b28" stroke-width="6" stroke-linecap="round"/>
+  <rect x="44" y="111" width="72" height="28" rx="9" fill="#ffffff" stroke="#b97824" stroke-width="5"/>
+  <path d="M58 111q22-18 44 0" fill="none" stroke="#b97824" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="65" cy="125" r="5" fill="#d99a3d"/>
+  <circle cx="83" cy="125" r="5" fill="#d99a3d"/>
+</svg>

@@ -1,0 +1,55 @@
+# Questbook baseline NCP 네트워크 토폴로지 매니페스트다.
+environment: baseline
+provider: naver-cloud-platform
+scale:
+  totalUsersUpperBound: 1000
+  concurrentUsersUpperBound: 50
+network:
+  vpcCidr: 10.30.0.0/16
+  subnets:
+    - name: load-balancer-subnet
+      cidr: 10.30.0.0/24
+      publicIngress: true
+      role: Public Application Load Balancer HTTPS entrypoint
+    - name: web-subnet
+      cidr: 10.30.10.0/24
+      publicIngress: false
+      role: Static PWA serving, security headers, compression, /api proxy
+    - name: app-subnet
+      cidr: 10.30.20.0/24
+      publicIngress: false
+      role: Python app API, TourAPI/NAVER/Gemini adapters, in-memory cache
+    - name: data-subnet
+      cidr: 10.30.30.0/24
+      publicIngress: false
+      role: Managed relational database and future Redis cache
+    - name: nat-gateway-subnet
+      cidr: 10.30.250.0/24
+      publicIngress: restricted
+      role: Outbound calls to TourAPI, NAVER Maps REST API, Gemini
+servers:
+  web:
+    initialCount: 1
+    expandsWhen: concurrent users exceed 100 or web CPU remains above 70 percent
+  app:
+    initialCount: 1
+    cache: app-memory
+    expandsWhen: API p95 exceeds 1s or app CPU remains above 70 percent
+database:
+  type: managed-relational
+  engineDecision: deferred
+  schemas:
+    - auth
+    - user
+    - quest
+    - reward
+    - note
+    - partner
+security:
+  publicEntrypoint: load-balancer-only
+  browserSecrets: forbidden
+  appSecrets: environment-or-secret-manager
+  session: stateless-bearer-token
+cachePolicy:
+  tourApiCacheTtlSeconds: 1800
+  persistentTourApiRawStorage: forbidden

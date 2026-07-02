@@ -1,0 +1,14 @@
+<!-- 과학 문화 2단계 꿈돌이 완성 이미지입니다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">플라스크 꿈돌이</title>
+  <desc id="desc">플라스크를 들고 실험하는 과학 테마 탐험 마스코트</desc>
+  <rect width="160" height="160" rx="36" fill="#eef2ff"/>
+  <circle cx="80" cy="68" r="41" fill="#79d79b"/>
+  <circle cx="66" cy="64" r="6" fill="#1d2b28"/>
+  <circle cx="94" cy="64" r="6" fill="#1d2b28"/>
+  <path d="M65 89q15 13 31 0" fill="none" stroke="#1d2b28" stroke-width="6" stroke-linecap="round"/>
+  <path d="M106 102h20l-9 35H93z" fill="#d9f6ff" stroke="#4a64c8" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M102 122h20" stroke="#4a64c8" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="47" cy="113" r="8" fill="#f5c542"/>
+  <circle cx="37" cy="128" r="5" fill="#4a64c8"/>
+</svg>

@@ -1,0 +1,217 @@
+<!-- 사용자 모바일 웹/PWA의 정적 진입점 파일입니다. -->
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#03c75a" />
+    <meta
+      name="description"
+      content="대전 관광지를 퀘스트, 뱃지, 모험가의 수첩, 꿈돌이 도감으로 연결하는 모바일 웹/PWA"
+    />
+    <title>모험가의 수첩</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='20' fill='%2303c75a'/%3E%3Cpath d='M25 22h38a8 8 0 0 1 8 8v44H28a8 8 0 0 1-8-8V27a5 5 0 0 1 5-5Z' fill='%23fffaf0'/%3E%3Cpath d='M34 36h26M34 48h19M34 60h23' stroke='%230a8f48' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="../src/styles.css" />
+  </head>
+  <body data-active-view="home">
+    <a class="skip-link" href="#main-content">본문으로 이동</a>
+
+    <div class="app-shell">
+      <header class="app-header" aria-label="앱 상태">
+        <span class="app-mark" data-app-icon>✦</span>
+        <div class="app-title-group">
+          <span class="app-eyebrow" data-app-eyebrow>QUESTBOOK</span>
+          <h1 class="app-title" data-app-title>모험가 홈</h1>
+        </div>
+        <div class="header-status">
+          <span class="level-pill" id="header-level">Lv.3</span>
+          <span class="system-status" id="system-status" aria-live="polite">
+            <span class="status-dot status-dot--pending" aria-hidden="true"></span>
+            <span>확인 중</span>
+          </span>
+        </div>
+      </header>
+
+      <main class="app-main" id="main-content">
+        <section class="consent-panel" id="consent-panel" aria-labelledby="consent-title" hidden>
+          <p class="page-kicker">시작 전 확인</p>
+          <h2 class="page-title" id="consent-title">데모 소셜 로그인</h2>
+          <p class="page-copy">
+            추천과 퀘스트 인증을 위해 닉네임, 활동 기록, 현재 위치를 필요한 순간에만 사용합니다.
+          </p>
+          <div class="consent-check-list">
+            <label class="consent-check">
+              <input type="checkbox" id="age-confirmed" />
+              <span>만 14세 이상입니다.</span>
+            </label>
+            <label class="consent-check">
+              <input type="checkbox" id="privacy-consent" />
+              <span>개인정보 수집·이용에 동의합니다.</span>
+            </label>
+            <label class="consent-check">
+              <input type="checkbox" id="location-consent" />
+              <span>위치정보 수집·이용에 동의합니다.</span>
+            </label>
+          </div>
+          <button class="primary-action" type="button" id="demo-login-button">동의하고 시작</button>
+          <p class="data-note" id="consent-message" aria-live="polite"></p>
+        </section>
+
+        <div class="view-stack" id="app-views">
+          <section class="view-panel is-active" id="view-home" data-view-panel="home" aria-labelledby="home-title">
+            <section class="hero-panel home-hero">
+              <div class="home-hero-copy">
+                <p class="page-kicker">로그인 완료</p>
+                <h2 class="page-title" id="home-title">선택한 꿈돌이와 오늘의 탐험</h2>
+                <p class="page-copy">내 레벨, 최근 뱃지, 추천 퀘스트를 한 화면에서 확인합니다.</p>
+              </div>
+              <div class="profile-panel" id="profile-panel" aria-live="polite"></div>
+              <div class="hero-actions">
+                <button class="primary-action" type="button" id="use-location-button">내 위치로 추천</button>
+                <button class="secondary-action" type="button" id="refresh-button">새로고침</button>
+              </div>
+            </section>
+
+            <section aria-label="탐험 상태 요약">
+              <h2 class="section-title">탐험 상태</h2>
+              <div class="metric-grid" id="home-metric-grid"></div>
+            </section>
+
+            <section aria-label="주요 화면 이동">
+              <h2 class="section-title">탐험 메뉴</h2>
+              <div class="quick-grid">
+                <button class="feature-card" type="button" data-view-target="map">
+                  <span class="card-icon">⌖</span>
+                  <strong>지도</strong>
+                  <span>주변 퀘스트 장소를 지도에서 확인합니다.</span>
+                </button>
+                <button class="feature-card" type="button" data-view-target="quests">
+                  <span class="card-icon">✓</span>
+                  <strong>퀘스트</strong>
+                  <span>추천, 진행 중, 완료 퀘스트를 고릅니다.</span>
+                </button>
+                <button class="feature-card" type="button" data-view-target="notes">
+                  <span class="card-icon">▤</span>
+                  <strong>수첩</strong>
+                  <span>완료한 탐험 기록을 모아봅니다.</span>
+                </button>
+                <button class="feature-card" type="button" data-view-target="badges">
+                  <span class="card-icon">●</span>
+                  <strong>뱃지</strong>
+                  <span>획득한 스탬프와 꿈돌이를 확인합니다.</span>
+                </button>
+              </div>
+            </section>
+
+            <section aria-label="최근 획득 뱃지">
+              <h2 class="section-title">최근 획득 뱃지</h2>
+              <div class="recent-badge-list" id="recent-badge-list"></div>
+            </section>
+
+            <section aria-label="오늘의 추천">
+              <h2 class="section-title">오늘의 추천</h2>
+              <div class="card-list compact-card-list" id="home-recommendation-list" aria-live="polite"></div>
+              <p class="data-note" id="home-data-note">관광정보 제공: 한국관광공사(TourAPI)</p>
+            </section>
+          </section>
+
+          <section class="view-panel" id="view-quests" data-view-panel="quests" aria-labelledby="quests-title" hidden>
+            <section class="hero-panel">
+              <p class="page-kicker">대전 관광 퀘스트</p>
+              <h2 class="page-title" id="quests-title">오늘 수행할 퀘스트를 고르세요</h2>
+              <p class="page-copy">현재 위치와 뱃지 성향을 기준으로 추천 퀘스트를 정렬합니다.</p>
+            </section>
+
+            <section aria-label="퀘스트 유형 필터">
+              <h2 class="section-title">퀘스트 유형</h2>
+              <div class="chip-row" aria-label="관광 카테고리 선택">
+                <button type="button" class="chip-button is-active" data-category="all">전체</button>
+                <button type="button" class="chip-button" data-category="nature">자연</button>
+                <button type="button" class="chip-button" data-category="science">과학</button>
+                <button type="button" class="chip-button" data-category="downtown">원도심</button>
+                <button type="button" class="chip-button" data-category="market">상권</button>
+                <button type="button" class="chip-button" data-category="mobility">이동</button>
+                <button type="button" class="chip-button" data-category="nightview">야경</button>
+              </div>
+            </section>
+
+            <section aria-label="퀘스트 목록">
+              <h2 class="section-title">퀘스트 카드</h2>
+              <div class="card-list" id="recommendation-list" aria-live="polite"></div>
+            </section>
+          </section>
+
+          <section class="view-panel" id="view-map" data-view-panel="map" aria-labelledby="map-title" hidden>
+            <section class="map-status">
+              <div>
+                <p class="page-kicker">Dynamic Map</p>
+                <h2 class="page-title" id="map-title">현재 위치 주변 퀘스트</h2>
+              </div>
+              <span class="map-provider-pill" id="map-provider-status">연결 확인 중</span>
+            </section>
+
+            <section class="map-tools" aria-label="지도 위치 변경">
+              <div class="map-coordinate-grid">
+                <button class="map-secondary-button" type="button" data-view-target="quests">퀘스트 목록</button>
+                <button class="map-secondary-button" type="button" id="map-location-button">현재 위치</button>
+              </div>
+              <p class="map-position-status" id="map-copy">대전광역시청 기준 좌표로 추천을 준비합니다.</p>
+            </section>
+
+            <section class="map-shell" aria-label="대전 퀘스트 지도">
+              <div class="map-canvas is-mock" id="quest-map"></div>
+            </section>
+
+            <section class="map-detail" id="map-detail" aria-label="선택한 장소 정보"></section>
+
+            <section aria-label="지도 장소 목록">
+              <h2 class="section-title">지도 데이터셋</h2>
+              <div class="map-place-list" id="map-place-list"></div>
+              <p class="data-note">NAVER 지도 설정이 있으면 실제 지도 연동을 시도하고, 실패하면 같은 장소 데이터를 목업 지도로 표시합니다.</p>
+            </section>
+          </section>
+
+          <section class="view-panel" id="view-badges" data-view-panel="badges" aria-labelledby="badges-title" hidden>
+            <section class="badge-hero">
+              <p class="badge-hero-label">BADGE NOTEBOOK</p>
+              <div class="featured-badge" id="featured-badge-icon">●</div>
+              <h2 class="badge-hero-title" id="badges-title">뱃지 수첩</h2>
+              <p class="badge-hero-sub" id="featured-badge-copy">최근 획득한 뱃지를 확인합니다.</p>
+            </section>
+
+            <section aria-label="뱃지 목록">
+              <h2 class="section-title">카테고리 성장</h2>
+              <div class="badge-grid" id="badge-grid" aria-live="polite"></div>
+            </section>
+
+            <section aria-label="꿈돌이 도감">
+              <h2 class="section-title">꿈돌이 도감</h2>
+              <div class="ggumdori-grid" id="ggumdori-grid" aria-live="polite"></div>
+            </section>
+          </section>
+
+          <section class="view-panel" id="view-notes" data-view-panel="notes" aria-labelledby="notes-title" hidden>
+            <section class="hero-panel">
+              <p class="page-kicker">모험가의 수첩</p>
+              <h2 class="page-title" id="notes-title">최근 탐험 기록</h2>
+              <p class="page-copy">완료한 퀘스트와 획득한 뱃지가 시간순으로 쌓입니다.</p>
+            </section>
+
+            <section aria-label="수첩 기록 목록">
+              <h2 class="section-title">탐험 노트</h2>
+              <div class="note-list" id="note-list" aria-live="polite"></div>
+            </section>
+          </section>
+        </div>
+      </main>
+
+      <nav class="bottom-nav" id="bottom-nav" aria-label="주요 화면 이동"></nav>
+    </div>
+
+    <script type="module" src="../src/app.js"></script>
+  </body>
+</html>

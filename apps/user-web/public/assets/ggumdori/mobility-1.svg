@@ -1,0 +1,14 @@
+<!-- 이동형 1단계 꿈돌이 완성 이미지입니다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">타슈 꿈돌이</title>
+  <desc id="desc">자전거 바퀴와 헬멧을 가진 이동형 테마 탐험 마스코트</desc>
+  <rect width="160" height="160" rx="36" fill="#e8f7fb"/>
+  <path d="M48 54c10-19 54-19 64 0" fill="#4b9fb8"/>
+  <circle cx="80" cy="78" r="39" fill="#7bdc91"/>
+  <circle cx="66" cy="75" r="6" fill="#1d2b28"/>
+  <circle cx="94" cy="75" r="6" fill="#1d2b28"/>
+  <path d="M66 96q14 11 28 0" fill="none" stroke="#1d2b28" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="53" cy="124" r="17" fill="none" stroke="#287f98" stroke-width="6"/>
+  <circle cx="107" cy="124" r="17" fill="none" stroke="#287f98" stroke-width="6"/>
+  <path d="M53 124h31l12-22M84 124l23 0" fill="none" stroke="#287f98" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

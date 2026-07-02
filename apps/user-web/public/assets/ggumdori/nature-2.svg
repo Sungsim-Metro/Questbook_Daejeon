@@ -1,0 +1,13 @@
+<!-- 자연 관찰 2단계 꿈돌이 완성 이미지입니다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">숲 탐험 꿈돌이</title>
+  <desc id="desc">잎사귀 망토를 두른 자연 관찰 테마 탐험 마스코트</desc>
+  <rect width="160" height="160" rx="36" fill="#eaf8ee"/>
+  <path d="M38 76c16-35 68-35 84 0-24-8-60-8-84 0Z" fill="#2d9b5f"/>
+  <circle cx="80" cy="78" r="39" fill="#86dc91"/>
+  <circle cx="67" cy="75" r="6" fill="#1d2b28"/>
+  <circle cx="93" cy="75" r="6" fill="#1d2b28"/>
+  <path d="M66 98q14 11 28 0" fill="none" stroke="#1d2b28" stroke-width="6" stroke-linecap="round"/>
+  <path d="M47 118c17 18 49 18 66 0v22H47z" fill="#2d9b5f"/>
+  <path d="M55 129h50" stroke="#eaf8ee" stroke-width="4" stroke-linecap="round"/>
+</svg>

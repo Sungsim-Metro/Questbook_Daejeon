@@ -1,0 +1,163 @@
+# Questbook baseline 웹-앱 서버 HTTP API 계약이다.
+openapi: 3.1.0
+info:
+  title: Questbook Daejeon Baseline API
+  version: 0.1.0
+  description: 사용자 PWA와 앱 API 사이의 baseline 계약이다.
+servers:
+  - url: http://127.0.0.1:8000
+    description: 로컬 웹 게이트웨이
+paths:
+  /api/auth/providers:
+    get:
+      summary: 사용 가능한 로그인 provider와 설정 상태를 반환한다.
+      responses:
+        "200":
+          description: provider 목록
+  /api/auth/demo-login:
+    post:
+      summary: 로컬 baseline 검증용 demo-social 로그인과 필수 동의 기록을 처리한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ageConfirmed, privacyConsent, locationConsent]
+              properties:
+                providerUserId:
+                  type: string
+                displayName:
+                  type: string
+                ageConfirmed:
+                  type: boolean
+                privacyConsent:
+                  type: boolean
+                locationConsent:
+                  type: boolean
+      responses:
+        "200":
+          description: Bearer access token과 사용자 동의 상태
+  /api/health:
+    get:
+      summary: 앱 API와 DB 및 캐시 상태를 확인한다.
+      responses:
+        "200":
+          description: 정상 상태
+  /api/me:
+    get:
+      summary: 서버가 식별한 현재 사용자와 진행도를 반환한다.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 사용자 요약
+  /api/recommendations:
+    get:
+      summary: 현재 위치와 카테고리 기준 추천 관광지와 퀘스트 후보를 반환한다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: lng
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, nature, science, downtown, market, mobility, nightview]
+        - name: radiusMeters
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 5000
+      responses:
+        "200":
+          description: 추천 결과. OpenAPI 원본 전체가 아니라 최소 장소 필드와 퀘스트 후보만 포함한다.
+  /api/quests/{instanceId}/accept:
+    post:
+      summary: 추천 퀘스트를 수행하기로 선택한다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 수락된 퀘스트 상태
+  /api/quests/{instanceId}/complete:
+    post:
+      summary: GPS 기반 baseline 인증으로 퀘스트 완료를 요청한다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude]
+              properties:
+                latitude:
+                  type: number
+                longitude:
+                  type: number
+                accuracyMeters:
+                  type: number
+      responses:
+        "200":
+          description: 완료 성공 또는 재시도 가능한 인증 실패
+  /api/badges:
+    get:
+      summary: 전체 뱃지와 사용자 진행 상태를 반환한다.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 뱃지 목록
+  /api/notes:
+    get:
+      summary: 완료 퀘스트 기반 모험가의 수첩 기록을 반환한다.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 수첩 기록 목록
+  /api/ggumdori:
+    get:
+      summary: 꿈돌이 도감과 사용자 해금 상태를 반환한다.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 꿈돌이 도감 상태
+  /api/naver-map/config:
+    get:
+      summary: 브라우저에 공개 가능한 NAVER Maps 설정 상태만 반환한다.
+      responses:
+        "200":
+          description: Key ID 설정 여부와 REST 프록시 활성 상태
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

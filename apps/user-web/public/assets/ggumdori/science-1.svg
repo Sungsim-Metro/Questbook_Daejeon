@@ -1,0 +1,13 @@
+<!-- 과학 문화 1단계 꿈돌이 완성 이미지입니다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">안경 꿈돌이</title>
+  <desc id="desc">둥근 안경과 과학 노트를 든 밝은 초록색 탐험 마스코트</desc>
+  <rect width="160" height="160" rx="36" fill="#eaf4ff"/>
+  <circle cx="80" cy="70" r="42" fill="#7bdc91"/>
+  <circle cx="63" cy="68" r="13" fill="none" stroke="#1d2b28" stroke-width="5"/>
+  <circle cx="97" cy="68" r="13" fill="none" stroke="#1d2b28" stroke-width="5"/>
+  <path d="M76 68h8" stroke="#1d2b28" stroke-width="5" stroke-linecap="round"/>
+  <path d="M65 92q15 12 30 0" fill="none" stroke="#1d2b28" stroke-width="6" stroke-linecap="round"/>
+  <rect x="44" y="107" width="72" height="30" rx="10" fill="#ffffff" stroke="#2f6fb5" stroke-width="5"/>
+  <path d="M58 118h44M58 128h30" stroke="#2f6fb5" stroke-width="4" stroke-linecap="round"/>
+</svg>

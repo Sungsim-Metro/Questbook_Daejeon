@@ -1,0 +1,27 @@
+{"_comment": "사용자 모바일 웹/PWA 매니페스트 파일입니다.",
+  "name": "모험가의 수첩",
+  "short_name": "모험수첩",
+  "description": "대전 관광지를 퀘스트, 뱃지, 수첩 기록, 꿈돌이 도감으로 연결하는 모바일 웹/PWA",
+  "lang": "ko-KR",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f7f5",
+  "theme_color": "#1f6b5b",
+  "categories": ["travel", "games", "lifestyle"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='42' fill='%231f6b5b'/%3E%3Cpath d='M52 38h78a16 16 0 0 1 16 16v96H58a18 18 0 0 1-18-18V50a12 12 0 0 1 12-12Z' fill='%23f8f1df'/%3E%3Cpath d='M70 73h52M70 96h38M70 119h48' stroke='%231f6b5b' stroke-width='12' stroke-linecap='round'/%3E%3Ccircle cx='136' cy='52' r='18' fill='%23e9b44c'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%231f6b5b'/%3E%3Cpath d='M138 102h208a42 42 0 0 1 42 42v256H154a48 48 0 0 1-48-48V134a32 32 0 0 1 32-32Z' fill='%23f8f1df'/%3E%3Cpath d='M188 196h140M188 256h103M188 316h128' stroke='%231f6b5b' stroke-width='32' stroke-linecap='round'/%3E%3Ccircle cx='362' cy='138' r='48' fill='%23e9b44c'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

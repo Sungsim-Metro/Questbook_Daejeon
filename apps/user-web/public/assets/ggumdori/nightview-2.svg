@@ -1,0 +1,13 @@
+<!-- 야경 기록 2단계 꿈돌이 완성 이미지입니다. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">야경 꿈돌이</title>
+  <desc id="desc">달빛 망토와 별을 가진 야경 기록 테마 탐험 마스코트</desc>
+  <rect width="160" height="160" rx="36" fill="#ece9ff"/>
+  <path d="M116 32a22 22 0 1 1-25 31 27 27 0 1 0 25-31Z" fill="#f5d56b"/>
+  <circle cx="80" cy="79" r="40" fill="#7bdc91"/>
+  <circle cx="67" cy="76" r="6" fill="#1d2b28"/>
+  <circle cx="93" cy="76" r="6" fill="#1d2b28"/>
+  <path d="M66 99q14 11 28 0" fill="none" stroke="#1d2b28" stroke-width="6" stroke-linecap="round"/>
+  <path d="M44 119c19 19 53 19 72 0v23H44z" fill="#6757a6"/>
+  <path d="m42 48 4 9 9 4-9 4-4 9-4-9-9-4 9-4z" fill="#f5d56b"/>
+</svg>
