@@ -90,6 +90,10 @@ class AppSettings:
     port: int
     # 변수 의미: SQLite 데이터베이스 파일 경로다.
     database_path: Path
+    # 변수 의미: PostgreSQL 전환 후 사용할 데이터베이스 접속 URL이다.
+    database_url: str
+    # 변수 의미: Redis 전환 후 사용할 캐시 접속 URL이다.
+    redis_url: str
     # 변수 의미: TourAPI 임시 캐시 TTL 초 단위 값이다.
     cache_ttl_seconds: int
     # 변수 의미: 한국관광공사 OpenAPI 서비스 키다.
@@ -121,6 +125,11 @@ class AppSettings:
             host=get_env("QUESTBOOK_APP_API_HOST", "127.0.0.1"),
             port=get_int_env("QUESTBOOK_APP_API_PORT", 8100, 1, 65535),
             database_path=Path(database_path_value).expanduser(),
+            database_url=get_env(
+                "QUESTBOOK_DATABASE_URL",
+                "postgresql://questbook:questbook_local_password@127.0.0.1:5432/questbook",
+            ),
+            redis_url=get_env("QUESTBOOK_REDIS_URL", "redis://127.0.0.1:6379/0"),
             cache_ttl_seconds=get_int_env("QUESTBOOK_CACHE_TTL_SECONDS", 1800, 60, 86400),
             tourapi_service_key=get_env("TOURAPI_SERVICE_KEY"),
             naver_maps_key_id=get_env("NAVER_MAPS_API_KEY_ID"),

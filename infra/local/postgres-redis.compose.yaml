@@ -1,0 +1,41 @@
+# Questbook 로컬 PostgreSQL과 Redis 개발 환경을 정의한다.
+name: questbook-local-data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: questbook-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${QUESTBOOK_POSTGRES_DB:-questbook}
+      POSTGRES_USER: ${QUESTBOOK_POSTGRES_USER:-questbook}
+      POSTGRES_PASSWORD: ${QUESTBOOK_POSTGRES_PASSWORD:-questbook_local_password}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${QUESTBOOK_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - questbook-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: questbook-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${QUESTBOOK_REDIS_PORT:-6379}:6379"
+    volumes:
+      - questbook-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  questbook-postgres-data:
+  questbook-redis-data:

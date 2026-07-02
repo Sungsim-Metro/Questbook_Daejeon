@@ -76,6 +76,13 @@ node --check apps/user-web/src/app.js
 node --check apps/user-web/public/service-worker.js
 ```
 
+PostgreSQL과 Redis 로컬 개발 서비스는 Docker Compose로 준비한다. 현재 앱 로직은 아직 SQLite와 인메모리 캐시를 사용하지만, 다음 마이그레이션 작업을 위해 같은 서버에서 PostgreSQL과 Redis 접속 가능 여부를 먼저 확인할 수 있다.
+
+```bash
+docker compose -f infra/local/postgres-redis.compose.yaml up -d
+uv run --project services/app-api python scripts/check_local_data_services.py
+```
+
 운영 baseline 보조 파일은 다음 위치에 있다.
 
 - `infra/nginx/questbook-baseline.conf`: 정적 PWA 제공, gzip 압축, 보안 헤더, `/api` 프록시 예시

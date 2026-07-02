@@ -4,6 +4,8 @@ AGENTS.md
 !.env.example
 __pycache__/
 *.py[cod]
+.venv/
 .questbook/
 
 plan/
+Todo/
