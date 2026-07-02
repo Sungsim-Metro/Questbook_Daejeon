@@ -9,9 +9,10 @@
 - 정적 파일 제공과 API 프록시는 `services/web-gateway/`에서 담당한다.
 - 추천, 퀘스트, 인증, 뱃지, 수첩, 리워드 도메인은 `services/app-api/`의 Python 앱 서버에서 담당한다.
 - 한국관광공사 OpenAPI 원본 응답 전체는 영구 저장하지 않는다.
-- OpenAPI 응답은 사용자, 위치 권역, 카테고리 기준의 30분 임시 캐시에만 둔다.
+- OpenAPI 응답은 사용자, 위치 권역, 카테고리 기준의 Redis 30분 임시 캐시에만 둔다.
 - API Key, access token, secret 값은 코드와 저장소에 넣지 않는다.
-- 데이터베이스 엔진은 아직 고정하지 않고, `database/`에는 논리 스키마와 마이그레이션만 준비한다.
+- 운영 데이터베이스는 PostgreSQL, 서버 캐시는 Redis로 확정한다.
+- 현재 SQLite baseline 스키마는 PostgreSQL 마이그레이션으로 전환할 대상이다.
 
 ## 디렉토리 역할
 
@@ -30,7 +31,7 @@ contracts/
   events/            향후 비동기 이벤트 계약
 
 database/
-  migrations/        관계형 DB 마이그레이션
+  migrations/        PostgreSQL 마이그레이션
   seeds/             카테고리, 뱃지, 꿈돌이 같은 기준 데이터
 
 infra/
@@ -40,7 +41,7 @@ infra/
 
 tests/
   smoke/             실행 가능 여부와 헬스체크
-  integration/       API, DB, 캐시, 외부 API 대역 테스트
+  integration/       API, PostgreSQL, Redis, 외부 API 대역 테스트
   e2e/               사용자 흐름 검증
 
 scripts/             개발, 검수, 배포 보조 스크립트
@@ -63,23 +64,24 @@ scripts/             개발, 검수, 배포 보조 스크립트
 | `domain/partners/` | `PartnerStore`, `PartnerAccount` |
 | `domain/ggumdori/` | `GgumdoriVariant`, `UserGgumdori`, `GgumdoriSelection` |
 | `integrations/` | 한국관광공사 OpenAPI, NAVER Maps REST API, Gemini API, OAuth 제공자 |
-| `infrastructure/` | DB, 마이그레이션 연결, 캐시, 파일 저장소, 트랜잭션 |
+| `infrastructure/` | PostgreSQL, 마이그레이션 연결, Redis, 파일 저장소, 트랜잭션 |
 | `observability/` | 로그, 헬스체크, 지표, 외부 API 실패 진단 |
 
 ## 구현 순서
 
 1. `services/app-api`에 헬스체크와 설정 로딩을 먼저 추가한다.
 2. `contracts/openapi`에 추천, 퀘스트 생성, 퀘스트 완료 API 계약을 정의한다.
-3. 한국관광공사 OpenAPI 클라이언트와 30분 유저 단위 임시 캐시를 구현한다.
+3. 한국관광공사 OpenAPI 클라이언트와 Redis 30분 유저 단위 임시 캐시를 구현한다.
 4. `ReusableQuest`와 `UserQuestInstance`를 분리해 목업 퀘스트를 실제 추천 후보로 교체할 준비를 한다.
 5. `apps/user-web`에 현재 루트 정적 MVP를 옮겨 심을 때는 한 번에 이동하지 않고 화면 단위로 복제 후 검증한다.
-6. `database/migrations`에 사용자, 선호도, 퀘스트, 뱃지, 수첩 기준 스키마를 추가한다.
-7. 파트너와 리워드 기능은 MVP 이후 확장 단계로 남기되, 디렉토리와 모델 경계는 유지한다.
+6. `database/migrations`에 사용자, 선호도, 퀘스트, 뱃지, 수첩 기준 PostgreSQL 스키마를 추가한다.
+7. 현재 SQLite repository와 앱 서버 인메모리 캐시를 PostgreSQL/Redis 어댑터로 교체한다.
+8. 파트너와 리워드 기능은 MVP 이후 확장 단계로 남기되, 디렉토리와 모델 경계는 유지한다.
 
 ## 검수 기준
 
 - 기존 루트 프로토타입 파일이 이동되거나 삭제되지 않아야 한다.
 - 새 구현은 브라우저에서 secret 값을 직접 사용하지 않아야 한다.
-- OpenAPI 원본 응답 전체를 DB 마이그레이션 또는 seed 데이터에 넣지 않아야 한다.
+- OpenAPI 원본 응답 전체를 PostgreSQL 마이그레이션 또는 seed 데이터에 넣지 않아야 한다.
 - `services/app-api`의 테스트는 `uv` 기반 Python 3.11 환경에서 실행할 수 있어야 한다.
 - 화면에 OpenAPI 데이터가 표시되는 단계부터 공공누리 출처표시를 포함해야 한다.

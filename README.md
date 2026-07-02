@@ -59,7 +59,7 @@ MVP 단계에서는 뱃지, 모험 수첩, 꿈돌이 도감 같은 비금전 보
 - 기존 정적 MVP: 루트의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py`
 - baseline 분리 구현: `apps/user-web`, `services/web-gateway`, `services/app-api`
 
-baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, SQLite 관계형 저장소, 앱 서버 인메모리 캐시를 분리한다.
+baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, 저장소, 캐시 계층을 분리한다. 현재 로컬 baseline은 SQLite와 앱 서버 인메모리 캐시로 실행되지만, 목표 운영 데이터베이스는 PostgreSQL, 서버 캐시는 Redis로 확정한다.
 
 ```bash
 python3 scripts/run_baseline.py
@@ -80,7 +80,7 @@ node --check apps/user-web/public/service-worker.js
 
 - `infra/nginx/questbook-baseline.conf`: 정적 PWA 제공, gzip 압축, 보안 헤더, `/api` 프록시 예시
 - `infra/ncp/baseline-topology.yaml`: 설계서의 NCP VPC/subnet baseline 토폴로지
-- `scripts/backup_sqlite.py`: 로컬 baseline SQLite 백업 스크립트
+- `scripts/backup_sqlite.py`: PostgreSQL 전환 전 로컬 baseline SQLite 백업 스크립트
 
 기존 정적 MVP의 지도 페이지는 NAVER Maps Dynamic Map을 사용한다. 브라우저에는 `NAVER_MAPS_API_KEY_ID`만 전달하고, `NAVER_MAPS_API_KEY`는 로컬 서버의 Geocoding, Reverse Geocoding 프록시에서만 사용한다.
 

@@ -18,11 +18,11 @@ network:
     - name: app-subnet
       cidr: 10.30.20.0/24
       publicIngress: false
-      role: Python app API, TourAPI/NAVER/Gemini adapters, in-memory cache
+      role: Python app API, TourAPI/NAVER/Gemini adapters, Redis client
     - name: data-subnet
       cidr: 10.30.30.0/24
       publicIngress: false
-      role: Managed relational database and future Redis cache
+      role: Managed PostgreSQL and Redis cache
     - name: nat-gateway-subnet
       cidr: 10.30.250.0/24
       publicIngress: restricted
@@ -33,11 +33,11 @@ servers:
     expandsWhen: concurrent users exceed 100 or web CPU remains above 70 percent
   app:
     initialCount: 1
-    cache: app-memory
+    cache: redis
     expandsWhen: API p95 exceeds 1s or app CPU remains above 70 percent
 database:
   type: managed-relational
-  engineDecision: deferred
+  engine: postgresql
   schemas:
     - auth
     - user
@@ -45,6 +45,10 @@ database:
     - reward
     - note
     - partner
+cache:
+  type: redis
+  tourApiCacheTtlSeconds: 1800
+  persistentTourApiRawStorage: forbidden
 security:
   publicEntrypoint: load-balancer-only
   browserSecrets: forbidden
