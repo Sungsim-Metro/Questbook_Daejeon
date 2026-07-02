@@ -11,16 +11,16 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   nickname TEXT NOT NULL,
   avatar TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  last_active_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL,
+  last_active_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS preferences (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  categories_json TEXT NOT NULL,
+  categories_json JSONB NOT NULL,
   distance_range_meters INTEGER NOT NULL,
   pace TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS level_progress (
@@ -38,18 +38,18 @@ CREATE TABLE IF NOT EXISTS user_accounts (
   provider_user_id TEXT NOT NULL,
   email TEXT,
   display_name TEXT,
-  created_at TEXT NOT NULL,
-  last_login_at TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  last_login_at TIMESTAMPTZ NOT NULL,
   UNIQUE(provider, provider_user_id)
 );
 
 CREATE TABLE IF NOT EXISTS user_consents (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  age_confirmed INTEGER NOT NULL,
-  privacy_consent INTEGER NOT NULL,
-  location_consent INTEGER NOT NULL,
+  age_confirmed BOOLEAN NOT NULL,
+  privacy_consent BOOLEAN NOT NULL,
+  location_consent BOOLEAN NOT NULL,
   consent_version TEXT NOT NULL,
-  consented_at TEXT NOT NULL
+  consented_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS badge_definitions (
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS user_badges (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   badge_definition_id TEXT NOT NULL REFERENCES badge_definitions(id),
   progress_xp INTEGER NOT NULL,
-  earned_at TEXT,
+  earned_at TIMESTAMPTZ,
   UNIQUE(user_id, badge_definition_id)
 );
 
@@ -86,10 +86,10 @@ CREATE TABLE IF NOT EXISTS reusable_quests (
   source TEXT NOT NULL,
   review_status TEXT NOT NULL,
   created_for_user_id TEXT NOT NULL REFERENCES users(id),
-  is_reusable INTEGER NOT NULL,
+  is_reusable BOOLEAN NOT NULL,
   reuse_count INTEGER NOT NULL,
   completion_count INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
   UNIQUE(place_content_id, category_code, type)
 );
 
@@ -98,10 +98,10 @@ CREATE TABLE IF NOT EXISTS user_quest_instances (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   reusable_quest_id TEXT NOT NULL REFERENCES reusable_quests(id),
   status TEXT NOT NULL,
-  recommended_at TEXT NOT NULL,
-  accepted_at TEXT,
-  expires_at TEXT NOT NULL,
-  completed_at TEXT
+  recommended_at TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_quest_instances_user_status
@@ -112,9 +112,9 @@ CREATE TABLE IF NOT EXISTS quest_completions (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_quest_instance_id TEXT NOT NULL REFERENCES user_quest_instances(id),
   reusable_quest_id TEXT NOT NULL REFERENCES reusable_quests(id),
-  completed_at TEXT NOT NULL,
+  completed_at TIMESTAMPTZ NOT NULL,
   earned_xp INTEGER NOT NULL,
-  verification_result_json TEXT NOT NULL,
+  verification_result_json JSONB NOT NULL,
   photo_ref TEXT,
   note_id TEXT
 );
@@ -132,10 +132,10 @@ CREATE TABLE IF NOT EXISTS adventure_notes (
   quest_completion_id TEXT NOT NULL REFERENCES quest_completions(id),
   place_name TEXT NOT NULL,
   summary TEXT NOT NULL,
-  badges_json TEXT NOT NULL,
+  badges_json JSONB NOT NULL,
   distance_km DOUBLE PRECISION NOT NULL,
   share_image_url TEXT,
-  created_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_adventure_notes_user_created
@@ -158,12 +158,12 @@ CREATE TABLE IF NOT EXISTS user_ggumdori (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   variant_id TEXT NOT NULL REFERENCES ggumdori_variants(id),
-  unlocked_at TEXT NOT NULL,
+  unlocked_at TIMESTAMPTZ NOT NULL,
   UNIQUE(user_id, variant_id)
 );
 
 CREATE TABLE IF NOT EXISTS ggumdori_selection (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   selected_variant_id TEXT NOT NULL REFERENCES ggumdori_variants(id),
-  updated_at TEXT NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL
 );

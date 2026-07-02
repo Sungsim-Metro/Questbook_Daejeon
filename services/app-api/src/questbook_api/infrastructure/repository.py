@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 from threading import RLock
 from typing import Any
 from uuid import uuid4
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 
 def now_iso() -> str:
@@ -31,6 +31,33 @@ def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:16]}"
 
 
+def iso_dict_row(cursor: psycopg.Cursor[Any]) -> Any:
+    """
+    입력: psycopg 커서.
+    출력: row를 dict로 만들며 datetime을 ISO-8601 문자열로 바꾸는 변환 함수.
+    역할: 저장소 밖으로는 기존 계약대로 문자열 시각만 내보낸다.
+    호출 예시: connection = psycopg.connect(url, row_factory=iso_dict_row)
+    """
+    # 변수 의미: 기본 dict 변환 함수다.
+    base_factory = dict_row(cursor)
+
+    def convert(record: Any) -> dict[str, Any]:
+        """
+        입력: psycopg row record.
+        출력: datetime 값이 문자열로 정규화된 dict row.
+        역할: TIMESTAMPTZ 컬럼을 API 직렬화 가능한 값으로 바꾼다.
+        호출 예시: row = convert(record)
+        """
+        # 변수 의미: dict로 변환된 row다.
+        row = base_factory(record)
+        return {
+            key: value.isoformat() if isinstance(value, datetime) else value
+            for key, value in row.items()
+        }
+
+    return convert
+
+
 # 변수 의미: baseline PostgreSQL 스키마 생성 SQL이다.
 SCHEMA_SQL = """
 -- Questbook baseline PostgreSQL 스키마를 정의한다.
@@ -46,16 +73,16 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   nickname TEXT NOT NULL,
   avatar TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  last_active_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL,
+  last_active_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS preferences (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  categories_json TEXT NOT NULL,
+  categories_json JSONB NOT NULL,
   distance_range_meters INTEGER NOT NULL,
   pace TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS level_progress (
@@ -73,18 +100,18 @@ CREATE TABLE IF NOT EXISTS user_accounts (
   provider_user_id TEXT NOT NULL,
   email TEXT,
   display_name TEXT,
-  created_at TEXT NOT NULL,
-  last_login_at TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  last_login_at TIMESTAMPTZ NOT NULL,
   UNIQUE(provider, provider_user_id)
 );
 
 CREATE TABLE IF NOT EXISTS user_consents (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  age_confirmed INTEGER NOT NULL,
-  privacy_consent INTEGER NOT NULL,
-  location_consent INTEGER NOT NULL,
+  age_confirmed BOOLEAN NOT NULL,
+  privacy_consent BOOLEAN NOT NULL,
+  location_consent BOOLEAN NOT NULL,
   consent_version TEXT NOT NULL,
-  consented_at TEXT NOT NULL
+  consented_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS badge_definitions (
@@ -104,7 +131,7 @@ CREATE TABLE IF NOT EXISTS user_badges (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   badge_definition_id TEXT NOT NULL REFERENCES badge_definitions(id),
   progress_xp INTEGER NOT NULL,
-  earned_at TEXT,
+  earned_at TIMESTAMPTZ,
   UNIQUE(user_id, badge_definition_id)
 );
 
@@ -121,10 +148,10 @@ CREATE TABLE IF NOT EXISTS reusable_quests (
   source TEXT NOT NULL,
   review_status TEXT NOT NULL,
   created_for_user_id TEXT NOT NULL REFERENCES users(id),
-  is_reusable INTEGER NOT NULL,
+  is_reusable BOOLEAN NOT NULL,
   reuse_count INTEGER NOT NULL,
   completion_count INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
   UNIQUE(place_content_id, category_code, type)
 );
 
@@ -133,10 +160,10 @@ CREATE TABLE IF NOT EXISTS user_quest_instances (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   reusable_quest_id TEXT NOT NULL REFERENCES reusable_quests(id),
   status TEXT NOT NULL,
-  recommended_at TEXT NOT NULL,
-  accepted_at TEXT,
-  expires_at TEXT NOT NULL,
-  completed_at TEXT
+  recommended_at TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_quest_instances_user_status
@@ -147,9 +174,9 @@ CREATE TABLE IF NOT EXISTS quest_completions (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_quest_instance_id TEXT NOT NULL REFERENCES user_quest_instances(id),
   reusable_quest_id TEXT NOT NULL REFERENCES reusable_quests(id),
-  completed_at TEXT NOT NULL,
+  completed_at TIMESTAMPTZ NOT NULL,
   earned_xp INTEGER NOT NULL,
-  verification_result_json TEXT NOT NULL,
+  verification_result_json JSONB NOT NULL,
   photo_ref TEXT,
   note_id TEXT
 );
@@ -167,10 +194,10 @@ CREATE TABLE IF NOT EXISTS adventure_notes (
   quest_completion_id TEXT NOT NULL REFERENCES quest_completions(id),
   place_name TEXT NOT NULL,
   summary TEXT NOT NULL,
-  badges_json TEXT NOT NULL,
+  badges_json JSONB NOT NULL,
   distance_km DOUBLE PRECISION NOT NULL,
   share_image_url TEXT,
-  created_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_adventure_notes_user_created
@@ -193,14 +220,14 @@ CREATE TABLE IF NOT EXISTS user_ggumdori (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   variant_id TEXT NOT NULL REFERENCES ggumdori_variants(id),
-  unlocked_at TEXT NOT NULL,
+  unlocked_at TIMESTAMPTZ NOT NULL,
   UNIQUE(user_id, variant_id)
 );
 
 CREATE TABLE IF NOT EXISTS ggumdori_selection (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   selected_variant_id TEXT NOT NULL REFERENCES ggumdori_variants(id),
-  updated_at TEXT NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL
 );
 """
 
@@ -264,7 +291,7 @@ class QuestbookRepository:
         # 변수 의미: DB 접근 동시성을 보호하는 잠금이다.
         self._lock = RLock()
         # 변수 의미: PostgreSQL 연결 객체다.
-        self._connection = psycopg.connect(database_url, row_factory=dict_row, autocommit=True)
+        self._connection = psycopg.connect(database_url, row_factory=iso_dict_row, autocommit=True)
 
     def initialize(self) -> None:
         """
@@ -358,7 +385,7 @@ class QuestbookRepository:
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (user_id) DO NOTHING
                 """,
-                (user_id, json.dumps(["nature", "science", "downtown"], ensure_ascii=False), 5000, "보통", current_time),
+                (user_id, Jsonb(["nature", "science", "downtown"]), 5000, "보통", current_time),
             )
             self._connection.execute(
                 """
@@ -449,9 +476,9 @@ class QuestbookRepository:
                 """,
                 (
                     user_id,
-                    1 if age_confirmed else 0,
-                    1 if privacy_consent else 0,
-                    1 if location_consent else 0,
+                    age_confirmed,
+                    privacy_consent,
+                    location_consent,
                     consent_version,
                     consented_at,
                 ),
@@ -537,7 +564,7 @@ class QuestbookRepository:
                     "progressPercent": min(100, round(row["current_xp"] / row["next_level_required_xp"] * 100)),
                 },
                 "preference": {
-                    "categories": json.loads(row["categories_json"]),
+                    "categories": row["categories_json"],
                     "distanceRangeMeters": row["distance_range_meters"],
                     "pace": row["pace"],
                 },
@@ -604,7 +631,7 @@ class QuestbookRepository:
                     quest_data["source"],
                     "approved",
                     user_id,
-                    1,
+                    True,
                     0,
                     0,
                     created_at,
@@ -746,7 +773,7 @@ class QuestbookRepository:
                     instance["reusable_quest_id"],
                     completed_at,
                     earned_xp,
-                    json.dumps(verification_result, ensure_ascii=False),
+                    Jsonb(verification_result),
                     None,
                     note_id,
                 ),
@@ -779,7 +806,7 @@ class QuestbookRepository:
                     completion_id,
                     instance["place_name"],
                     f"{instance['title']} 완료로 {earned_xp} XP를 획득했습니다.",
-                    json.dumps(badge_names, ensure_ascii=False),
+                    Jsonb(badge_names),
                     distance_km,
                     None,
                     completed_at,
@@ -1005,7 +1032,7 @@ class QuestbookRepository:
                     "questCompletionId": row["quest_completion_id"],
                     "placeName": row["place_name"],
                     "summary": row["summary"],
-                    "badges": json.loads(row["badges_json"]),
+                    "badges": row["badges_json"],
                     "distanceKm": row["distance_km"],
                     "shareImageUrl": row["share_image_url"],
                     "createdAt": row["created_at"],
