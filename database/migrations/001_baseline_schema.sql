@@ -1,5 +1,4 @@
--- Questbook baseline 관계형 데이터베이스 스키마를 정의한다.
-PRAGMA foreign_keys = ON;
+-- Questbook baseline PostgreSQL 스키마를 정의한다.
 
 CREATE TABLE IF NOT EXISTS categories (
   code TEXT PRIMARY KEY,
@@ -134,7 +133,7 @@ CREATE TABLE IF NOT EXISTS adventure_notes (
   place_name TEXT NOT NULL,
   summary TEXT NOT NULL,
   badges_json TEXT NOT NULL,
-  distance_km REAL NOT NULL,
+  distance_km DOUBLE PRECISION NOT NULL,
   share_image_url TEXT,
   created_at TEXT NOT NULL
 );
