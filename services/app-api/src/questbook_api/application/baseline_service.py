@@ -6,7 +6,7 @@ from threading import Lock
 from typing import Any
 
 from questbook_api.domain.models import QuestTemplate, TourPlaceCandidate
-from questbook_api.infrastructure.cache import TourPlaceMemoryCache, utc_now
+from questbook_api.infrastructure.cache import TourPlaceRedisCache, utc_now
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters
 
@@ -55,7 +55,7 @@ class BaselineQuestbookService:
     def __init__(
         self,
         repository: QuestbookRepository,
-        cache: TourPlaceMemoryCache,
+        cache: TourPlaceRedisCache,
         tour_client: TourApiClient,
     ) -> None:
         """
