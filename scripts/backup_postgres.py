@@ -55,12 +55,16 @@ def main() -> int:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     # 변수 의미: 백업 파일 경로다.
     backup_path = BACKUP_DIR / f"questbook-{timestamp}.dump"
-    # 변수 의미: pg_dump 실행 결과다.
-    result = subprocess.run(
-        ["pg_dump", "--format=custom", f"--file={backup_path}"],
-        check=False,
-        env=pg_env_from_url(database_url),
-    )
+    try:
+        # 변수 의미: pg_dump 실행 결과다.
+        result = subprocess.run(
+            ["pg_dump", "--format=custom", f"--file={backup_path}"],
+            check=False,
+            env=pg_env_from_url(database_url),
+        )
+    except FileNotFoundError:
+        print("pg_dump failed; check that PostgreSQL is running and pg_dump is installed", file=sys.stderr)
+        return 1
     if result.returncode != 0:
         print("pg_dump failed; check that PostgreSQL is running and pg_dump is installed", file=sys.stderr)
         return result.returncode
