@@ -1,4 +1,4 @@
-# Questbook_Dajeon
+# Questbook_Daejeon
 
 대전을 탐험하며 뱃지를 모으고, 뱃지 성향에 따라 꿈돌이 도감을 해금하는 위치 기반 관광 퀘스트 게임
 
