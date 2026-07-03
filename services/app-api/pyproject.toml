@@ -11,6 +11,13 @@ dependencies = [
 [project.scripts]
 questbook-api = "questbook_api.server:main"
 
+[build-system]
+requires = ["uv_build>=0.8,<2"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "questbook_api"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
