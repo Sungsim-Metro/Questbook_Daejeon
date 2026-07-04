@@ -298,8 +298,11 @@ class BaselineQuestbookService:
         except (TypeError, ValueError):
             return {"method": instance["verification_type"], "decision": "rejected", "reason": "invalid_location"}, 0.0
 
-        # 변수 의미: 브라우저 위치 정확도 미터 값이다.
-        accuracy_meters = float(payload.get("accuracyMeters", payload.get("accuracy", 999)))
+        try:
+            # 변수 의미: 브라우저 위치 정확도 미터 값이다.
+            accuracy_meters = float(payload.get("accuracyMeters", payload.get("accuracy", 999)))
+        except (TypeError, ValueError):
+            accuracy_meters = 999.0
         if accuracy_meters > 80:
             return {
                 "method": instance["verification_type"],
@@ -332,59 +335,70 @@ class BaselineQuestbookService:
 
         # 변수 의미: 퀘스트 인증 방식이다.
         verification_type = str(instance["verification_type"])
+        # 변수 의미: 임시 GPS-only 판정에서 완료를 막지 않는 보조 인증 결과 목록이다.
+        optional_checks: list[dict[str, Any]] = []
         if verification_type == "receipt_or_sign_photo":
             # 변수 의미: 소비형 인증 사진 첨부 여부다.
             photo_attached = bool(payload.get("photoAttached"))
             # 변수 의미: OCR 또는 사용자가 확인한 상호명 텍스트다.
             ocr_text = str(payload.get("ocrText") or payload.get("storeName") or "")
-            if not photo_attached:
-                return {
-                    "method": verification_type,
-                    "decision": "needs_review",
-                    "reason": "photo_required",
-                    "distanceMeters": round(distance_meters, 1),
-                }, round(distance_meters / 1000, 3)
-            if not self._is_store_name_match(instance["place_name"], ocr_text):
-                return {
-                    "method": verification_type,
-                    "decision": "needs_review",
-                    "reason": "store_name_not_matched",
-                    "ocrMatchedStore": False,
-                    "distanceMeters": round(distance_meters, 1),
-                }, round(distance_meters / 1000, 3)
-            return {
-                "method": verification_type,
-                "decision": "approved",
-                "ocrMatchedStore": True,
-                "matchScore": 1.0,
-                "distanceMeters": round(distance_meters, 1),
-                "allowedRadiusMeters": allowed_radius_meters,
-                "accuracyMeters": accuracy_meters,
-            }, round(distance_meters / 1000, 3)
+            # 변수 의미: OCR 또는 상호명이 기대 장소명과 일치하는지 여부다.
+            ocr_matched_store = self._is_store_name_match(instance["place_name"], ocr_text)
+            optional_checks.append(
+                {
+                    "name": "photo_attached",
+                    "passed": photo_attached,
+                    "reason": "" if photo_attached else "photo_required",
+                    "ignoredForDecision": True,
+                }
+            )
+            optional_checks.append(
+                {
+                    "name": "store_name_match",
+                    "passed": ocr_matched_store,
+                    "reason": "" if ocr_matched_store else "store_name_not_matched",
+                    "ocrMatchedStore": ocr_matched_store,
+                    "matchScore": 1.0 if ocr_matched_store else 0.0,
+                    "ignoredForDecision": True,
+                }
+            )
 
-        if verification_type == "time_window_photo" and not bool(payload.get("photoAttached")):
-            return {
-                "method": verification_type,
-                "decision": "needs_review",
-                "reason": "photo_required",
-                "distanceMeters": round(distance_meters, 1),
-            }, round(distance_meters / 1000, 3)
+        if verification_type == "time_window_photo":
+            # 변수 의미: 활동형 시간대 사진 첨부 여부다.
+            photo_attached = bool(payload.get("photoAttached"))
+            optional_checks.append(
+                {
+                    "name": "photo_attached",
+                    "passed": photo_attached,
+                    "reason": "" if photo_attached else "photo_required",
+                    "ignoredForDecision": True,
+                }
+            )
 
-        if verification_type == "checklist" and not bool(payload.get("checklistComplete", True)):
-            return {
-                "method": verification_type,
-                "decision": "rejected",
-                "reason": "checklist_incomplete",
-                "distanceMeters": round(distance_meters, 1),
-            }, round(distance_meters / 1000, 3)
+        if verification_type == "checklist":
+            # 변수 의미: 사용자가 제출한 체크리스트 완료 여부다.
+            checklist_complete = bool(payload.get("checklistComplete", True))
+            optional_checks.append(
+                {
+                    "name": "checklist_complete",
+                    "passed": checklist_complete,
+                    "reason": "" if checklist_complete else "checklist_incomplete",
+                    "ignoredForDecision": True,
+                }
+            )
 
-        return {
+        # 변수 의미: 임시 GPS-only 완료 승인 결과다.
+        verification_result: dict[str, Any] = {
             "method": instance["verification_type"],
             "decision": "approved",
+            "decisionBasis": "gps_only_temporary",
             "distanceMeters": round(distance_meters, 1),
             "allowedRadiusMeters": allowed_radius_meters,
             "accuracyMeters": accuracy_meters,
-        }, round(distance_meters / 1000, 3)
+        }
+        if optional_checks:
+            verification_result["optionalChecks"] = optional_checks
+        return verification_result, round(distance_meters / 1000, 3)
 
     def _refetch_place_for_completion(
         self,

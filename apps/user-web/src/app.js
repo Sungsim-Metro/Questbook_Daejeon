@@ -189,6 +189,7 @@ const state = {
   notes: [...FALLBACK_NOTES],
   ggumdori: [...FALLBACK_GGUMDORI],
   questStatuses: readStoredQuestStatuses(),
+  pendingQuestActions: {},
   selectedGgumdoriId: readSelectedGgumdoriId(),
   selectedMapInstanceId: FALLBACK_RECOMMENDATIONS[0]?.instanceId || "",
   accessToken: readStorageValue(ACCESS_TOKEN_KEY),
@@ -1656,6 +1657,12 @@ function createRecommendationCard(recommendation) {
   // 현재 추천 항목의 진행 상태입니다.
   const questStatus = getQuestStatus(recommendation.instanceId, recommendation.status);
 
+  // 현재 추천 항목에서 처리 중인 액션입니다.
+  const pendingAction = state.pendingQuestActions[recommendation.instanceId] || "";
+
+  // 현재 추천 항목의 버튼을 잠글지 여부입니다.
+  const isActionPending = Boolean(pendingAction);
+
   // 추천 카드를 감싸는 요소입니다.
   const card = createElement("article", "recommendation-card");
 
@@ -1687,8 +1694,19 @@ function createRecommendationCard(recommendation) {
 
   acceptButton.type = "button";
   completeButton.type = "button";
-  acceptButton.disabled = questStatus === "accepted" || questStatus === "in_progress" || questStatus === "completed";
-  completeButton.disabled = questStatus === "completed" || questStatus === "done";
+  acceptButton.disabled =
+    isActionPending ||
+    questStatus === "accepted" ||
+    questStatus === "in_progress" ||
+    questStatus === "completed" ||
+    questStatus === "done";
+  completeButton.disabled = isActionPending || questStatus === "completed" || questStatus === "done";
+  acceptButton.textContent = pendingAction === "accept" ? "수락 중" : "수락";
+  completeButton.textContent = pendingAction === "complete" ? "확인 중" : "완료";
+  acceptButton.classList.toggle("is-pending", pendingAction === "accept");
+  completeButton.classList.toggle("is-pending", pendingAction === "complete");
+  acceptButton.setAttribute("aria-busy", pendingAction === "accept" ? "true" : "false");
+  completeButton.setAttribute("aria-busy", pendingAction === "complete" ? "true" : "false");
   acceptButton.addEventListener("click", () => handleQuestAction(recommendation.instanceId, "accept"));
   completeButton.addEventListener("click", () => handleQuestAction(recommendation.instanceId, "complete"));
   actions.append(acceptButton, completeButton);
@@ -2394,18 +2412,15 @@ function getActionFailureMessage(action, actionResult) {
   // 완료 실패 사유별 안내 문구입니다.
   const completionMessages = {
     invalid_location: "현재 위치를 확인할 수 없어 완료하지 않았습니다.",
-    low_gps_accuracy: "GPS 정확도가 낮아 완료하지 않았습니다.",
+    low_gps_accuracy: "GPS 정확도가 80m를 넘어 완료하지 않았습니다.",
     place_cache_missing: "장소 좌표를 다시 확인하지 못해 완료하지 않았습니다.",
-    outside_radius: "장소 반경 밖으로 판정되어 완료하지 않았습니다.",
-    photo_required: "사진 인증이 필요한 퀘스트입니다. 사진 업로드 UI 연결 후 완료할 수 있습니다.",
-    store_name_not_matched: "영수증 또는 간판 상호명이 일치하지 않아 완료하지 않았습니다.",
-    checklist_incomplete: "체크리스트가 완료되지 않아 퀘스트를 완료하지 않았습니다.",
+    outside_radius: "장소 반경 50m 밖으로 판정되어 완료하지 않았습니다.",
     already_completed: "이미 완료된 퀘스트입니다.",
     quest_not_found: "퀘스트를 찾을 수 없습니다.",
   };
 
   if (action === "complete") {
-    return completionMessages[reason] || "완료 조건을 충족하지 못해 상태를 변경하지 않았습니다.";
+    return completionMessages[reason] || "GPS 완료 기준을 충족하지 못해 상태를 변경하지 않았습니다.";
   }
 
   return "퀘스트 요청을 처리하지 못했습니다.";
@@ -2431,7 +2446,7 @@ function getRequestFailureMessage(error, action) {
   }
 
   if (action === "complete") {
-    return "완료 요청에 실패해 상태를 변경하지 않았습니다.";
+    return "GPS 완료 요청에 실패해 상태를 변경하지 않았습니다.";
   }
 
   return "요청에 실패해 상태를 변경하지 않았습니다.";
@@ -2529,6 +2544,9 @@ async function handleQuestAction(instanceId, action) {
   // 액션 대상 추천 항목입니다.
   const recommendation = state.recommendations.find((item) => item.instanceId === instanceId);
 
+  state.pendingQuestActions[instanceId] = action;
+  renderAll();
+
   try {
     // API 요청 옵션입니다.
     const requestOptions = { method: "POST" };
@@ -2545,7 +2563,6 @@ async function handleQuestAction(instanceId, action) {
     if (action === "complete" && actionResult.ok === false) {
       state.apiHealthy = true;
       updateSystemStatus(true, getActionFailureMessage(action, actionResult));
-      renderAll();
       return;
     }
 
@@ -2560,7 +2577,7 @@ async function handleQuestAction(instanceId, action) {
       await Promise.allSettled([loadUser(), loadBadges(), loadNotes(), loadGgumdori()]);
     }
 
-    updateSystemStatus(true, action === "complete" ? "완료 처리됨" : "퀘스트 수락됨");
+    updateSystemStatus(true, action === "complete" ? "GPS 기준 완료됨" : "퀘스트 수락됨");
   } catch (error) {
     if (!isUnauthorizedError(error)) {
       // 위치 권한 실패는 API 연결 상태를 바꾸지 않는다.
@@ -2571,9 +2588,10 @@ async function handleQuestAction(instanceId, action) {
       state.apiHealthy = isLocationError ? state.apiHealthy : false;
       updateSystemStatus(state.apiHealthy, getRequestFailureMessage(error, action));
     }
+  } finally {
+    delete state.pendingQuestActions[instanceId];
+    renderAll();
   }
-
-  renderAll();
 }
 
 /**

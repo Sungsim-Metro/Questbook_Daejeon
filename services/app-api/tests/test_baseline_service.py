@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 from threading import Barrier, Thread
+from typing import Any
 import unittest
 
 
@@ -61,6 +62,24 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
         호출 예시: self.tearDown()
         """
         self.repository.close()
+
+    def _prepare_accepted_recommendation(self, category_key: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        """
+        입력: 추천받을 카테고리 키.
+        출력: 수락된 인스턴스 ID, 추천 장소, 추천 항목.
+        역할: 완료 테스트에서 같은 추천·수락 준비 절차를 재사용한다.
+        호출 예시: instance_id, place, recommendation = self._prepare_accepted_recommendation("market")
+        """
+        # 변수 의미: 지정 카테고리의 추천 응답이다.
+        recommendations = self.service.get_recommendations("demo-user", 36.327, 127.427, category_key, 5000)
+        # 변수 의미: 완료 테스트에 사용할 첫 번째 추천 항목이다.
+        recommendation = recommendations["recommendations"][0]
+        # 변수 의미: 추천된 퀘스트 인스턴스 ID다.
+        instance_id = recommendation["quest"]["instanceId"]
+        # 변수 의미: 추천 장소 좌표와 표시 정보다.
+        place = recommendation["place"]
+        self.service.accept_quest("demo-user", instance_id)
+        return instance_id, place, recommendation
 
     def test_recommendations_use_user_scoped_cache(self) -> None:
         """
@@ -148,6 +167,153 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
         self.assertGreaterEqual(self.repository.get_user("demo-user")["level"]["totalXp"], 60)
         self.assertTrue(any(badge["categoryCode"] == "market" and badge["earned"] for badge in self.repository.list_badges("demo-user")))
         self.assertEqual(len(self.repository.list_notes("demo-user")), 1)
+
+    def test_market_completion_uses_gps_when_photo_is_missing(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 소비형 퀘스트에서 사진이 없어도 GPS 반경 안이면 임시 완료되는지 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_market_completion_uses_gps_when_photo_is_missing
+        """
+        # 변수 의미: 수락된 시장 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("market")
+
+        # 변수 의미: 사진 없이 요청한 GPS-only 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+                "photoAttached": False,
+                "storeName": "",
+            },
+        )
+
+        self.assertTrue(completion["ok"])
+        self.assertEqual(completion["verification"]["decision"], "approved")
+        self.assertEqual(completion["verification"]["decisionBasis"], "gps_only_temporary")
+        # 변수 의미: 보조 검증 결과를 이름으로 조회하기 위한 맵이다.
+        optional_checks = {check["name"]: check for check in completion["verification"]["optionalChecks"]}
+        self.assertFalse(optional_checks["photo_attached"]["passed"])
+        self.assertTrue(optional_checks["photo_attached"]["ignoredForDecision"])
+
+    def test_market_completion_records_ignored_ocr_mismatch(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: OCR 상호명이 틀려도 GPS 반경 안이면 성공하고 보조 검증 실패를 기록하는지 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_market_completion_records_ignored_ocr_mismatch
+        """
+        # 변수 의미: 수락된 시장 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("market")
+
+        # 변수 의미: 잘못된 OCR 텍스트를 포함한 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+                "photoAttached": True,
+                "ocrText": "다른 상점",
+            },
+        )
+
+        self.assertTrue(completion["ok"])
+        # 변수 의미: 보조 검증 결과를 이름으로 조회하기 위한 맵이다.
+        optional_checks = {check["name"]: check for check in completion["verification"]["optionalChecks"]}
+        self.assertFalse(optional_checks["store_name_match"]["passed"])
+        self.assertEqual(optional_checks["store_name_match"]["reason"], "store_name_not_matched")
+        self.assertTrue(optional_checks["store_name_match"]["ignoredForDecision"])
+
+    def test_checklist_completion_uses_gps_when_checklist_is_incomplete(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 체크리스트 퀘스트에서 체크리스트가 미완료여도 GPS 반경 안이면 임시 완료되는지 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_checklist_completion_uses_gps_when_checklist_is_incomplete
+        """
+        # 변수 의미: 수락된 과학 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("science")
+
+        # 변수 의미: 체크리스트 미완료 상태의 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+                "checklistComplete": False,
+            },
+        )
+
+        self.assertTrue(completion["ok"])
+        # 변수 의미: 보조 검증 결과를 이름으로 조회하기 위한 맵이다.
+        optional_checks = {check["name"]: check for check in completion["verification"]["optionalChecks"]}
+        self.assertFalse(optional_checks["checklist_complete"]["passed"])
+        self.assertEqual(optional_checks["checklist_complete"]["reason"], "checklist_incomplete")
+        self.assertTrue(optional_checks["checklist_complete"]["ignoredForDecision"])
+
+    def test_time_window_completion_uses_gps_when_photo_is_missing(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 시간대 사진 퀘스트에서 사진이 없어도 GPS 반경 안이면 임시 완료되는지 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_time_window_completion_uses_gps_when_photo_is_missing
+        """
+        # 변수 의미: 수락된 야경 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("nightview")
+
+        # 변수 의미: 사진 없이 요청한 시간대 퀘스트 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+                "photoAttached": False,
+            },
+        )
+
+        self.assertTrue(completion["ok"])
+        # 변수 의미: 보조 검증 결과를 이름으로 조회하기 위한 맵이다.
+        optional_checks = {check["name"]: check for check in completion["verification"]["optionalChecks"]}
+        self.assertFalse(optional_checks["photo_attached"]["passed"])
+        self.assertEqual(optional_checks["photo_attached"]["reason"], "photo_required")
+        self.assertTrue(optional_checks["photo_attached"]["ignoredForDecision"])
+
+    def test_gps_failure_conditions_still_block_completion(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: GPS 정확도와 반경 실패가 여전히 완료를 막는지 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_gps_failure_conditions_still_block_completion
+        """
+        # 변수 의미: 수락된 자연 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("nature")
+
+        # 변수 의미: 정확도가 낮은 GPS 완료 요청 결과다.
+        low_accuracy_result = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {"latitude": place["latitude"], "longitude": place["longitude"], "accuracyMeters": 120},
+        )
+        self.assertFalse(low_accuracy_result["ok"])
+        self.assertEqual(low_accuracy_result["verification"]["reason"], "low_gps_accuracy")
+
+        # 변수 의미: 반경 밖 좌표로 요청한 완료 결과다.
+        outside_radius_result = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {"latitude": 0, "longitude": 0, "accuracyMeters": 10},
+        )
+        self.assertFalse(outside_radius_result["ok"])
+        self.assertEqual(outside_radius_result["verification"]["reason"], "outside_radius")
 
     def test_concurrent_completion_grants_xp_only_once(self) -> None:
         """

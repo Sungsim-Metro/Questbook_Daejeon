@@ -519,6 +519,23 @@ p {
   white-space: nowrap;
 }
 
+.card-action {
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.card-action:active:not([disabled]) {
+  transform: translateY(1px);
+}
+
+.card-action.is-pending,
+.card-action[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.82;
+}
+
 .primary-action,
 .card-action--primary {
   color: #fff;
@@ -560,6 +577,12 @@ p {
   cursor: not-allowed;
   background: #eee6d5;
   box-shadow: none;
+}
+
+.card-action.is-pending[disabled],
+.card-action[aria-busy="true"][disabled] {
+  cursor: progress;
+  opacity: 0.82;
 }
 
 .quick-grid {
