@@ -84,12 +84,18 @@ body {
 }
 
 /* ── 픽셀 카드 공통 ── */
-.hero-panel .soft-panel,
+.hero-panel,
+.soft-panel,
 .metric-card,
 .feature-card,
 .quest-card,
+.note-card,
 .recommend-card,
-.badge-card {
+.badge-card,
+.map-tools,
+.map-detail-card,
+.map-place-button,
+.empty-note {
   border-radius: 0 !important;
   border: 3px solid var(--px-line) !important;
   background: #fff !important;
@@ -133,6 +139,144 @@ body {
   border: 2px solid var(--px-line);
   background: var(--px-yellow);
   color: var(--px-ink);
+}
+
+.avatar,
+.card-icon,
+.quest-icon,
+.note-icon,
+.badge-symbol,
+.map-badge {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: var(--px-blue-soft);
+}
+
+/* 필터 칩 */
+.chip-button {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  color: var(--px-ink);
+  box-shadow: 2px 2px 0 rgba(27, 27, 27, .85);
+  font-size: 12px;
+}
+
+.chip-button.is-active {
+  border-color: var(--px-line);
+  background: var(--px-blue);
+  color: #fff;
+}
+
+.text-button {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  box-shadow: 2px 2px 0 rgba(27, 27, 27, .85);
+}
+
+/* ── 지도 화면 ── */
+.map-provider-pill {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  font-size: 11px;
+}
+
+.map-input {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  font-size: 13px;
+}
+
+.map-input:focus {
+  border-color: var(--px-blue);
+  box-shadow: 2px 2px 0 rgba(46, 139, 230, .5);
+}
+
+.map-action-button,
+.map-secondary-button {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  box-shadow: 2px 2px 0 rgba(27, 27, 27, .85);
+  font-size: 12px;
+}
+
+.map-action-button {
+  background: var(--px-blue);
+}
+
+.map-secondary-button {
+  background: #fff;
+  color: var(--px-ink);
+}
+
+.map-action-button:active,
+.map-secondary-button:active,
+.chip-button:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.map-shell {
+  border-radius: 0;
+  border: 3px solid var(--px-line);
+  box-shadow: var(--px-shadow);
+}
+
+.map-field span,
+.map-position-status {
+  font-size: 11px;
+}
+
+.map-place-button.is-selected {
+  border-color: var(--px-blue) !important;
+  background: var(--px-blue-soft) !important;
+}
+
+/* ── 뱃지 화면 ── */
+.badge-hero {
+  background: var(--px-blue);
+  border-bottom: 3px solid var(--px-line);
+}
+
+.featured-badge {
+  border-radius: 0;
+  border: 3px solid var(--px-line);
+  box-shadow: 5px 5px 0 rgba(27, 27, 27, .85);
+}
+
+.badge-hero-label {
+  font-size: 11px;
+  letter-spacing: .14em;
+}
+
+.badge-hero-title {
+  font-size: 24px;
+  text-shadow: 2px 2px 0 rgba(27, 27, 27, .5);
+}
+
+.stamp {
+  border-radius: 0 !important;
+}
+
+.stamp.is-done {
+  border: 2px solid var(--px-line);
+  background: #fff;
+}
+
+.stamp.is-empty {
+  border: 2px dashed #b3a887;
+}
+
+.badge-card.is-locked {
+  opacity: 1;
+  filter: none;
+  background: #efe9d8 !important;
+}
+
+.badge-card.is-locked .badge-symbol {
+  filter: grayscale(1) brightness(.7);
 }
 
 /* 진행 바 → 픽셀 EXP 바 */
