@@ -3,6 +3,8 @@
 작성일: 2026-07-03 · 구현: 사용자(태스크 1~3개씩) → Claude 검토
 전제: 앱 서버 기동 런북(`Todo/app-server-bringup-runbook.md`) 완료 후 운영 검증 가능. 코드 구현과 콘솔 준비는 그 전에 병행 가능.
 
+> **구현 반영 (2026-07-04)**: 실제 구현은 JWT-in-fragment 대신 **browser nonce + Redis 단회 `oauth_code` redeem**을 사용한다. 게이트웨이는 변경 없음이 아니라 upstream의 캐시·보안 헤더를 전달하도록 보완됐으며, wildcard CORS는 추가하지 않는다. 아래 계획의 오래된 JWT fragment 예시는 현재 구현 기준으로 폐기됐다.
+
 ## 목표
 
 demo-social 로그인과 나란히 **네이버·구글 계정으로 실제 로그인**을 제공한다.
@@ -27,13 +29,13 @@ Authorization Code 방식(서버 측 코드 교환, 시크릿은 앱 서버 `.en
 
 ## 주요 설계 결정
 
-게이트웨이 프록시(`gateway.py`)의 제약이 설계를 결정한다:
-`urlopen`이 3xx를 자동 추종하므로 **앱 API가 302를 응답하면 안 됨**. 따라서 리다이렉트 대신 JSON/HTML로 응답하고 브라우저가 이동한다.
-**게이트웨이는 수정하지 않는다** — state를 Redis 단회용으로만 관리해 쿠키·Set-Cookie 중계가 필요 없게 설계했다.
+게이트웨이 프록시(`gateway.py`)의 제약과 현재 구현은 다음을 따른다:
+`urlopen`이 3xx를 자동 추종하므로 **앱 API가 302를 응답하면 안 됨**. 따라서 시작은 JSON으로, 콜백은 HTML 브리지로 응답하고 브라우저가 이동한다.
+게이트웨이는 upstream의 `Cache-Control`, `Content-Security-Policy`, `Vary` 등 선택 헤더를 전달하고 wildcard CORS를 추가하지 않는다. state와 login code는 Redis 단회용으로 관리하며, callback HTML에 앱 JWT를 직접 싣지 않는다.
 
-1. **시작 흐름**: `POST /api/auth/{provider}/start` (body: 동의 3항목) → 서버가 state 발급 후 JSON `{authorizeUrl}` 반환 → **브라우저가 `location.href`로 이동** (302 없음)
-2. **state 검증(Redis 단회용)**: `secrets.token_urlsafe(32)` 값을 Redis에 단회용 저장(TTL 600초, key `oauth_state:{state}`, value에 provider·redirect_uri·동의 3항목 포함). 콜백에서 **GETDEL로 소비하며 존재 여부 확인** → 없으면(재사용·만료·위조) 거부. 이것이 OAuth 표준 CSRF 방어이며 게이트웨이 변경이 불필요하다. (쿠키 바인딩은 선택적 심화 방어로 범위 외)
-3. **콜백 흐름**: `GET /api/auth/{provider}/callback?code&state` → state 검증 → urllib로 토큰 교환 → 프로필 조회 → 사용자 find-or-create → JWT 발급 → **200 HTML 브리지 페이지** 응답: `location.replace("/#oauth_token=<JWT>")` 실행. app.js가 부팅 시 fragment에서 토큰을 꺼내 localStorage에 저장하고 fragment를 지운다 (localStorage 키 정의는 app.js 한 곳 유지). 실패 시 `/#oauth_error=<사유>`로 복귀
+1. **시작 흐름**: `POST /api/auth/{provider}/start` (body: 동의 3항목 + browser nonce) → 서버가 state 발급 후 JSON `{authorizeUrl}` 반환 → **브라우저가 `location.href`로 이동** (302 없음)
+2. **state 검증(Redis 단회용)**: `secrets.token_urlsafe(32)` 값을 Redis에 단회용 저장(TTL 600초, key `oauth_state:{state}`, value에 provider·redirect_uri·동의 3항목·browser nonce 포함). 콜백에서 **GETDEL로 소비하며 존재 여부 확인** → 없으면(재사용·만료·위조) 거부. 이것이 OAuth 표준 CSRF 방어다. (쿠키 바인딩은 선택적 심화 방어로 범위 외)
+3. **콜백 흐름**: `GET /api/auth/{provider}/callback?code&state` → state 검증 → urllib로 토큰 교환 → 프로필 조회 → 사용자 find-or-create → Redis 단회 `oauth_code` 발급 → **200 HTML 브리지 페이지** 응답: `location.replace("/#oauth_code=<code>")` 실행. app.js는 fragment의 code와 `sessionStorage` nonce를 `POST /api/auth/oauth-code/redeem`으로 보내 앱 JWT를 받은 뒤 localStorage에 저장하고 fragment를 지운다. 실패 시 `/#oauth_error=<사유>`로 복귀
 4. **사용자 식별**: `(provider, provider_user_id)`로 기존 연결 조회 → 있으면 그 user_id 재사용, 없으면 `usr_` 접두사 신규 ID로 `ensure_user` + `link_user_account`. 닉네임은 프로필의 표시 이름(없으면 기본값)
 5. **동의 처리**: 기존 데모와 동일하게 로그인 시점에 요구 — start body의 동의 3항목을 검증해 Redis state에 동봉, 콜백 성공 시 `record_user_consent` 기록 (기존 `baseline-2026-07` 버전 체계 유지)
 6. **redirect_uri 구성**: `QUESTBOOK_PUBLIC_BASE_URL` + `/api/auth/{provider}/callback`. 로컬은 `http://localhost:8000`, 운영은 `https://www.travel-qbook.co.kr`
@@ -726,9 +728,9 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
                     location_consent=bool(consent.get("location")),
                     consent_version="baseline-2026-07",
                 )
-                # 변수 의미: 서명된 baseline access token이다.
-                app_token = create_access_token(user_id, provider, state.settings.jwt_secret)
-                self._send_oauth_bridge(f"/#oauth_token={quote(app_token)}")
+                # 변수 의미: 프런트가 앱 토큰으로 교환할 단회 코드다.
+                login_code = state.oauth_state.issue_login_code(user_id, provider, browser_nonce)
+                self._send_oauth_bridge(f"/#oauth_code={quote(login_code)}")
             except Exception as error:
                 self._send_oauth_bridge(f"/#oauth_error={quote(self._safe_error_code(error))}")
 
@@ -749,8 +751,8 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
             """
             입력: 브라우저가 이동할 fragment 포함 경로.
             출력: 자동 이동 HTML 응답.
-            역할: 토큰 또는 오류를 URL fragment로 프런트에 전달한다.
-            호출 예시: self._send_oauth_bridge("/#oauth_token=...")
+            역할: 단회 코드 또는 오류를 URL fragment로 프런트에 전달한다.
+            호출 예시: self._send_oauth_bridge("/#oauth_code=...")
             """
             # 변수 의미: 자동 이동 스크립트를 담은 HTML 본문이다.
             html = (
@@ -821,9 +823,9 @@ if __name__ == "__main__":
 
 ---
 
-### Task 4 — 프런트엔드 (게이트웨이 변경 없음)
+### Task 4 — 프런트엔드와 게이트웨이 헤더 전달
 
-**목적**: 동의 패널에 네이버·구글 버튼을 넣고, 콜백이 심은 `#oauth_token` fragment를 부팅 시 처리한다.
+**목적**: 동의 패널에 네이버·구글 버튼을 넣고, 콜백이 심은 `#oauth_code` fragment를 `sessionStorage` nonce와 함께 redeem한다. 게이트웨이는 upstream 보안·캐시 헤더를 보존한다.
 
 **파일 1** — `apps/user-web/public/index.html` 수정
 
@@ -848,8 +850,13 @@ if __name__ == "__main__":
  * 호출 예시: await handleOAuthLogin("naver")
  */
 async function handleOAuthLogin(provider) {
+  // 만 14세 이상 확인 체크박스입니다.
   const ageInput = select("#age-confirmed");
+
+  // 개인정보 동의 체크박스입니다.
   const privacyInput = select("#privacy-consent");
+
+  // 위치정보 동의 체크박스입니다.
   const locationInput = select("#location-consent");
 
   if (!ageInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
@@ -857,48 +864,116 @@ async function handleOAuthLogin(provider) {
     return;
   }
 
+  // OAuth callback 검증에 사용할 브라우저 세션 nonce입니다.
+  const oauthNonce = createOAuthNonce();
+  if (!oauthNonce || !writeSessionValue(OAUTH_NONCE_KEY, oauthNonce)) {
+    setConsentMessage("현재 브라우저에서는 보안 로그인 상태를 저장할 수 없습니다.");
+    return;
+  }
+
+  setOAuthLoginPending(provider, true);
+  setConsentMessage("로그인 페이지로 이동합니다.");
+
   try {
     // provider 로그인 시작 API 응답입니다.
     const payload = await fetchJson(`/api/auth/${provider}/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ageConfirmed: true, privacyConsent: true, locationConsent: true }),
+      body: JSON.stringify({
+        ageConfirmed: true,
+        privacyConsent: true,
+        locationConsent: true,
+        oauthNonce,
+      }),
     });
+
     if (payload.authorizeUrl) {
       window.location.href = payload.authorizeUrl;
+      return;
     }
+
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setOAuthLoginPending(provider, false);
+    setConsentMessage("로그인 시작에 필요한 이동 주소를 받지 못했습니다.");
   } catch (error) {
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setOAuthLoginPending(provider, false);
     setConsentMessage("로그인 시작에 실패했습니다. 잠시 뒤 다시 시도하세요.");
   }
 }
 
 /**
+ * 입력: callback fragment에서 받은 단회 OAuth code.
+ * 출력: token 교환 Promise.
+ * 역할: sessionStorage nonce와 단회 code를 서버에 보내 access token을 받는다.
+ * 호출 예시: await redeemOAuthCode("code")
+ */
+async function redeemOAuthCode(oauthCode) {
+  // 브라우저 세션에 저장된 OAuth nonce입니다.
+  const oauthNonce = readSessionValue(OAUTH_NONCE_KEY) || "";
+  if (!oauthCode || !oauthNonce) {
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setConsentPanelVisible(true);
+    setConsentMessage("로그인 검증 정보가 만료되었습니다. 다시 시도하세요.");
+    return;
+  }
+
+  try {
+    // OAuth code 교환 API 응답입니다.
+    const payload = await fetchJson("/api/auth/oauth-code/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oauthCode, oauthNonce }),
+    });
+    state.accessToken = payload.accessToken || "";
+    if (!state.accessToken) {
+      throw new Error("missing access token");
+    }
+    writeStorageValue(ACCESS_TOKEN_KEY, state.accessToken);
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setConsentPanelVisible(false);
+    setConsentMessage("");
+    await loadInitialData();
+  } catch (error) {
+    state.accessToken = "";
+    removeStorageValue(ACCESS_TOKEN_KEY);
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setConsentPanelVisible(true);
+    setConsentMessage("로그인 검증에 실패했습니다. 다시 시도하세요.");
+  }
+}
+
+/**
  * 입력: 없음.
- * 출력: 없음.
- * 역할: 콜백이 심은 URL fragment에서 토큰 또는 오류를 읽어 처리하고 주소창을 정리한다.
- * 호출 예시: consumeOAuthRedirect()
+ * 출력: 비동기 token 교환을 시작했는지 여부.
+ * 역할: 콜백이 심은 URL fragment에서 단회 code 또는 오류를 읽어 처리하고 주소창을 정리한다.
+ * 호출 예시: const pending = consumeOAuthRedirect()
  */
 function consumeOAuthRedirect() {
   // 현재 주소의 fragment 문자열입니다.
   const hash = window.location.hash || "";
 
-  if (hash.startsWith("#oauth_token=")) {
-    // fragment에서 꺼낸 access token입니다.
-    const token = decodeURIComponent(hash.slice("#oauth_token=".length));
-    if (token) {
-      state.accessToken = token;
-      writeStorageValue(ACCESS_TOKEN_KEY, token);
-    }
+  if (hash.startsWith("#oauth_code=")) {
+    // fragment에서 꺼낸 단회 OAuth code입니다.
+    const oauthCode = decodeFragmentValue(hash.slice("#oauth_code=".length));
     history.replaceState(null, "", window.location.pathname + window.location.search);
-    return;
+    setConsentPanelVisible(true);
+    setConsentMessage("로그인을 검증하는 중입니다.");
+    redeemOAuthCode(oauthCode);
+    return true;
   }
 
   if (hash.startsWith("#oauth_error=")) {
     // fragment에서 꺼낸 오류 코드입니다.
-    const reason = decodeURIComponent(hash.slice("#oauth_error=".length));
+    const reason = decodeFragmentValue(hash.slice("#oauth_error=".length)) || "login_failed";
+    state.accessToken = "";
+    removeStorageValue(ACCESS_TOKEN_KEY);
+    removeSessionValue(OAUTH_NONCE_KEY);
     history.replaceState(null, "", window.location.pathname + window.location.search);
+    setConsentPanelVisible(true);
     setConsentMessage(`로그인에 실패했습니다 (${reason}). 다시 시도하세요.`);
   }
+  return false;
 }
 ```
 
@@ -916,6 +991,13 @@ function consumeOAuthRedirect() {
   if (googleLoginButton) {
     googleLoginButton.addEventListener("click", () => handleOAuthLogin("google"));
   }
+
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      setOAuthLoginPending("", false);
+      setConsentMessage("");
+    }
+  });
 ```
 
 (c) `initializeApp()`의 `registerServiceWorker();` 바로 다음 줄에 추가(뷰 라우팅보다 먼저 fragment를 처리해야 함):
@@ -981,7 +1063,7 @@ cd /home/ilhyeonchu/Documents/GitHub/Questbook_Dajeon && python3 services/web-ga
    curl -s http://127.0.0.1:8100/api/auth/providers | python3 -m json.tool   # naver/google configured=true 확인
    ```
    (신규 파일은 editable 설치에 자동 반영되므로 `uv sync` 불필요. 의존성은 그대로다.)
-3. **qbook-web**(프런트 정적 파일 — 게이트웨이 코드는 변경 없음):
+3. **qbook-web**(프런트 정적 파일과 게이트웨이 헤더 전달 변경):
    ```bash
    cd /opt/Questbook_Daejeon && git pull
    ```
@@ -1000,7 +1082,7 @@ cd /home/ilhyeonchu/Documents/GitHub/Questbook_Dajeon && python3 services/web-ga
 
 - **Naver 검수**: 개발 중 상태는 등록 멤버만 로그인 가능. 발표에서 관객이 직접 네이버 로그인하는 시나리오면 미리 검수 신청하거나 시연은 발표자 계정으로 한정
 - **Google 테스트 모드**: 동일하게 테스트 사용자만 허용. 시연 계정을 반드시 사전 등록·리허설
-- **게이트웨이 쿠키 중계 누락 시** 콜백에서 state 쿠키가 사라져 전부 실패 → Task 4를 Task 3 검증 전에 로컬에서 함께 확인
+- **게이트웨이 헤더 전달 누락 시** callback HTML의 `no-store`·CSP 또는 API 응답의 `Vary`가 빠질 수 있음 → Task 4를 Task 3 검증 전에 로컬에서 함께 확인
 - **redirect_uri 불일치 오류**: 콘솔 등록값과 서버 구성값이 문자 하나까지 같아야 함 (`http`/`https`, 포트, 경로)
 - 토큰 만료 120분: 시연 직전 재로그인으로 충분, 리프레시 토큰은 범위 외
 
