@@ -6,7 +6,7 @@ import math
 from datetime import date, datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
@@ -17,6 +17,8 @@ from questbook_api.domain.models import TourPlaceCandidate
 TOURAPI_LOCATION_ENDPOINT = "https://apis.data.go.kr/B551011/KorService2/locationBasedList2"
 # 변수 의미: 외부 API 응답 제한 시간 초 단위 값이다.
 UPSTREAM_TIMEOUT_SECONDS = 5
+# 변수 의미: TourAPI 정상 응답 코드다.
+TOURAPI_SUCCESS_RESULT_CODE = "0000"
 
 
 # 변수 의미: TourAPI가 없을 때 baseline 흐름을 검증하기 위한 대전 장소 후보 목록이다.
@@ -122,6 +124,32 @@ def map_tourapi_category(raw_item: dict[str, Any]) -> tuple[str, str]:
     return "downtown", CATEGORY_NAMES["downtown"]
 
 
+def normalize_service_key(raw_service_key: str) -> str:
+    """
+    입력: 환경 변수에서 읽은 한국관광공사 OpenAPI 서비스 키.
+    출력: URL 쿼리 인코딩 전에 사용할 서비스 키.
+    역할: 공공데이터포털의 Encoding/Decoding 키 입력 차이로 인한 이중 인코딩을 방지한다.
+    호출 예시: service_key = normalize_service_key(get_env("TOURAPI_SERVICE_KEY"))
+    """
+    # 변수 의미: 앞뒤 공백을 제거한 원본 서비스 키다.
+    stripped_key = raw_service_key.strip()
+    if not stripped_key:
+        return ""
+    return unquote(stripped_key)
+
+
+def extract_result_code(payload: dict[str, Any]) -> str:
+    """
+    입력: TourAPI JSON 페이로드.
+    출력: 응답 헤더의 resultCode 문자열.
+    역할: HTTP 200이어도 인증키 오류나 서비스 오류이면 fallback으로 전환하게 한다.
+    호출 예시: result_code = extract_result_code(payload)
+    """
+    # 변수 의미: TourAPI 응답 헤더 딕셔너리다.
+    response_header = payload.get("response", {}).get("header", {})
+    return str(response_header.get("resultCode", "")).strip()
+
+
 class TourApiClient:
     """
     입력: TourAPI 서비스 키.
@@ -138,7 +166,7 @@ class TourApiClient:
         호출 예시: client = TourApiClient(settings.tourapi_service_key)
         """
         # 변수 의미: 한국관광공사 OpenAPI 서비스 키다.
-        self.service_key = service_key
+        self.service_key = normalize_service_key(service_key)
         # 변수 의미: 연속 실패 횟수다.
         self._failure_count = 0
         # 변수 의미: 서킷이 다시 닫힐 수 있는 시각이다.
@@ -191,6 +219,11 @@ class TourApiClient:
                     response_body = response.read().decode("utf-8")
                 # 변수 의미: JSON으로 파싱한 TourAPI 응답이다.
                 payload = json.loads(response_body)
+                # 변수 의미: TourAPI 응답 결과 코드다.
+                result_code = extract_result_code(payload)
+                if result_code and result_code != TOURAPI_SUCCESS_RESULT_CODE:
+                    self._record_failure()
+                    return self._fallback_places(latitude, longitude, category_key), f"fallback:result_code_{result_code}"
                 # 변수 의미: 정규화된 장소 후보 목록이다.
                 places = self._parse_tourapi_payload(payload)
                 self._record_success()

@@ -174,6 +174,13 @@ const state = {
   apiHealthy: false,
   activeView: readInitialView(),
   dataSource: "fallback",
+  recommendationMeta: {
+    sourceStatus: "fallback:not_loaded",
+    cacheHit: false,
+    attribution: "관광정보 제공: 한국관광공사(TourAPI)",
+    fetchedAt: "",
+    expiresAt: "",
+  },
   selectedCategory: "all",
   location: { ...FALLBACK_LOCATION },
   user: { ...FALLBACK_USER },
@@ -860,6 +867,85 @@ function unwrapList(payload) {
 }
 
 /**
+ * 입력: 추천 API 전체 응답.
+ * 출력: 추천 데이터 원천과 캐시 메타데이터.
+ * 역할: TourAPI live/fallback 상태를 화면에 표시할 수 있게 보존한다.
+ * 호출 예시: state.recommendationMeta = normalizeRecommendationMeta(payload)
+ */
+function normalizeRecommendationMeta(payload) {
+  // 추천 API 전체 응답 객체입니다.
+  const response = payload || {};
+
+  // 추천 API의 캐시 메타데이터입니다.
+  const cache = response.cache || {};
+
+  return {
+    sourceStatus: String(cache.sourceStatus || response.sourceStatus || "fallback:unknown"),
+    cacheHit: Boolean(cache.hit),
+    attribution: String(response.attribution || "관광정보 제공: 한국관광공사(TourAPI)"),
+    fetchedAt: String(cache.fetchedAt || ""),
+    expiresAt: String(cache.expiresAt || ""),
+  };
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 홈 지표에 표시할 추천 데이터 원천 이름.
+ * 역할: 앱 API 연결 여부와 TourAPI live 여부를 짧은 라벨로 구분한다.
+ * 호출 예시: const label = getRecommendationDataLabel()
+ */
+function getRecommendationDataLabel() {
+  // 추천 API가 보고한 데이터 원천 상태입니다.
+  const sourceStatus = state.recommendationMeta.sourceStatus;
+
+  if (state.dataSource !== "api") {
+    return "목업";
+  }
+  if (sourceStatus === "live") {
+    return "TourAPI";
+  }
+  return "Fallback";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 사용자에게 표시할 TourAPI 상태 문구.
+ * 역할: live, 키 미설정, 상위 오류, 클라이언트 fallback을 구분해 안내한다.
+ * 호출 예시: homeDataNote.textContent = getTourApiStatusText()
+ */
+function getTourApiStatusText() {
+  // 현재 추천 API 메타데이터입니다.
+  const meta = state.recommendationMeta;
+
+  // 캐시 사용 여부 표시 문구입니다.
+  const cacheText = meta.cacheHit ? "30분 캐시 사용" : "새 조회";
+
+  if (state.dataSource !== "api") {
+    return "앱 API 연결 실패로 브라우저 목업 데이터를 표시합니다.";
+  }
+
+  if (meta.sourceStatus === "live") {
+    return `${meta.attribution}. 실제 TourAPI 응답 · ${cacheText}.`;
+  }
+
+  if (meta.sourceStatus.startsWith("fallback:result_code_")) {
+    return `TourAPI가 오류 resultCode를 반환해 대전 fallback 장소 데이터로 표시합니다. ${cacheText}.`;
+  }
+
+  // fallback 상태별 사용자 안내 문구입니다.
+  const fallbackMessages = {
+    "fallback:not_configured": "TOURAPI_SERVICE_KEY가 없어 대전 fallback 장소 데이터로 표시합니다.",
+    "fallback:circuit_open": "TourAPI 연속 실패로 잠시 대전 fallback 장소 데이터로 표시합니다.",
+    "fallback:empty": "TourAPI 주변 장소 결과가 비어 있어 대전 fallback 장소 데이터로 표시합니다.",
+    "fallback:upstream_4xx": "TourAPI 요청이 인증 또는 요청 오류를 반환해 대전 fallback 장소 데이터로 표시합니다.",
+    "fallback:upstream_error": "TourAPI 호출 오류로 대전 fallback 장소 데이터로 표시합니다.",
+    "fallback:client_error": "추천 API 응답을 사용할 수 없어 브라우저 목업 데이터를 표시합니다.",
+  };
+
+  return `${fallbackMessages[meta.sourceStatus] || "TourAPI 응답을 사용할 수 없어 대전 fallback 장소 데이터로 표시합니다."} ${cacheText}.`;
+}
+
+/**
  * 입력: 추천 API 원본 항목.
  * 출력: 화면에서 사용하는 추천 항목.
  * 역할: 서버 응답 필드명이 조금 달라도 동일한 카드 구조로 보정한다.
@@ -1429,7 +1515,7 @@ function renderHomeMetrics() {
     ["📍", state.location.label.replace(" 기준", ""), "현재 위치 후보"],
     ["🏷️", `${earnedBadges.length}개`, "획득 뱃지"],
     ["🗺️", `${state.recommendations.length}개`, "주변 퀘스트"],
-    ["🎁", state.dataSource === "api" ? "API" : "Fallback", "추천 데이터"],
+    ["🎁", getRecommendationDataLabel(), "추천 데이터"],
   ];
 
   grid.replaceChildren();
@@ -1556,10 +1642,7 @@ function renderRecommendationMeta() {
   const homeDataNote = select("#home-data-note");
 
   if (homeDataNote) {
-    homeDataNote.textContent =
-      state.dataSource === "api"
-        ? "관광정보 제공: 한국관광공사(TourAPI). 현재 추천은 앱 API 응답입니다."
-        : "TourAPI 키가 없거나 호출에 실패해 대전 fallback 장소 데이터로 표시합니다.";
+    homeDataNote.textContent = getTourApiStatusText();
   }
 }
 
@@ -2408,9 +2491,17 @@ async function loadRecommendations(forceRefresh = false) {
 
     state.recommendations = recommendations;
     state.dataSource = "api";
+    state.recommendationMeta = normalizeRecommendationMeta(payload);
   } catch (error) {
     state.recommendations = [...FALLBACK_RECOMMENDATIONS];
     state.dataSource = "fallback";
+    state.recommendationMeta = {
+      sourceStatus: "fallback:client_error",
+      cacheHit: false,
+      attribution: "관광정보 제공: 한국관광공사(TourAPI)",
+      fetchedAt: "",
+      expiresAt: "",
+    };
   }
 
   renderRecommendationMeta();

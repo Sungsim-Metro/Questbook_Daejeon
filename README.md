@@ -59,9 +59,11 @@ MVP 단계에서는 뱃지, 모험 수첩, 꿈돌이 도감 같은 비금전 보
 - 기존 정적 MVP: 루트의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py`
 - baseline 분리 구현: `apps/user-web`, `services/web-gateway`, `services/app-api`
 
-baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 baseline 실행 전에는 Docker Compose로 PostgreSQL과 Redis를 먼저 기동한다.
+baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 baseline 실행 전에는 Docker Compose로 PostgreSQL과 Redis를 먼저 기동한다. 실제 한국관광공사 TourAPI를 쓰려면 공공데이터포털에서 `한국관광공사_국문 관광정보 서비스_GW` 활용신청 후 `.env`에 `TOURAPI_SERVICE_KEY`를 넣는다. 브라우저 코드에는 키를 넣지 않고 앱 API가 서버 측에서 호출한다.
 
 ```bash
+cp .env.example .env
+# .env에서 TOURAPI_SERVICE_KEY=공공데이터포털_서비스키 를 설정
 docker compose -f infra/local/postgres-redis.compose.yaml up -d
 uv run --project services/app-api python scripts/check_local_data_services.py
 uv run --project services/app-api python scripts/run_baseline.py
