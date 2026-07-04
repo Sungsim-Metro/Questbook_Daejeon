@@ -157,9 +157,6 @@ const FALLBACK_GGUMDORI = [
   { id: "nightview-2", name: "야경 꿈돌이", themeCategory: "nightview", unlocked: false, condition: "nightview Lv.2", imageRef: "/assets/ggumdori/nightview-2.svg" },
 ];
 
-// 브라우저에 저장할 마지막 추천 결과 키입니다.
-const LAST_RECOMMENDATIONS_KEY = "questbook:user-web:last-recommendations";
-
 // 브라우저에 저장할 퀘스트 상태 키입니다.
 const QUEST_STATUS_KEY = "questbook:user-web:quest-status";
 
@@ -168,6 +165,9 @@ const SELECTED_GGUMDORI_KEY = "questbook:user-web:selected-ggumdori";
 
 // 브라우저에 저장할 baseline access token 키입니다.
 const ACCESS_TOKEN_KEY = "questbook:user-web:access-token";
+
+// 브라우저 세션에 저장할 OAuth callback nonce 키입니다.
+const OAUTH_NONCE_KEY = "questbook:user-web:oauth-nonce";
 
 // 화면 전체의 현재 상태입니다.
 const state = {
@@ -317,6 +317,84 @@ function removeStorageValue(key) {
   } catch (error) {
     // 저장소 사용이 불가능한 환경에서는 현재 메모리 상태만 정리합니다.
   }
+}
+
+/**
+ * 입력: sessionStorage 키와 저장할 문자열.
+ * 출력: 저장 성공 여부.
+ * 역할: OAuth callback을 같은 브라우저 세션에 바인딩할 nonce를 보관한다.
+ * 호출 예시: writeSessionValue(OAUTH_NONCE_KEY, nonce)
+ */
+function writeSessionValue(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * 입력: sessionStorage 키.
+ * 출력: 저장된 문자열 또는 null.
+ * 역할: OAuth callback 이후 token 교환에 사용할 nonce를 읽는다.
+ * 호출 예시: const nonce = readSessionValue(OAUTH_NONCE_KEY)
+ */
+function readSessionValue(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * 입력: sessionStorage 키.
+ * 출력: 없음.
+ * 역할: OAuth nonce를 더 이상 쓰지 않을 때 제거한다.
+ * 호출 예시: removeSessionValue(OAUTH_NONCE_KEY)
+ */
+function removeSessionValue(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch (error) {
+    // 세션 저장소 사용이 불가능한 환경에서는 제거할 값도 없습니다.
+  }
+}
+
+/**
+ * 입력: URL fragment에서 잘라낸 인코딩 문자열.
+ * 출력: 디코딩한 문자열 또는 빈 문자열.
+ * 역할: 잘못 인코딩된 fragment가 앱 초기화를 중단하지 않게 한다.
+ * 호출 예시: const token = decodeFragmentValue(rawToken)
+ */
+function decodeFragmentValue(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    return "";
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: URL 안전 OAuth nonce 문자열.
+ * 역할: 로그인 시작 브라우저와 callback 브라우저를 묶을 난수를 만든다.
+ * 호출 예시: const nonce = createOAuthNonce()
+ */
+function createOAuthNonce() {
+  if (globalThis.crypto?.randomUUID) {
+    return `${globalThis.crypto.randomUUID()}-${globalThis.crypto.randomUUID()}`;
+  }
+
+  if (globalThis.crypto?.getRandomValues) {
+    // nonce 생성에 사용할 난수 바이트입니다.
+    const bytes = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  return "";
 }
 
 /**
@@ -542,6 +620,24 @@ function setConsentMessage(message) {
 }
 
 /**
+ * 입력: 진행 중인 provider 이름과 진행 여부.
+ * 출력: 없음.
+ * 역할: OAuth 시작 중 버튼 중복 클릭을 막고 진행 상태를 표시한다.
+ * 호출 예시: setOAuthLoginPending("naver", true)
+ */
+function setOAuthLoginPending(provider, isPending) {
+  ["naver", "google"].forEach((item) => {
+    // OAuth 로그인 버튼입니다.
+    const button = select(`#${item}-login-button`);
+    if (!button) {
+      return;
+    }
+    button.disabled = isPending;
+    button.setAttribute("aria-busy", isPending && item === provider ? "true" : "false");
+  });
+}
+
+/**
  * 입력: 없음.
  * 출력: demo-social 로그인 처리 Promise.
  * 역할: 만 14세 이상 확인과 개인정보·위치정보 동의를 서버에 기록하고 access token을 받는다.
@@ -583,6 +679,139 @@ async function handleDemoLogin() {
   } catch (error) {
     setConsentMessage("로그인 처리에 실패했습니다. 잠시 뒤 다시 시도하세요.");
   }
+}
+
+/**
+ * 입력: provider 이름("naver" 또는 "google").
+ * 출력: OAuth 로그인 시작 Promise.
+ * 역할: 동의 3항목 검증 후 인가 URL을 받아 provider 로그인 페이지로 이동한다.
+ * 호출 예시: await handleOAuthLogin("naver")
+ */
+async function handleOAuthLogin(provider) {
+  // 만 14세 이상 확인 체크박스입니다.
+  const ageInput = select("#age-confirmed");
+
+  // 개인정보 동의 체크박스입니다.
+  const privacyInput = select("#privacy-consent");
+
+  // 위치정보 동의 체크박스입니다.
+  const locationInput = select("#location-consent");
+
+  if (!ageInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
+    setConsentMessage("세 항목을 모두 확인해야 로그인할 수 있습니다.");
+    return;
+  }
+
+  // OAuth callback 검증에 사용할 브라우저 세션 nonce입니다.
+  const oauthNonce = createOAuthNonce();
+  if (!oauthNonce || !writeSessionValue(OAUTH_NONCE_KEY, oauthNonce)) {
+    setConsentMessage("현재 브라우저에서는 보안 로그인 상태를 저장할 수 없습니다.");
+    return;
+  }
+
+  setOAuthLoginPending(provider, true);
+  setConsentMessage("로그인 페이지로 이동합니다.");
+
+  try {
+    // provider 로그인 시작 API 응답입니다.
+    const payload = await fetchJson(`/api/auth/${provider}/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ageConfirmed: true,
+        privacyConsent: true,
+        locationConsent: true,
+        oauthNonce,
+      }),
+    });
+
+    if (payload.authorizeUrl) {
+      window.location.href = payload.authorizeUrl;
+      return;
+    }
+
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setOAuthLoginPending(provider, false);
+    setConsentMessage("로그인 시작에 필요한 이동 주소를 받지 못했습니다.");
+  } catch (error) {
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setOAuthLoginPending(provider, false);
+    setConsentMessage("로그인 시작에 실패했습니다. 잠시 뒤 다시 시도하세요.");
+  }
+}
+
+/**
+ * 입력: callback fragment에서 받은 단회 OAuth code.
+ * 출력: token 교환 Promise.
+ * 역할: sessionStorage nonce와 단회 code를 서버에 보내 access token을 받는다.
+ * 호출 예시: await redeemOAuthCode("code")
+ */
+async function redeemOAuthCode(oauthCode) {
+  // 브라우저 세션에 저장된 OAuth nonce입니다.
+  const oauthNonce = readSessionValue(OAUTH_NONCE_KEY) || "";
+  if (!oauthCode || !oauthNonce) {
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setConsentPanelVisible(true);
+    setConsentMessage("로그인 검증 정보가 만료되었습니다. 다시 시도하세요.");
+    return;
+  }
+
+  try {
+    // OAuth code 교환 API 응답입니다.
+    const payload = await fetchJson("/api/auth/oauth-code/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oauthCode, oauthNonce }),
+    });
+    state.accessToken = payload.accessToken || "";
+    if (!state.accessToken) {
+      throw new Error("missing access token");
+    }
+    writeStorageValue(ACCESS_TOKEN_KEY, state.accessToken);
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setConsentPanelVisible(false);
+    setConsentMessage("");
+    await loadInitialData();
+  } catch (error) {
+    state.accessToken = "";
+    removeStorageValue(ACCESS_TOKEN_KEY);
+    removeSessionValue(OAUTH_NONCE_KEY);
+    setConsentPanelVisible(true);
+    setConsentMessage("로그인 검증에 실패했습니다. 다시 시도하세요.");
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 비동기 token 교환을 시작했는지 여부.
+ * 역할: 콜백이 심은 URL fragment에서 단회 code 또는 오류를 읽어 처리하고 주소창을 정리한다.
+ * 호출 예시: const pending = consumeOAuthRedirect()
+ */
+function consumeOAuthRedirect() {
+  // 현재 주소의 fragment 문자열입니다.
+  const hash = window.location.hash || "";
+
+  if (hash.startsWith("#oauth_code=")) {
+    // fragment에서 꺼낸 단회 OAuth code입니다.
+    const oauthCode = decodeFragmentValue(hash.slice("#oauth_code=".length));
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    setConsentPanelVisible(true);
+    setConsentMessage("로그인을 검증하는 중입니다.");
+    redeemOAuthCode(oauthCode);
+    return true;
+  }
+
+  if (hash.startsWith("#oauth_error=")) {
+    // fragment에서 꺼낸 오류 코드입니다.
+    const reason = decodeFragmentValue(hash.slice("#oauth_error=".length)) || "login_failed";
+    state.accessToken = "";
+    removeStorageValue(ACCESS_TOKEN_KEY);
+    removeSessionValue(OAUTH_NONCE_KEY);
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    setConsentPanelVisible(true);
+    setConsentMessage(`로그인에 실패했습니다 (${reason}). 다시 시도하세요.`);
+  }
+  return false;
 }
 
 /**
@@ -2153,7 +2382,7 @@ function requestLocation() {
 /**
  * 입력: 강제 새로고침 여부.
  * 출력: 추천 목록 로드 Promise.
- * 역할: 추천 API를 호출하고 실패 시 마지막 캐시 또는 목업 데이터를 사용한다.
+ * 역할: 추천 API를 호출하고 실패 시 목업 데이터를 사용한다.
  * 호출 예시: await loadRecommendations(true)
  */
 async function loadRecommendations(forceRefresh = false) {
@@ -2179,11 +2408,8 @@ async function loadRecommendations(forceRefresh = false) {
 
     state.recommendations = recommendations;
     state.dataSource = "api";
-    writeStorageValue(LAST_RECOMMENDATIONS_KEY, JSON.stringify(recommendations));
   } catch (error) {
-    // localStorage에 저장된 마지막 추천 목록입니다.
-    const storedRecommendations = readStoredRecommendations();
-    state.recommendations = storedRecommendations.length > 0 ? storedRecommendations : [...FALLBACK_RECOMMENDATIONS];
+    state.recommendations = [...FALLBACK_RECOMMENDATIONS];
     state.dataSource = "fallback";
   }
 
@@ -2193,23 +2419,6 @@ async function loadRecommendations(forceRefresh = false) {
   renderRecommendations();
   renderQuestBoard();
   renderMapView();
-}
-
-/**
- * 입력: 없음.
- * 출력: 저장된 추천 목록.
- * 역할: API 실패 시 마지막 추천 결과를 복원한다.
- * 호출 예시: readStoredRecommendations()
- */
-function readStoredRecommendations() {
-  try {
-    // localStorage에서 읽은 추천 JSON 문자열입니다.
-    const storedValue = readStorageValue(LAST_RECOMMENDATIONS_KEY);
-
-    return storedValue ? JSON.parse(storedValue).map(normalizeRecommendation) : [];
-  } catch (error) {
-    return [];
-  }
 }
 
 /**
@@ -2443,6 +2652,12 @@ function bindEvents() {
   // demo-social 로그인 버튼입니다.
   const demoLoginButton = select("#demo-login-button");
 
+  // 네이버 로그인 버튼입니다.
+  const naverLoginButton = select("#naver-login-button");
+
+  // 구글 로그인 버튼입니다.
+  const googleLoginButton = select("#google-login-button");
+
   if (locationButton) {
     locationButton.addEventListener("click", requestLocation);
   }
@@ -2464,6 +2679,25 @@ function bindEvents() {
       handleDemoLogin();
     });
   }
+
+  if (naverLoginButton) {
+    naverLoginButton.addEventListener("click", () => {
+      handleOAuthLogin("naver");
+    });
+  }
+
+  if (googleLoginButton) {
+    googleLoginButton.addEventListener("click", () => {
+      handleOAuthLogin("google");
+    });
+  }
+
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      setOAuthLoginPending("", false);
+      setConsentMessage("");
+    }
+  });
 
   document.querySelectorAll("[data-category]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2501,10 +2735,12 @@ function bindEvents() {
  */
 function initializeApp() {
   registerServiceWorker();
+  // OAuth callback code를 token으로 교환 중인지 여부입니다.
+  const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();
   setActiveView(state.activeView, false);
   renderAll();
-  if (ensureSessionReady()) {
+  if (!oauthRedirectPending && ensureSessionReady()) {
     loadInitialData();
   }
 }

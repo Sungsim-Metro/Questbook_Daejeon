@@ -334,6 +334,11 @@ p {
   accent-color: var(--green-dark);
 }
 
+.oauth-login-list {
+  display: grid;
+  gap: 8px;
+}
+
 .home-hero {
   display: grid;
   gap: 13px;
@@ -501,6 +506,7 @@ p {
 .secondary-action,
 .card-action,
 .ggumdori-select,
+.social-login-button,
 .map-secondary-button,
 .chip-button {
   min-height: var(--tap-size);
@@ -523,6 +529,7 @@ p {
 .secondary-action,
 .card-action--secondary,
 .ggumdori-select,
+.social-login-button,
 .map-secondary-button,
 .chip-button {
   border: 1px solid rgba(10, 143, 72, 0.22);
@@ -530,8 +537,25 @@ p {
   background: #edf8f1;
 }
 
+.social-login-button {
+  gap: 8px;
+  box-shadow: 0 5px 12px rgba(94, 78, 54, 0.08);
+}
+
+#naver-login-button {
+  color: #fff;
+  background: #03c75a;
+}
+
+#google-login-button {
+  border-color: rgba(45, 58, 50, 0.18);
+  color: var(--ink);
+  background: #fff;
+}
+
 .card-action[disabled],
-.ggumdori-select[disabled] {
+.ggumdori-select[disabled],
+.social-login-button[disabled] {
   color: #8a7f6e;
   cursor: not-allowed;
   background: #eee6d5;
@@ -1172,6 +1196,7 @@ p {
 .secondary-action:focus-visible,
 .card-action:focus-visible,
 .ggumdori-select:focus-visible,
+.social-login-button:focus-visible,
 .map-secondary-button:focus-visible,
 .chip-button:focus-visible,
 .feature-card:focus-visible,

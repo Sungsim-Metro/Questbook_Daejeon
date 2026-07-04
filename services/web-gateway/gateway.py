@@ -24,6 +24,8 @@ USER_WEB_SRC_ROOT = REPOSITORY_ROOT / "apps" / "user-web" / "src"
 DOTENV_PATH = REPOSITORY_ROOT / ".env"
 # 변수 의미: 프록시 요청 제한 시간 초 단위 값이다.
 PROXY_TIMEOUT_SECONDS = 10
+# 변수 의미: 앱 API에서 브라우저까지 보존할 프록시 응답 헤더다.
+FORWARDED_RESPONSE_HEADERS = {"Cache-Control", "Content-Security-Policy", "Vary"}
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -236,6 +238,7 @@ class QuestbookGatewayHandler(BaseHTTPRequestHandler):
                 content_type = response.headers.get("Content-Type", "application/json")
                 self.send_response(response.status)
                 self._send_common_headers(content_type)
+                self._forward_selected_headers(response.headers)
                 self.send_header("Content-Length", str(len(response_body)))
                 self.end_headers()
                 self.wfile.write(response_body)
@@ -244,6 +247,7 @@ class QuestbookGatewayHandler(BaseHTTPRequestHandler):
             error_body = error.read()
             self.send_response(error.code)
             self._send_common_headers(error.headers.get("Content-Type", "application/json"))
+            self._forward_selected_headers(error.headers)
             self.send_header("Content-Length", str(len(error_body)))
             self.end_headers()
             self.wfile.write(error_body)
@@ -268,6 +272,19 @@ class QuestbookGatewayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response_body)
 
+    def _forward_selected_headers(self, headers: Any) -> None:
+        """
+        입력: 앱 API 응답 헤더 매핑.
+        출력: 없음.
+        역할: OAuth callback과 인증 API의 캐시·보안 헤더를 브라우저까지 보존한다.
+        호출 예시: self._forward_selected_headers(response.headers)
+        """
+        for header_name in FORWARDED_RESPONSE_HEADERS:
+            # 변수 의미: 앱 API가 내려준 보존 대상 헤더 값이다.
+            header_value = headers.get(header_name)
+            if header_value:
+                self.send_header(header_name, header_value)
+
     def _send_common_headers(self, content_type: str) -> None:
         """
         입력: 응답 Content-Type.
@@ -280,9 +297,6 @@ class QuestbookGatewayHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Permissions-Policy", "geolocation=(self), camera=(self)")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
 
 def run_gateway() -> None:
