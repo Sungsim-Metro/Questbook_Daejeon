@@ -415,33 +415,94 @@ class QuestbookRepository:
         with self._lock, self._connection.transaction():
             # 변수 의미: 현재 시각 문자열이다.
             current_time = now_iso()
-            # 변수 의미: 기존 provider 계정 row다.
-            existing_row = self._connection.execute(
-                "SELECT * FROM user_accounts WHERE provider = %s AND provider_user_id = %s",
+            # 변수 의미: 삽입 또는 갱신된 provider 계정 row다.
+            row = self._connection.execute(
+                """
+                INSERT INTO user_accounts(
+                  id, user_id, provider, provider_user_id, email, display_name, created_at, last_login_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (provider, provider_user_id) DO UPDATE SET
+                  email = EXCLUDED.email,
+                  display_name = EXCLUDED.display_name,
+                  last_login_at = EXCLUDED.last_login_at
+                RETURNING *
+                """,
+                (
+                    make_id("acct"),
+                    user_id,
+                    provider,
+                    provider_user_id,
+                    email,
+                    display_name,
+                    current_time,
+                    current_time,
+                ),
+            ).fetchone()
+            return dict(row)
+
+    def _delete_user_if_unlinked(self, user_id: str) -> None:
+        """
+        입력: 사용자 ID.
+        출력: 없음.
+        역할: OAuth identity 동시 생성 경쟁에서 계정에 연결되지 않은 신규 사용자를 정리한다.
+        호출 예시: self._delete_user_if_unlinked("usr_x")
+        """
+        with self._lock, self._connection.transaction():
+            # 변수 의미: 사용자 ID를 참조하는 provider 계정 row다.
+            linked_row = self._connection.execute(
+                "SELECT 1 FROM user_accounts WHERE user_id = %s LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if linked_row is None:
+                self._connection.execute("DELETE FROM users WHERE id = %s", (user_id,))
+
+    def find_user_id_by_identity(self, provider: str, provider_user_id: str) -> str | None:
+        """
+        입력: provider 이름과 provider 사용자 ID.
+        출력: 연결된 baseline 사용자 ID 또는 None.
+        역할: OAuth 재로그인 시 기존 사용자를 식별한다.
+        호출 예시: user_id = repository.find_user_id_by_identity("naver", "naver-1")
+        """
+        with self._lock:
+            # 변수 의미: provider 신원에 연결된 계정 row다.
+            row = self._connection.execute(
+                "SELECT user_id FROM user_accounts WHERE provider = %s AND provider_user_id = %s",
                 (provider, provider_user_id),
             ).fetchone()
-            if existing_row is None:
-                # 변수 의미: 새 계정 연결 ID다.
-                account_id = make_id("acct")
-                self._connection.execute(
-                    """
-                    INSERT INTO user_accounts(
-                      id, user_id, provider, provider_user_id, email, display_name, created_at, last_login_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (account_id, user_id, provider, provider_user_id, email, display_name, current_time, current_time),
-                )
-            else:
-                account_id = existing_row["id"]
-                self._connection.execute(
-                    """
-                    UPDATE user_accounts
-                    SET user_id = %s, email = %s, display_name = %s, last_login_at = %s
-                    WHERE id = %s
-                    """,
-                    (user_id, email, display_name, current_time, account_id),
-                )
-            return dict(self._connection.execute("SELECT * FROM user_accounts WHERE id = %s", (account_id,)).fetchone())
+            return row["user_id"] if row else None
+
+    def find_or_create_identity(
+        self,
+        provider: str,
+        provider_user_id: str,
+        display_name: str | None,
+        email: str | None,
+    ) -> str:
+        """
+        입력: provider, provider 사용자 ID, 표시 이름, 이메일.
+        출력: 기존 또는 새로 만든 baseline 사용자 ID.
+        역할: OAuth 신원으로 사용자를 찾거나 없으면 생성한다.
+        호출 예시: user_id = repository.find_or_create_identity("naver", "naver-1", "탐험가", "a@b.com")
+        """
+        with self._lock:
+            # 변수 의미: 기존에 연결된 사용자 ID다.
+            existing_user_id = self.find_user_id_by_identity(provider, provider_user_id)
+            # 변수 의미: 사용할 baseline 사용자 ID다.
+            user_id = existing_user_id or make_id("usr")
+            self.ensure_user(user_id)
+            # 변수 의미: 연결 또는 재사용된 provider 계정 row다.
+            account = self.link_user_account(
+                user_id=user_id,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                display_name=display_name,
+                email=email,
+            )
+            # 변수 의미: 최종적으로 provider 신원에 연결된 baseline 사용자 ID다.
+            linked_user_id = str(account["user_id"])
+            if linked_user_id != user_id:
+                self._delete_user_if_unlinked(user_id)
+            return linked_user_id
 
     def record_user_consent(
         self,
