@@ -13,7 +13,7 @@
 
 .data-note {
   margin: 13px 0 0;
-  padding: 11px 12px;
+  padding: var(--card-padding);
   border: 1px dashed rgba(10, 143, 72, .28);
   border-radius: 16px;
   background: rgba(232, 248, 238, .72);
@@ -25,7 +25,7 @@
 .map-status {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: var(--content-gap);
   align-items: center;
   margin-bottom: 12px;
 }
@@ -57,21 +57,21 @@
 
 .map-tools {
   display: grid;
-  gap: 10px;
+  gap: var(--content-gap);
   margin-bottom: 12px;
 }
 
 .map-search-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: var(--content-gap);
   align-items: end;
 }
 
 .map-coordinate-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+  gap: var(--content-gap);
 }
 
 .map-field {
@@ -92,7 +92,7 @@
 
 .map-input {
   width: 100%;
-  min-height: 43px;
+  min-height: var(--control-min-height);
   padding: 9px 10px 10px;
   border: 1px solid rgba(94, 78, 54, .18);
   border-radius: 14px;
@@ -108,7 +108,7 @@
 
 .map-action-button,
 .map-secondary-button {
-  min-height: 43px;
+  min-height: var(--control-min-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -147,7 +147,7 @@
 .map-shell {
   position: relative;
   overflow: hidden;
-  min-height: 400px;
+  min-height: clamp(330px, 52dvh, 430px);
   border: 1px solid var(--line);
   border-radius: 22px;
   background:
@@ -160,13 +160,13 @@
 .map-canvas {
   position: relative;
   width: 100%;
-  height: 400px;
-  min-height: 400px;
+  height: clamp(330px, 52dvh, 430px);
+  min-height: 0;
 }
 
 .map-canvas.is-naver {
-  height: 400px;
-  min-height: 400px;
+  height: clamp(330px, 52dvh, 430px);
+  min-height: 0;
   background: #eef3ed;
 }
 
@@ -303,7 +303,7 @@
 
 .map-detail-card {
   display: grid;
-  gap: 9px;
+  gap: var(--content-gap);
 }
 
 .map-detail-card .type-chip,
@@ -315,7 +315,7 @@
 .map-detail-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--content-gap);
 }
 
 .map-detail-copy {
@@ -347,9 +347,9 @@
 .map-place-button {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--content-gap);
   width: 100%;
-  padding: 10px;
+  padding: var(--card-padding);
   border: 1px solid var(--line);
   border-radius: 17px;
   background: var(--paper-2);
@@ -363,8 +363,8 @@
 }
 
 .badge-hero {
-  margin: -16px -16px 0 -24px;
-  padding: 24px 18px 20px 26px;
+  margin: calc(-1 * var(--page-block)) calc(-1 * var(--page-inline-end)) 0 calc(-1 * var(--page-inline-start));
+  padding: clamp(20px, 5vw, 26px) var(--page-inline-end) clamp(18px, 5vw, 22px) var(--page-inline-start);
   text-align: center;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, .17), transparent 28%),
@@ -372,8 +372,8 @@
 }
 
 .featured-badge {
-  width: 132px;
-  height: 132px;
+  width: clamp(112px, 32vw, 132px);
+  height: clamp(112px, 32vw, 132px);
   margin: 14px auto 13px;
   display: grid;
   place-items: center;
@@ -414,7 +414,7 @@
 
 .stamp-row {
   display: flex;
-  gap: 8px;
+  gap: var(--content-gap);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -424,8 +424,8 @@
 }
 
 .stamp {
-  width: 42px;
-  height: 42px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -478,4 +478,3 @@
     width: 100%;
   }
 }
-

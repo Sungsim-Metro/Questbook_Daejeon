@@ -347,6 +347,9 @@ body {
 
 /* ── 하단 내비게이션 ── */
 .bottom-nav {
+  height: calc(var(--nav-height) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  border-radius: 0;
   border-top: 3px solid var(--px-line);
   background: var(--px-paper);
   box-shadow: none;
@@ -363,14 +366,14 @@ body {
 
 /* ── 스크롤 방향 플로팅 버튼 ── */
 .scroll-fab {
-  position: absolute;
-  right: 16px;
-  bottom: calc(var(--nav-height) + 14px);
+  position: fixed;
+  right: max(14px, calc((100vw - var(--shell-max-width)) / 2 + 16px));
+  bottom: calc(var(--nav-bottom-offset) + var(--nav-height) + var(--safe-bottom) + 14px);
   z-index: 20;
   display: grid;
   place-items: center;
-  width: 54px;
-  height: 54px;
+  width: clamp(48px, 12vw, 54px);
+  height: clamp(48px, 12vw, 54px);
   border: 3px solid var(--px-line);
   border-radius: 0;
   background: var(--px-yellow);

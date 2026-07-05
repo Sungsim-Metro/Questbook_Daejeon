@@ -16,7 +16,19 @@
   --sky: #7fc7af;
   --line: rgba(94, 78, 54, .16);
   --shadow-soft: 0 14px 30px rgba(94, 78, 54, .12);
-  --nav-height: 72px;
+  --shell-max-width: 520px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --header-min-height: clamp(60px, 9dvh, 68px);
+  --nav-height: clamp(64px, 10dvh, 76px);
+  --nav-bottom-offset: 0px;
+  --page-block: clamp(14px, 3.8vw, 18px);
+  --page-inline-start: clamp(20px, 5vw, 28px);
+  --page-inline-end: clamp(13px, 4vw, 18px);
+  --content-gap: clamp(8px, 2.6vw, 12px);
+  --panel-padding: clamp(12px, 3.6vw, 18px);
+  --card-padding: clamp(10px, 3.2vw, 14px);
+  --control-min-height: clamp(40px, 11vw, 48px);
+  --icon-size: clamp(38px, 10vw, 48px);
 }
 
 * {
@@ -24,12 +36,14 @@
 }
 
 html {
+  height: 100%;
   min-height: 100%;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   font-family: 'Gaegu', 'Noto Sans KR', system-ui, sans-serif;
   color: var(--ink);
   word-break: keep-all;
@@ -63,8 +77,9 @@ a {
 }
 
 .app-shell {
-  width: min(100%, 520px);
-  min-height: 100dvh;
+  width: min(100%, var(--shell-max-width));
+  height: 100vh;
+  height: 100dvh;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -77,7 +92,7 @@ a {
 .app-shell::before {
   content: '';
   position: absolute;
-  inset: 64px 0 var(--nav-height);
+  inset: var(--header-min-height) 0 calc(var(--nav-height) + var(--safe-bottom));
   background: linear-gradient(var(--paper-line) 1px, transparent 1px) 0 17px / 100% 30px;
   opacity: .5;
   pointer-events: none;
@@ -86,9 +101,9 @@ a {
 .app-shell::after {
   content: '';
   position: absolute;
-  top: 64px;
-  bottom: var(--nav-height);
-  left: 24px;
+  top: var(--header-min-height);
+  bottom: calc(var(--nav-height) + var(--safe-bottom));
+  left: var(--page-inline-start);
   width: 2px;
   background: rgba(211, 145, 114, .24);
   pointer-events: none;
@@ -102,18 +117,18 @@ a {
 }
 
 .app-header {
-  min-height: 64px;
-  padding: 14px 16px 12px;
+  min-height: var(--header-min-height);
+  padding: clamp(12px, 3vw, 14px) var(--page-inline-end) clamp(10px, 2.8vw, 12px) var(--page-inline-start);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--content-gap);
   color: #fff;
   background: linear-gradient(135deg, var(--green), var(--green-dark));
 }
 
 .app-mark {
-  width: 36px;
-  height: 36px;
+  width: clamp(32px, 8.5vw, 38px);
+  height: clamp(32px, 8.5vw, 38px);
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -160,8 +175,9 @@ a {
 }
 
 .app-main {
+  min-height: 0;
   flex: 1;
-  padding: 16px 16px calc(var(--nav-height) + 18px) 24px;
+  padding: var(--page-block) var(--page-inline-end) calc(var(--nav-height) + var(--safe-bottom) + var(--page-block) + 16px) var(--page-inline-start);
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -198,13 +214,17 @@ a {
 }
 
 .bottom-nav {
-  height: var(--nav-height);
+  height: calc(var(--nav-height) + var(--safe-bottom));
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: fixed;
+  z-index: 30;
+  right: auto;
+  bottom: var(--nav-bottom-offset);
+  left: 50%;
+  width: min(100vw, var(--shell-max-width));
+  padding-bottom: var(--safe-bottom);
+  transform: translateX(-50%);
   align-items: center;
   border-top: 1px solid rgba(94, 78, 54, .1);
   background: rgba(255, 253, 245, .97);
@@ -244,29 +264,40 @@ a {
 }
 
 @media (min-width: 720px) {
+  :root {
+    --nav-bottom-offset: 18px;
+  }
+
   body {
     padding: 18px;
   }
 
   .app-shell {
-    min-height: min(860px, calc(100vh - 36px));
+    height: min(860px, calc(100vh - 36px));
+    height: min(860px, calc(100dvh - 36px));
     border: 1px solid rgba(94, 78, 54, .1);
     border-radius: 30px;
+  }
+
+  .bottom-nav {
+    width: min(var(--shell-max-width), calc(100vw - 36px));
+    border-radius: 0 0 28px 28px;
   }
 }
 
 @media (max-width: 380px) {
+  :root {
+    --nav-height: 66px;
+    --page-inline-start: 18px;
+    --page-inline-end: 12px;
+  }
+
   body,
   button,
   input,
   select,
   textarea {
     font-size: 17px;
-  }
-
-  .app-main {
-    padding-right: 13px;
-    padding-left: 20px;
   }
 
   .page-title {

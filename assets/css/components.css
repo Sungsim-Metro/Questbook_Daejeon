@@ -2,23 +2,24 @@
 .hero-panel,
 .soft-panel {
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: clamp(16px, 4vw, 22px);
   background: linear-gradient(145deg, rgba(232, 248, 238, .9), rgba(255, 253, 247, .95));
   box-shadow: var(--shadow-soft);
 }
 
 .hero-panel {
-  padding: 17px 15px;
+  padding: var(--panel-padding);
 }
 
 .soft-panel {
-  padding: 13px;
+  padding: var(--card-padding);
 }
 
 .status-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: var(--content-gap);
 }
 
 .avatar,
@@ -32,8 +33,8 @@
 }
 
 .avatar {
-  width: 48px;
-  height: 48px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -111,7 +112,7 @@
 }
 
 .progress-bar {
-  height: 10px;
+  height: clamp(9px, 2.5vw, 12px);
   overflow: hidden;
   border-radius: 999px;
   background: #eadfc9;
@@ -125,13 +126,13 @@
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: var(--content-gap);
 }
 
 .metric-card {
-  min-height: 78px;
-  padding: 10px;
+  min-height: clamp(74px, 20vw, 88px);
+  padding: var(--card-padding);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: #fff8e5;
@@ -163,8 +164,8 @@
 
 .quick-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 156px), 1fr));
+  gap: var(--content-gap);
   margin-top: 13px;
 }
 
@@ -180,8 +181,8 @@
 }
 
 .feature-card {
-  min-height: 122px;
-  padding: 13px 10px;
+  min-height: clamp(110px, 31vw, 132px);
+  padding: var(--card-padding);
 }
 
 .feature-card:hover,
@@ -191,8 +192,9 @@
 }
 
 .card-icon {
-  width: 40px;
-  height: 40px;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  flex: 0 0 var(--icon-size);
   display: grid;
   place-items: center;
   margin-bottom: 9px;
@@ -223,8 +225,8 @@
 .note-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px;
+  gap: var(--content-gap);
+  padding: var(--card-padding);
 }
 
 .recommend-card {
@@ -255,12 +257,13 @@
 .quest-title,
 .note-title,
 .badge-name {
-  overflow: hidden;
+  overflow: visible;
   color: var(--ink);
   font-size: 20px;
   line-height: 1.05;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .card-sub,
@@ -275,6 +278,10 @@
 
 .text-button {
   flex: 0 0 auto;
+  min-height: var(--control-min-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 9px 12px 10px;
   border-radius: 13px;
   background: var(--green-dark);
@@ -298,6 +305,7 @@
 
 .chip-button {
   flex: 0 0 auto;
+  min-height: calc(var(--control-min-height) - 4px);
   padding: 9px 12px 10px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -319,13 +327,13 @@
 .badge-grid,
 .map-place-list {
   display: grid;
-  gap: 10px;
+  gap: var(--content-gap);
 }
 
 .quest-icon,
 .note-icon {
-  width: 42px;
-  height: 42px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   flex: 0 0 auto;
   display: grid;
   place-items: center;
@@ -345,12 +353,12 @@
 }
 
 .badge-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 146px), 1fr));
 }
 
 .badge-card {
-  min-height: 118px;
-  padding: 12px;
+  min-height: clamp(110px, 30vw, 128px);
+  padding: var(--card-padding);
 }
 
 .badge-card.is-locked {
@@ -360,8 +368,8 @@
 
 .badge-symbol,
 .map-badge {
-  width: 46px;
-  height: 46px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   display: grid;
   place-items: center;
   border-radius: 17px;
@@ -378,7 +386,7 @@
 }
 
 .empty-note {
-  padding: 13px;
+  padding: var(--card-padding);
   border: 1px dashed rgba(10, 143, 72, .28);
   border-radius: 16px;
   background: rgba(232, 248, 238, .72);
