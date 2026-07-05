@@ -234,12 +234,14 @@ CREATE TABLE IF NOT EXISTS ggumdori_selection (
 
 # 변수 의미: baseline 기준 카테고리 seed 데이터다.
 CATEGORY_SEEDS = [
+    ("default", "기본", "대전 탐험을 시작하는 기본 관광 성향", 0),
     ("nature", "자연 관찰", "도심 녹지와 공원을 탐험하는 관광 성향", 10),
     ("science", "과학 문화", "전시와 과학 체험을 선호하는 관광 성향", 20),
     ("downtown", "원도심 걷기", "대전 원도심 골목과 거리를 걷는 관광 성향", 30),
     ("market", "지역 상권", "로컬 상권과 먹거리를 방문하는 관광 성향", 40),
     ("mobility", "이동형", "타슈와 대중교통을 활용해 이동하는 관광 성향", 50),
     ("nightview", "야경 기록", "전망과 야간 관광지를 기록하는 관광 성향", 60),
+    ("hotspring", "온천", "유성온천과 휴식형 장소를 탐험하는 관광 성향", 70),
 ]
 
 
@@ -262,12 +264,14 @@ BADGE_SEEDS = [
 
 # 변수 의미: 꿈돌이 도감 seed 데이터다.
 GGUMDORI_SEEDS = [
+    ("ggumdori_default_1", "기본 꿈돌이", "default", 1, "기본 지급", "/assets/ggumdori/default-1.svg", "대전 탐험을 시작하는 기본 꿈돌이입니다.", "common", 0),
     ("ggumdori_market_2", "제빵 꿈돌이", "market", 2, "market Lv.2", "/assets/ggumdori/market-2.svg", "지역 상권 탐험을 좋아하는 꿈돌이입니다.", "rare", 10),
     ("ggumdori_science_1", "안경 꿈돌이", "science", 1, "science Lv.1", "/assets/ggumdori/science-1.svg", "과학 전시와 실험을 좋아하는 꿈돌이입니다.", "common", 20),
     ("ggumdori_science_2", "플라스크 꿈돌이", "science", 2, "science Lv.2", "/assets/ggumdori/science-2.svg", "깊은 과학 탐험을 상징하는 꿈돌이입니다.", "rare", 21),
     ("ggumdori_nature_2", "숲 탐험 꿈돌이", "nature", 2, "nature Lv.2", "/assets/ggumdori/nature-2.svg", "대전의 녹지를 누비는 꿈돌이입니다.", "rare", 30),
     ("ggumdori_mobility_1", "타슈 꿈돌이", "mobility", 1, "mobility Lv.1", "/assets/ggumdori/mobility-1.svg", "이동형 퀘스트를 즐기는 꿈돌이입니다.", "common", 40),
     ("ggumdori_nightview_2", "야경 꿈돌이", "nightview", 2, "nightview Lv.2", "/assets/ggumdori/nightview-2.svg", "야경과 전망을 수집하는 꿈돌이입니다.", "rare", 50),
+    ("ggumdori_hotspring_1", "온천 꿈돌이", "hotspring", 1, "유성온천 방문", "/assets/ggumdori/hotspring-1.svg", "유성온천 탐험을 기념하는 꿈돌이입니다.", "common", 60),
 ]
 
 
@@ -395,8 +399,38 @@ class QuestbookRepository:
                 """,
                 (user_id, 1, 0, 0, 100),
             )
+            self._ensure_default_ggumdori(user_id, current_time)
             self._connection.execute("UPDATE users SET last_active_at = %s WHERE id = %s", (current_time, user_id))
             return self.get_user(user_id)
+
+    def _ensure_default_ggumdori(self, user_id: str, unlocked_at: str) -> None:
+        """
+        입력: 사용자 ID와 기본 해금 시각.
+        출력: 없음.
+        역할: 기본 꿈돌이를 사용자에게 지급하고 선택값이 없을 때 기본 선택으로 지정한다.
+        호출 예시: self._ensure_default_ggumdori("demo-user", now_iso())
+        """
+        # 변수 의미: 기본 지급 꿈돌이 variant ID다.
+        default_variant_id = "ggumdori_default_1"
+        # 변수 의미: 사용자 기본 꿈돌이 해금 row ID다.
+        user_ggumdori_id = make_id("ug")
+
+        self._connection.execute(
+            """
+            INSERT INTO user_ggumdori(id, user_id, variant_id, unlocked_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, variant_id) DO NOTHING
+            """,
+            (user_ggumdori_id, user_id, default_variant_id, unlocked_at),
+        )
+        self._connection.execute(
+            """
+            INSERT INTO ggumdori_selection(user_id, selected_variant_id, updated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO NOTHING
+            """,
+            (user_id, default_variant_id, unlocked_at),
+        )
 
     def link_user_account(
         self,

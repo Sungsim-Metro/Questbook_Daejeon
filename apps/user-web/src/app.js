@@ -8,7 +8,7 @@ const FALLBACK_USER = {
   nextLevelXp: 1800,
   completedQuestCount: 8,
   badgeCount: 5,
-  selectedGgumdoriName: "안경 꿈돌이",
+  selectedGgumdoriName: "기본 꿈돌이",
 };
 
 // API 요청이 실패했을 때 사용할 기본 위치입니다.
@@ -21,11 +21,13 @@ const FALLBACK_LOCATION = {
 // 화면에서 선택할 수 있는 관광 카테고리 이름입니다.
 const CATEGORY_LABELS = {
   all: "전체",
+  default: "기본",
   nature: "자연",
   science: "과학",
   downtown: "원도심",
   market: "상권",
   mobility: "이동",
+  hotspring: "온천",
   nightview: "야경",
 };
 
@@ -149,11 +151,13 @@ const FALLBACK_NOTES = [
 
 // API 실패 시 꿈돌이 도감 화면을 채우는 기본 항목입니다.
 const FALLBACK_GGUMDORI = [
+  { id: "default-1", name: "기본 꿈돌이", themeCategory: "default", unlocked: true, condition: "기본 지급", imageRef: "/assets/ggumdori/default-1.svg" },
   { id: "science-1", name: "안경 꿈돌이", themeCategory: "science", unlocked: true, condition: "science Lv.1", imageRef: "/assets/ggumdori/science-1.svg" },
   { id: "science-2", name: "플라스크 꿈돌이", themeCategory: "science", unlocked: false, condition: "science Lv.2", imageRef: "/assets/ggumdori/science-2.svg" },
   { id: "market-2", name: "제빵 꿈돌이", themeCategory: "market", unlocked: true, condition: "market Lv.2", imageRef: "/assets/ggumdori/market-2.svg" },
   { id: "nature-2", name: "숲 탐험 꿈돌이", themeCategory: "nature", unlocked: true, condition: "nature Lv.2", imageRef: "/assets/ggumdori/nature-2.svg" },
   { id: "mobility-1", name: "타슈 꿈돌이", themeCategory: "mobility", unlocked: false, condition: "mobility Lv.1", imageRef: "/assets/ggumdori/mobility-1.svg" },
+  { id: "hotspring-1", name: "온천 꿈돌이", themeCategory: "hotspring", unlocked: false, condition: "유성온천 방문", imageRef: "/assets/ggumdori/hotspring-1.svg" },
   { id: "nightview-2", name: "야경 꿈돌이", themeCategory: "nightview", unlocked: false, condition: "nightview Lv.2", imageRef: "/assets/ggumdori/nightview-2.svg" },
 ];
 
@@ -494,7 +498,7 @@ function readStoredQuestStatuses() {
  * 호출 예시: readSelectedGgumdoriId()
  */
 function readSelectedGgumdoriId() {
-  return readStorageValue(SELECTED_GGUMDORI_KEY) || "science-1";
+  return readStorageValue(SELECTED_GGUMDORI_KEY) || "default-1";
 }
 
 /**
