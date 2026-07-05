@@ -33,6 +33,8 @@ docker cp questbook-postgres:/tmp/questbook.dump .questbook/backups/questbook.du
 
 qbook-app 운영 서버에서 Secret Manager 값을 `/opt/Questbook_Daejeon/.env`에 반영하고 앱 API를 재시작한다.
 `NCP_API_ACCESS_KEY`와 `NCP_API_SECRET_KEY`는 앱에서 쓰는 Object Storage 키가 아니라 Secret Manager API를 조회할 Sub Account API 키다.
+신규 Secret은 기본적으로 KMS 리전 격리 키 엔드포인트(`https://ocapi-kr.ncloud.com/secretmanager`)를 사용한다.
+업데이트 이전 전역 키 연동 Secret이면 `--endpoint https://secretmanager.apigw.ntruss.com`를 추가한다.
 
 ```bash
 cd /opt/Questbook_Daejeon

@@ -189,6 +189,7 @@ Secret Manager에 운영 key-value를 이미 등록했다면, 이후에는 `.env
 - Secret Manager 값은 JSON 객체 형태다. 예: `{"QUESTBOOK_JWT_SECRET":"...","QUESTBOOK_DATABASE_URL":"..."}`
 - qbook-app에서 Secret Manager API를 호출할 수 있도록 NAT 또는 아웃바운드 443 경로가 열려 있다.
 - `NCP_API_ACCESS_KEY`와 `NCP_API_SECRET_KEY`는 앱의 Object Storage 키가 아니라 Secret Manager 조회 권한이 있는 Sub Account API 키다.
+- 신규 Secret은 기본적으로 KMS 리전 격리 키 엔드포인트(`https://ocapi-kr.ncloud.com/secretmanager`)를 사용한다. 업데이트 이전 전역 키 연동 Secret이면 `--endpoint https://secretmanager.apigw.ntruss.com`를 추가한다.
 
 첫 적용은 qbook-app에서 dry-run으로 key 목록을 확인한 뒤 실제 반영한다.
 

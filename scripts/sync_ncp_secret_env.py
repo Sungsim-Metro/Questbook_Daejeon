@@ -24,8 +24,8 @@ DEFAULT_ENV_FILE = Path("/opt/Questbook_Daejeon/.env")
 DEFAULT_SERVICE_NAME = "questbook-api"
 # 변수 의미: 앱 API 로컬 헬스체크 기본 URL이다.
 DEFAULT_HEALTH_URL = "http://127.0.0.1:8100/api/health"
-# 변수 의미: Secret Manager 전역 키 연동 Secret의 기본 API 엔드포인트다.
-DEFAULT_SECRET_MANAGER_ENDPOINT = "https://secretmanager.apigw.ntruss.com"
+# 변수 의미: Secret Manager 리전 격리 키 연동 Secret의 기본 API 엔드포인트다.
+DEFAULT_SECRET_MANAGER_ENDPOINT = "https://ocapi-kr.ncloud.com/secretmanager"
 # 변수 의미: Secret Manager 시크릿 값 조회 API 경로 형식이다.
 SECRET_VALUE_PATH_TEMPLATE = "/api/v1/secrets/{secret_id}/values"
 # 변수 의미: dotenv 환경 변수 이름으로 허용할 패턴이다.
@@ -132,16 +132,24 @@ def build_secret_value_request(endpoint: str, secret_id: str, access_key: str, s
     """
     # 변수 의미: 정규화된 엔드포인트 URL이다.
     normalized_endpoint = endpoint.rstrip("/")
+    # 변수 의미: scheme, host, base path로 나눈 엔드포인트 구성이다.
+    parsed_endpoint = urlparse(normalized_endpoint)
+    # 변수 의미: API origin이다.
+    endpoint_origin = f"{parsed_endpoint.scheme}://{parsed_endpoint.netloc}"
+    # 변수 의미: 엔드포인트에 포함된 서비스 base path다.
+    endpoint_base_path = parsed_endpoint.path.rstrip("/")
     # 변수 의미: URL path에서 안전하게 인코딩한 secretId다.
     encoded_secret_id = quote(secret_id, safe="")
     # 변수 의미: Secret Manager 값 조회 API 경로다.
-    path = SECRET_VALUE_PATH_TEMPLATE.format(secret_id=encoded_secret_id)
+    api_path = SECRET_VALUE_PATH_TEMPLATE.format(secret_id=encoded_secret_id)
+    # 변수 의미: 실제 요청과 NCP 서명에 함께 사용할 경로다.
+    signed_path = f"{endpoint_base_path}{api_path}" if endpoint_base_path else api_path
     # 변수 의미: API Gateway 인증 timestamp 밀리초 문자열이다.
     timestamp = str(int(time.time() * 1000))
     # 변수 의미: NCP API Gateway 서명 헤더 값이다.
-    signature = make_ncp_signature("GET", path, timestamp, access_key, secret_key)
+    signature = make_ncp_signature("GET", signed_path, timestamp, access_key, secret_key)
     # 변수 의미: 완성된 API URL이다.
-    url = f"{normalized_endpoint}{path}"
+    url = f"{endpoint_origin}{signed_path}"
     return Request(
         url,
         method="GET",
