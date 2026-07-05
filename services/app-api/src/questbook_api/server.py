@@ -15,6 +15,7 @@ from questbook_api.domain.auth.tokens import create_access_token, verify_access_
 from questbook_api.infrastructure.cache import TourPlaceRedisCache
 from questbook_api.infrastructure.oauth_state import OAuthStateError, OAuthStateStore
 from questbook_api.infrastructure.repository import QuestbookRepository
+from questbook_api.integrations.object_storage.client import ObjectStorageClient
 from questbook_api.integrations.oauth import client as oauth_client
 from questbook_api.integrations.tourapi.client import TourApiClient
 from questbook_api.settings import AppSettings
@@ -53,6 +54,8 @@ class AppState:
     service: BaselineQuestbookService
     # 변수 의미: OAuth 로그인 state 저장소다.
     oauth_state: OAuthStateStore
+    # 변수 의미: NCP Object Storage presigned URL 클라이언트다.
+    object_storage: ObjectStorageClient | None = None
 
 
 def build_json_bytes(payload: dict[str, Any]) -> bytes:
@@ -332,6 +335,9 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                         },
                     )
                     return
+                if path == "/api/object-storage/config":
+                    self._send_json(HTTPStatus.OK, self._object_storage_client().status())
+                    return
                 if path == "/api/naver-map/geocode":
                     self._handle_naver_geocode(query)
                     return
@@ -373,6 +379,20 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     payload = self._read_json_body()
                     self._send_json(HTTPStatus.OK, self._handle_oauth_code_redeem(payload))
                     return
+                if path_parts == ["api", "object-storage", "upload-url"]:
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
+                    user_id = self._required_user_id()
+                    # 변수 의미: Object Storage 업로드 URL 발급 요청 본문이다.
+                    payload = self._read_json_body()
+                    self._send_json(HTTPStatus.OK, self._handle_object_storage_upload_url(user_id, payload))
+                    return
+                if path_parts == ["api", "object-storage", "download-url"]:
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
+                    user_id = self._required_user_id()
+                    # 변수 의미: Object Storage 다운로드 URL 발급 요청 본문이다.
+                    payload = self._read_json_body()
+                    self._send_json(HTTPStatus.OK, self._handle_object_storage_download_url(user_id, payload))
+                    return
                 if len(path_parts) == 4 and path_parts[:2] == ["api", "quests"]:
                     # 변수 의미: 토큰에서 검증한 사용자 ID다.
                     user_id = self._required_user_id()
@@ -399,6 +419,9 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
             except ValueError as error:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": str(error)})
+                return
+            except RuntimeError as error:
+                self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "service_unavailable", "message": str(error)})
                 return
             except Exception as error:
                 self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error", "message": str(error)})
@@ -431,7 +454,10 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     "entries": state.cache.size(),
                     "ttlSeconds": state.cache.default_ttl_seconds,
                 },
-                "externalApis": {"tourapi": state.service.tour_client.status()},
+                "externalApis": {
+                    "tourapi": state.service.tour_client.status(),
+                    "objectStorage": self._object_storage_client().status(),
+                },
             }
 
         def _auth_providers_payload(self) -> dict[str, Any]:
@@ -477,6 +503,15 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             except ValueError as error:
                 raise PermissionError(str(error)) from error
             return str(payload["sub"])
+
+        def _object_storage_client(self) -> ObjectStorageClient:
+            """
+            입력: 없음.
+            출력: Object Storage 클라이언트.
+            역할: 테스트에서 주입한 클라이언트가 없으면 설정 기반 기본 클라이언트를 만든다.
+            호출 예시: client = self._object_storage_client()
+            """
+            return state.object_storage or ObjectStorageClient(state.settings)
 
         def _handle_demo_login(self, payload: dict[str, Any]) -> dict[str, Any]:
             """
@@ -678,6 +713,37 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             # 변수 의미: 서명된 baseline access token이다.
             app_token = create_access_token(user_id, provider, state.settings.jwt_secret)
             return {"accessToken": app_token, "tokenType": "Bearer", "provider": provider}
+
+        def _handle_object_storage_upload_url(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            """
+            입력: 사용자 ID와 업로드 URL 요청 본문.
+            출력: Object Storage presigned POST 정보.
+            역할: 사진 파일을 앱 서버 경유 없이 비공개 버킷으로 올릴 수 있게 한다.
+            호출 예시: response = self._handle_object_storage_upload_url("usr_x", payload)
+            """
+            # 변수 의미: 업로드 목적이다.
+            purpose = str(payload.get("purpose") or "")
+            # 변수 의미: 브라우저가 업로드할 이미지 Content-Type이다.
+            content_type = str(payload.get("contentType") or "")
+            # 변수 의미: 퀘스트 증빙일 때 연결할 사용자별 퀘스트 인스턴스 ID다.
+            quest_instance_id = str(payload.get("questInstanceId") or "")
+            return self._object_storage_client().create_presigned_upload(
+                user_id=user_id,
+                purpose=purpose,
+                content_type=content_type,
+                quest_instance_id=quest_instance_id,
+            )
+
+        def _handle_object_storage_download_url(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            """
+            입력: 사용자 ID와 다운로드 URL 요청 본문.
+            출력: Object Storage presigned GET 정보.
+            역할: 본인 prefix에 저장된 사진을 과거 기록 확인이나 공유 직전에만 읽게 한다.
+            호출 예시: response = self._handle_object_storage_download_url("usr_x", payload)
+            """
+            # 변수 의미: 읽을 Object Storage 객체 키다.
+            object_key = str(payload.get("objectKey") or "")
+            return self._object_storage_client().create_presigned_download(user_id, object_key)
 
         def _safe_error_code(self, error: Exception) -> str:
             """
@@ -907,7 +973,16 @@ def build_state(settings: AppSettings) -> AppState:
     service = BaselineQuestbookService(repository, cache, tour_client)
     # 변수 의미: OAuth 로그인 state 저장소다.
     oauth_state = OAuthStateStore(settings.redis_url)
-    return AppState(settings=settings, repository=repository, cache=cache, service=service, oauth_state=oauth_state)
+    # 변수 의미: NCP Object Storage presigned URL 클라이언트다.
+    object_storage = ObjectStorageClient(settings)
+    return AppState(
+        settings=settings,
+        repository=repository,
+        cache=cache,
+        service=service,
+        oauth_state=oauth_state,
+        object_storage=object_storage,
+    )
 
 
 def run_server(settings: AppSettings) -> None:

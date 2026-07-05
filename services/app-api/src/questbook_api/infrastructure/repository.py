@@ -793,12 +793,13 @@ class QuestbookRepository:
         instance: dict[str, Any],
         verification_result: dict[str, Any],
         distance_km: float,
+        photo_ref: str | None = None,
     ) -> dict[str, Any] | None:
         """
-        입력: 사용자 ID, 인스턴스와 공용 퀘스트 정보, 인증 결과, 이동 거리.
+        입력: 사용자 ID, 인스턴스와 공용 퀘스트 정보, 인증 결과, 이동 거리, 선택적 사진 객체 키.
         출력: 완료 처리 결과 딕셔너리 또는 이미 완료된 경우 None.
         역할: QuestCompletion, LevelProgress, UserBadge, UserGgumdori, AdventureNote를 하나의 트랜잭션으로 갱신한다.
-        호출 예시: result = repository.complete_quest(user_id, instance, verification, 0.2)
+        호출 예시: result = repository.complete_quest(user_id, instance, verification, 0.2, photo_ref)
         """
         with self._lock, self._connection.transaction():
             # 변수 의미: 완료 시각 문자열이다.
@@ -835,7 +836,7 @@ class QuestbookRepository:
                     completed_at,
                     earned_xp,
                     Jsonb(verification_result),
-                    None,
+                    photo_ref,
                     note_id,
                 ),
             )

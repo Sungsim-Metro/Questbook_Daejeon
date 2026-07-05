@@ -10,6 +10,7 @@
 - 추천, 퀘스트, 인증, 뱃지, 수첩, 리워드 도메인은 `services/app-api/`의 Python 앱 서버에서 담당한다.
 - 한국관광공사 OpenAPI 원본 응답 전체는 영구 저장하지 않는다.
 - OpenAPI 응답은 사용자, 위치 권역, 카테고리 기준의 Redis 30분 임시 캐시에만 둔다.
+- 사진 증빙 원본은 PostgreSQL이 아니라 NCP Object Storage 비공개 버킷에 두고 DB에는 객체 키만 남긴다.
 - API Key, access token, secret 값은 코드와 저장소에 넣지 않는다.
 - 운영 데이터베이스는 PostgreSQL, 서버 캐시는 Redis로 확정한다.
 - baseline 스키마는 PostgreSQL 마이그레이션과 앱 API 내장 초기화 SQL이 같은 정의를 사용한다.
@@ -63,7 +64,7 @@ scripts/             개발, 검수, 배포 보조 스크립트
 | `domain/notes/` | `AdventureNote`, 공유 카드 참조 |
 | `domain/partners/` | `PartnerStore`, `PartnerAccount` |
 | `domain/ggumdori/` | `GgumdoriVariant`, `UserGgumdori`, `GgumdoriSelection` |
-| `integrations/` | 한국관광공사 OpenAPI, NAVER Maps REST API, Gemini API, OAuth 제공자 |
+| `integrations/` | 한국관광공사 OpenAPI, NAVER Maps REST API, Gemini API, OAuth 제공자, Object Storage |
 | `infrastructure/` | PostgreSQL, 마이그레이션 연결, Redis, 파일 저장소, 트랜잭션 |
 | `observability/` | 로그, 헬스체크, 지표, 외부 API 실패 진단 |
 

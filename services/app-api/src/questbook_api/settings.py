@@ -98,6 +98,39 @@ def normalize_public_base_url(raw_value: str, default: str = "http://localhost:8
     return candidate
 
 
+def normalize_object_storage_endpoint_url(
+    raw_value: str,
+    default: str = "https://kr.object.ncloudstorage.com",
+) -> str:
+    """
+    입력: 환경 변수에서 읽은 Object Storage 엔드포인트 후보와 기본값.
+    출력: 검증된 Object Storage 엔드포인트 origin 문자열.
+    역할: S3 호환 SDK에 path/query/fragment가 섞인 엔드포인트가 전달되지 않게 한다.
+    호출 예시: endpoint = normalize_object_storage_endpoint_url(get_env("NCP_OBJECT_STORAGE_ENDPOINT_URL"))
+    """
+    # 변수 의미: 비어 있으면 대체할 Object Storage endpoint 후보 값이다.
+    candidate = (raw_value or default).strip().rstrip("/")
+    # 변수 의미: 파싱한 Object Storage endpoint URL이다.
+    parsed_url = urlparse(candidate)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("NCP_OBJECT_STORAGE_ENDPOINT_URL must be an absolute http(s) origin.")
+    if parsed_url.path or parsed_url.params or parsed_url.query or parsed_url.fragment:
+        raise ValueError("NCP_OBJECT_STORAGE_ENDPOINT_URL must not include path, query, or fragment.")
+    return candidate
+
+
+def normalize_object_storage_addressing_style(raw_value: str, default: str = "path") -> str:
+    """
+    입력: S3 addressing style 환경 변수와 기본값.
+    출력: botocore Config에 전달할 addressing style.
+    역할: NCP Object Storage 호환성을 위해 허용된 style만 사용한다.
+    호출 예시: style = normalize_object_storage_addressing_style("path")
+    """
+    # 변수 의미: 소문자로 정규화한 addressing style 후보 값이다.
+    candidate = (raw_value or default).strip().lower()
+    return candidate if candidate in {"path", "virtual"} else default
+
+
 @dataclass(frozen=True)
 class AppSettings:
     """
@@ -137,6 +170,22 @@ class AppSettings:
     google_oauth_client_id: str
     # 변수 의미: 구글 로그인 OAuth client secret이다.
     google_oauth_client_secret: str
+    # 변수 의미: NCP Object Storage S3 호환 API 엔드포인트다.
+    object_storage_endpoint_url: str = "https://kr.object.ncloudstorage.com"
+    # 변수 의미: NCP Object Storage 리전 이름이다.
+    object_storage_region_name: str = "kr-standard"
+    # 변수 의미: Questbook 사진 증빙을 저장할 비공개 버킷 이름이다.
+    object_storage_bucket_name: str = ""
+    # 변수 의미: Object Storage 접근용 API Access Key ID다.
+    object_storage_access_key: str = ""
+    # 변수 의미: Object Storage 접근용 API Secret Key다.
+    object_storage_secret_key: str = ""
+    # 변수 의미: presigned 업로드와 다운로드 URL 만료 시간 초 단위 값이다.
+    object_storage_presigned_url_ttl_seconds: int = 600
+    # 변수 의미: 브라우저 직접 업로드에서 허용할 최대 파일 크기 바이트 값이다.
+    object_storage_max_upload_bytes: int = 10 * 1024 * 1024
+    # 변수 의미: S3 호환 요청의 bucket addressing style이다.
+    object_storage_addressing_style: str = "path"
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -191,4 +240,26 @@ class AppSettings:
             naver_oauth_client_secret=naver_oauth_client_secret,
             google_oauth_client_id=google_oauth_client_id,
             google_oauth_client_secret=google_oauth_client_secret,
+            object_storage_endpoint_url=normalize_object_storage_endpoint_url(
+                get_env("NCP_OBJECT_STORAGE_ENDPOINT_URL", "https://kr.object.ncloudstorage.com")
+            ),
+            object_storage_region_name=get_env("NCP_OBJECT_STORAGE_REGION_NAME", "kr-standard") or "kr-standard",
+            object_storage_bucket_name=get_env("NCP_OBJECT_STORAGE_BUCKET_NAME"),
+            object_storage_access_key=get_env("NCP_OBJECT_STORAGE_ACCESS_KEY"),
+            object_storage_secret_key=get_env("NCP_OBJECT_STORAGE_SECRET_KEY"),
+            object_storage_presigned_url_ttl_seconds=get_int_env(
+                "NCP_OBJECT_STORAGE_PRESIGNED_URL_TTL_SECONDS",
+                600,
+                60,
+                3600,
+            ),
+            object_storage_max_upload_bytes=get_int_env(
+                "NCP_OBJECT_STORAGE_MAX_UPLOAD_BYTES",
+                10 * 1024 * 1024,
+                1,
+                100 * 1024 * 1024,
+            ),
+            object_storage_addressing_style=normalize_object_storage_addressing_style(
+                get_env("NCP_OBJECT_STORAGE_ADDRESSING_STYLE", "path")
+            ),
         )

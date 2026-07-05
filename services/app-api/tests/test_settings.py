@@ -92,6 +92,26 @@ class AppSettingsTest(unittest.TestCase):
 
         self.assertEqual(settings.jwt_secret, strong_secret)
 
+    def test_object_storage_settings_use_ncp_korea_defaults(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: Object Storage 설정이 NCP 한국 리전 기본값과 환경 변수 값을 함께 읽는지 확인한다.
+        호출 예시: self.test_object_storage_settings_use_ncp_korea_defaults()
+        """
+        # 변수 의미: Object Storage 환경 변수가 포함된 앱 설정이다.
+        settings = self._settings_from_env({
+            "QUESTBOOK_APP_API_HOST": "127.0.0.1",
+            "NCP_OBJECT_STORAGE_BUCKET_NAME": "qbook-evidence-test",
+            "NCP_OBJECT_STORAGE_ACCESS_KEY": "access-key",
+            "NCP_OBJECT_STORAGE_SECRET_KEY": "secret-key",
+        })
+
+        self.assertEqual(settings.object_storage_endpoint_url, "https://kr.object.ncloudstorage.com")
+        self.assertEqual(settings.object_storage_region_name, "kr-standard")
+        self.assertEqual(settings.object_storage_bucket_name, "qbook-evidence-test")
+        self.assertEqual(settings.object_storage_presigned_url_ttl_seconds, 600)
+
 
 if __name__ == "__main__":
     unittest.main()

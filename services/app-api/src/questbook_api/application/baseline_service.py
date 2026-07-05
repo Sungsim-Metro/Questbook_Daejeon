@@ -8,6 +8,7 @@ from typing import Any
 from questbook_api.domain.models import QuestTemplate, TourPlaceCandidate
 from questbook_api.infrastructure.cache import TourPlaceRedisCache, utc_now
 from questbook_api.infrastructure.repository import QuestbookRepository
+from questbook_api.integrations.object_storage.client import sanitize_object_key_token
 from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters
 
 
@@ -215,8 +216,10 @@ class BaselineQuestbookService:
         if verification_result["decision"] != "approved":
             return {"ok": False, "verification": verification_result, "retryable": True}
 
+        # 변수 의미: Object Storage에 저장된 사진 증빙 객체 키다.
+        photo_ref = self._normalize_photo_ref(user_id, payload)
         # 변수 의미: 완료 트랜잭션 결과다.
-        completion = self.repository.complete_quest(user_id, instance, verification_result, distance_km)
+        completion = self.repository.complete_quest(user_id, instance, verification_result, distance_km, photo_ref)
         if completion is None:
             return {"ok": False, "reason": "already_completed", "retryable": False}
         return {"ok": True, "verification": verification_result, "completion": completion}
@@ -436,6 +439,26 @@ class BaselineQuestbookService:
         if not normalized_expected or not normalized_ocr:
             return False
         return normalized_expected in normalized_ocr or normalized_ocr in normalized_expected
+
+    def _normalize_photo_ref(self, user_id: str, payload: dict[str, Any]) -> str | None:
+        """
+        입력: 사용자 ID와 완료 인증 요청 페이로드.
+        출력: 현재 사용자 prefix에 속한 Object Storage 객체 키 또는 None.
+        역할: 완료 기록에 저장할 사진 참조가 다른 사용자 경로를 가리키지 않게 한다.
+        호출 예시: photo_ref = self._normalize_photo_ref("usr_x", {"photoRef": "users/usr_x/..."})
+        """
+        # 변수 의미: 클라이언트가 제출한 사진 객체 키 후보 값이다.
+        raw_photo_ref = str(payload.get("photoRef") or payload.get("objectKey") or "").strip()
+        if not raw_photo_ref:
+            return None
+
+        # 변수 의미: 현재 사용자에게 허용된 Object Storage 객체 키 prefix다.
+        allowed_prefix = f"users/{sanitize_object_key_token(user_id, 'user')}/"
+        if raw_photo_ref.startswith("/") or "/../" in f"/{raw_photo_ref}/":
+            raise ValueError("Invalid photoRef.")
+        if not raw_photo_ref.startswith(allowed_prefix):
+            raise ValueError("photoRef is outside the current user prefix.")
+        return raw_photo_ref
 
     def _quest_payload(self, reusable_quest: dict[str, Any], instance: dict[str, Any]) -> dict[str, Any]:
         """

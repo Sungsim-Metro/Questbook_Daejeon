@@ -5,6 +5,7 @@
 - `run_baseline.py`: 사용자 PWA, 웹 게이트웨이, 앱 API를 함께 실행한다.
 - `backup_postgres.py`: 로컬 PostgreSQL baseline DB를 `pg_dump --format=custom` 형식으로 백업한다.
 - `check_local_data_services.py`: 로컬 PostgreSQL과 Redis 연결 가능 여부를 점검한다.
+- `check_object_storage.py`: NCP Object Storage 버킷 접근 가능 여부를 비밀 값 출력 없이 점검한다.
 
 백업 전제: `docker compose -f infra/local/postgres-redis.compose.yaml up -d`로 로컬 PostgreSQL/Redis compose 스택을 먼저 실행한다.
 

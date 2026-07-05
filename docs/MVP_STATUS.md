@@ -30,6 +30,7 @@ baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 Po
 - GPS 반경 기반 퀘스트 완료 처리
 - XP, 레벨, 뱃지, 수첩 기록 갱신 트랜잭션
 - 꿈돌이 도감 해금 상태 조회
+- NCP Object Storage presigned 사진 증빙 업로드·다운로드 URL 발급 경계
 
 ## 2. 구현된 화면
 
@@ -88,9 +89,11 @@ baseline 분리 서버는 다음 파일로 구성된다.
 - `services/app-api/src/questbook_api/infrastructure/repository.py`: PostgreSQL 스키마, seed, 트랜잭션
 - `services/app-api/src/questbook_api/infrastructure/cache.py`: 유저 단위 30분 Redis 캐시
 - `services/app-api/src/questbook_api/integrations/tourapi/client.py`: TourAPI 호출과 fallback
+- `services/app-api/src/questbook_api/integrations/object_storage/client.py`: NCP Object Storage presigned URL 발급
 - `infra/nginx/questbook-baseline.conf`: 운영 웹 서버 baseline 설정 예시
 - `infra/ncp/baseline-topology.yaml`: NCP VPC/subnet baseline 토폴로지
 - `scripts/backup_postgres.py`: 로컬 PostgreSQL baseline 백업 스크립트
+- `scripts/check_object_storage.py`: NCP Object Storage 버킷 연결 점검 스크립트
 
 ## 4. 현재 파일 구조
 
@@ -109,6 +112,7 @@ baseline 분리 서버는 다음 파일로 구성된다.
 │  ├─ Design.md
 │  ├─ IMPLEMENTATION_STRUCTURE.md
 │  ├─ MVP_STATUS.md
+│  ├─ object-storage-setup.md
 │  └─ PROJECT_DESIGN.md
 ├─ apps/
 │  └─ user-web/
@@ -134,6 +138,7 @@ baseline 분리 서버는 다음 파일로 구성된다.
 ├─ scripts/
 │  ├─ backup_postgres.py
 │  ├─ check_local_data_services.py
+│  ├─ check_object_storage.py
 │  └─ run_baseline.py
 ├─ tests/
 │  └─ smoke/test_baseline_http.py
@@ -164,7 +169,7 @@ baseline 분리 서버는 다음 파일로 구성된다.
 - 목업 퀘스트: 방문형, 이동형, 소비형, 테마형, 활동형
 - 목업 수첩 기록: 완료 기록과 추천 대기 기록
 
-baseline 분리 구현은 현재 PostgreSQL에 사용자, 선호도, 레벨, 뱃지, 공용 퀘스트, 사용자별 퀘스트 인스턴스, 완료 기록, 수첩 기록, 꿈돌이 해금 상태를 저장한다. TourAPI 장소 후보는 영구 저장하지 않고, 앱 서버의 Redis 캐시에 유저 단위 30분 TTL로 보관한다.
+baseline 분리 구현은 현재 PostgreSQL에 사용자, 선호도, 레벨, 뱃지, 공용 퀘스트, 사용자별 퀘스트 인스턴스, 완료 기록, 수첩 기록, 꿈돌이 해금 상태를 저장한다. TourAPI 장소 후보는 영구 저장하지 않고, 앱 서버의 Redis 캐시에 유저 단위 30분 TTL로 보관한다. 사진 증빙 원본은 NCP Object Storage 비공개 버킷을 전제로 presigned URL 발급 경계만 준비되어 있으며, DB에는 `photo_ref` 객체 키만 저장한다.
 
 ## 6. 현재 미구현 범위
 
@@ -175,7 +180,7 @@ baseline 분리 구현은 현재 PostgreSQL에 사용자, 선호도, 레벨, 뱃
 - HTTPS 운영 인증서와 HSTS 운영 적용
 - 정식 개인정보 처리방침 게시와 동의 철회 UI
 - 회원 탈퇴 시 데이터 파기 자동화
-- 사진 인증 파일 업로드, EXIF 제거, 영수증 OCR 상호명 대조
+- 프런트엔드 사진 업로드 UI 연결, EXIF 제거, 영수증 OCR 상호명 대조
 - Gemini 기반 퀘스트 문구 다양화
 - 지역 상권 리워드 발급
 - 파트너 포털과 쿠폰 사용 처리

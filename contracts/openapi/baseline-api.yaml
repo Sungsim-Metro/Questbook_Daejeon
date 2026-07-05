@@ -122,6 +122,9 @@ paths:
                   type: number
                 accuracyMeters:
                   type: number
+                photoRef:
+                  type: string
+                  description: Object Storage에 업로드한 사진 증빙 객체 키
       responses:
         "200":
           description: 완료 성공 또는 재시도 가능한 인증 실패
@@ -155,6 +158,59 @@ paths:
       responses:
         "200":
           description: Key ID 설정 여부와 REST 프록시 활성 상태
+  /api/object-storage/config:
+    get:
+      summary: 비밀값 없이 NCP Object Storage 설정 준비 상태를 반환한다.
+      responses:
+        "200":
+          description: endpoint, region, bucket 설정 여부, presigned URL 정책
+  /api/object-storage/upload-url:
+    post:
+      summary: 사진 증빙 업로드용 Object Storage presigned PUT URL을 발급한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose, contentType]
+              properties:
+                purpose:
+                  type: string
+                  enum: [quest_receipt, quest_photo, user_auth_photo]
+                contentType:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp, image/heic, image/heif]
+                questInstanceId:
+                  type: string
+                  description: quest_receipt와 quest_photo 목적일 때 필수
+      responses:
+        "200":
+          description: 브라우저가 PUT으로 직접 업로드할 URL, headers, objectKey
+        "503":
+          description: Object Storage 환경 변수가 아직 설정되지 않음
+  /api/object-storage/download-url:
+    post:
+      summary: 본인 사진 증빙 조회용 Object Storage presigned GET을 발급한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectKey]
+              properties:
+                objectKey:
+                  type: string
+      responses:
+        "200":
+          description: 짧은 만료 시간의 다운로드 URL
+        "401":
+          description: 현재 사용자 prefix 밖의 객체 키 요청
 components:
   securitySchemes:
     bearerAuth:
