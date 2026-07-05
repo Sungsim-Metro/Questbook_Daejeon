@@ -1,0 +1,478 @@
+/* Questbook 3a "내 꿈돌이 + 도감" 레트로 픽셀 테마.
+   base.css / components.css / pages.css 뒤에 로드하세요. */
+
+/* 픽셀 폰트 (둥근모꼴 계열 Galmuri11) */
+@import url('https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css');
+
+:root {
+  --px-ink: #22211c;
+  --px-sub: #6d6553;
+  --px-paper: #fdf6e3;
+  --px-line: #1b1b1b;
+  --px-blue: #2e8be6;
+  --px-blue-soft: #e9f3ff;
+  --px-yellow: #ffc233;
+  --px-green: #2e9e4f;
+  --px-green-2: #37c05f;
+  --px-shadow: 4px 4px 0 rgba(27, 27, 27, .85);
+}
+
+body,
+body button,
+body input,
+body select,
+body textarea {
+  font-family: 'Galmuri11', 'Noto Sans KR', system-ui, sans-serif;
+  font-weight: normal;
+}
+
+body {
+  color: var(--px-ink);
+  background: #e8dfc8;
+}
+
+.app-shell {
+  background: var(--px-paper);
+  box-shadow: none;
+}
+
+/* 공책 줄/세로선 배경 제거 */
+.app-shell::before,
+.app-shell::after {
+  display: none;
+}
+
+@media (min-width: 720px) {
+  .app-shell {
+    border: 3px solid var(--px-line);
+    border-radius: 0;
+    box-shadow: 8px 8px 0 rgba(27, 27, 27, .85);
+  }
+}
+
+/* ── 헤더 ── */
+.app-header {
+  background: var(--px-blue);
+  border-bottom: 3px solid var(--px-line);
+}
+
+.app-mark {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: var(--px-paper);
+  color: var(--px-ink);
+}
+
+.app-eyebrow {
+  letter-spacing: .12em;
+  font-size: 11px;
+}
+
+.app-title {
+  font-size: 19px;
+  text-shadow: 2px 2px 0 rgba(27, 27, 27, .5);
+  letter-spacing: .04em;
+}
+
+.level-pill {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  box-shadow: 2px 2px 0 var(--px-line);
+  background: var(--px-yellow);
+  color: var(--px-ink);
+  font-size: 13px;
+}
+
+/* ── 픽셀 카드 공통 ── */
+.hero-panel,
+.soft-panel,
+.metric-card,
+.feature-card,
+.quest-card,
+.note-card,
+.recommend-card,
+.badge-card,
+.map-tools,
+.map-detail-card,
+.map-place-button,
+.empty-note {
+  border-radius: 0 !important;
+  border: 3px solid var(--px-line) !important;
+  background: #fff !important;
+  box-shadow: var(--px-shadow) !important;
+}
+
+.section-title {
+  color: var(--px-ink);
+  font-size: 15px;
+}
+
+.page-kicker {
+  color: var(--px-blue);
+  font-size: 13px;
+  letter-spacing: .06em;
+}
+
+.page-title {
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.page-copy,
+.data-note {
+  color: var(--px-sub);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.data-note {
+  padding: 10px 11px;
+  border: 2px dashed #b3a887;
+  background: rgba(255, 255, 255, .6);
+}
+
+/* 칩/뱃지류 */
+.xp-chip,
+.type-chip,
+.state-chip {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: var(--px-yellow);
+  color: var(--px-ink);
+}
+
+.avatar,
+.card-icon,
+.quest-icon,
+.note-icon,
+.badge-symbol,
+.map-badge {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: var(--px-blue-soft);
+}
+
+/* 필터 칩 */
+.chip-button {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  color: var(--px-ink);
+  box-shadow: 2px 2px 0 rgba(27, 27, 27, .85);
+  font-size: 12px;
+}
+
+.chip-button.is-active {
+  border-color: var(--px-line);
+  background: var(--px-blue);
+  color: #fff;
+}
+
+.text-button {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  box-shadow: 2px 2px 0 rgba(27, 27, 27, .85);
+}
+
+/* ── 지도 화면 ── */
+.map-provider-pill {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  font-size: 11px;
+}
+
+.map-input {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  font-size: 13px;
+}
+
+.map-input:focus {
+  border-color: var(--px-blue);
+  box-shadow: 2px 2px 0 rgba(46, 139, 230, .5);
+}
+
+.map-action-button,
+.map-secondary-button {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  box-shadow: 2px 2px 0 rgba(27, 27, 27, .85);
+  font-size: 12px;
+}
+
+.map-action-button {
+  background: var(--px-blue);
+}
+
+.map-secondary-button {
+  background: #fff;
+  color: var(--px-ink);
+}
+
+.map-action-button:active,
+.map-secondary-button:active,
+.chip-button:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.map-shell {
+  border-radius: 0;
+  border: 3px solid var(--px-line);
+  box-shadow: var(--px-shadow);
+}
+
+.map-field span,
+.map-position-status {
+  font-size: 11px;
+}
+
+.map-place-button.is-selected {
+  border-color: var(--px-blue) !important;
+  background: var(--px-blue-soft) !important;
+}
+
+/* ── 뱃지 화면 ── */
+.badge-hero {
+  background: var(--px-blue);
+  border-bottom: 3px solid var(--px-line);
+}
+
+.featured-badge {
+  border-radius: 0;
+  border: 3px solid var(--px-line);
+  box-shadow: 5px 5px 0 rgba(27, 27, 27, .85);
+}
+
+.badge-hero-label {
+  font-size: 11px;
+  letter-spacing: .14em;
+}
+
+.badge-hero-title {
+  font-size: 24px;
+  text-shadow: 2px 2px 0 rgba(27, 27, 27, .5);
+}
+
+.stamp {
+  border-radius: 0 !important;
+}
+
+.stamp.is-done {
+  border: 2px solid var(--px-line);
+  background: #fff;
+}
+
+.stamp.is-empty {
+  border: 2px dashed #b3a887;
+}
+
+.badge-card.is-locked {
+  opacity: 1;
+  filter: none;
+  background: #efe9d8 !important;
+}
+
+.badge-card.is-locked .badge-symbol {
+  filter: grayscale(1) brightness(.7);
+}
+
+/* 진행 바 → 픽셀 EXP 바 */
+.progress-bar {
+  height: 16px;
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+  padding: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg,
+    var(--px-green) 0, var(--px-green) 6px,
+    var(--px-green-2) 6px, var(--px-green-2) 12px);
+}
+
+/* ── 하단 내비게이션 ── */
+.bottom-nav {
+  border-top: 3px solid var(--px-line);
+  background: var(--px-paper);
+  box-shadow: none;
+}
+
+.nav-link {
+  color: #8b8267;
+  font-size: 11px;
+}
+
+.nav-link.is-active {
+  color: var(--px-blue);
+}
+
+/* ═══ 꿈돌이 히어로 카드 (3a) ═══ */
+.gd-hero {
+  display: flex;
+  margin-top: 12px;
+  border: 3px solid var(--px-line);
+  background: #fff;
+  box-shadow: 5px 5px 0 rgba(27, 27, 27, .85);
+}
+
+.gd-hero-img {
+  width: 40%;
+  max-width: 156px;
+  flex: 0 0 auto;
+  border-right: 3px solid var(--px-line);
+  background: #bfe0f8 center 40% / cover no-repeat;
+  image-rendering: pixelated;
+}
+
+.gd-hero-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 13px 13px 15px;
+}
+
+.gd-hero-quote {
+  align-self: flex-start;
+  padding: 7px 9px 8px;
+  border: 2px solid var(--px-line);
+  background: var(--px-blue-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.gd-hero-name-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.gd-hero-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.gd-equipped-tag {
+  padding: 2px 6px 3px;
+  border: 2px solid var(--px-line);
+  background: var(--px-green);
+  color: #fff;
+  font-size: 10px;
+}
+
+.gd-hero-meta {
+  margin: 5px 0 0;
+  color: var(--px-sub);
+  font-size: 11px;
+}
+
+/* ═══ 꿈돌이 도감 (3a) ═══ */
+.gd-dex-caption {
+  margin-left: 8px;
+  color: #8b8267;
+  font-size: 11px;
+}
+
+.gd-dex-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.gd-dex-tile {
+  padding: 0;
+  border: 3px solid var(--px-line);
+  background: #fff;
+  box-shadow: 3px 3px 0 rgba(27, 27, 27, .85);
+  text-align: center;
+  color: var(--px-ink);
+  font-size: 10px;
+}
+
+.gd-dex-tile.is-equipped {
+  border-color: #e8a800;
+  box-shadow: 3px 3px 0 #e8a800;
+}
+
+.gd-dex-tile.is-locked {
+  cursor: default;
+}
+
+.gd-dex-thumb {
+  position: relative;
+  display: block;
+  height: 72px;
+  border-bottom: 2px solid var(--px-line);
+  background: #bfe0f8 center 40% / cover no-repeat;
+  image-rendering: pixelated;
+}
+
+.gd-dex-tile.is-locked .gd-dex-thumb {
+  filter: grayscale(1) brightness(.45);
+}
+
+.gd-dex-lock {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  filter: none;
+}
+
+.gd-dex-name {
+  display: block;
+  padding: 5px 3px 2px;
+  line-height: 1.3;
+}
+
+.gd-dex-cond {
+  display: block;
+  padding: 0 3px 6px;
+  color: #8b8267;
+  font-size: 9.5px;
+  line-height: 1.3;
+}
+
+/* ═══ 스크롤 방향 플로팅 버튼 ═══ */
+.scroll-fab {
+  position: absolute;
+  right: 16px;
+  bottom: calc(var(--nav-height) + 14px);
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: 3px solid var(--px-line);
+  background: var(--px-yellow);
+  color: var(--px-ink);
+  font-size: 24px;
+  line-height: 1;
+  box-shadow: 4px 4px 0 var(--px-line);
+  opacity: 0;
+  transform: translateY(14px);
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+
+.scroll-fab.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.scroll-fab:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--px-line);
+}

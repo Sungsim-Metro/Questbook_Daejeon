@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Questbook Daejeon 정적 모바일 웹 앱의 홈 페이지다. -->
+<!-- Questbook Daejeon 홈 — 3a "내 꿈돌이 + 도감" 레트로 픽셀 디자인. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="assets/css/base.css" />
   <link rel="stylesheet" href="assets/css/components.css" />
   <link rel="stylesheet" href="assets/css/pages.css" />
+  <link rel="stylesheet" href="assets/css/retro.css" />
 </head>
 <body data-page="home">
   <div class="app-shell">
@@ -21,32 +22,28 @@
     </header>
 
     <main class="app-main">
-      <section class="hero-panel">
-        <p class="page-kicker">로그인 완료</p>
-        <h1 class="page-title"><span data-user-name>꼬마 탐험가</span>님의 다음 탐험을 고르세요</h1>
-        <p class="page-copy">대전의 퀘스트 장소, 추천 관광지, 뱃지 기록을 더미 데이터로 먼저 연결했습니다.</p>
-        <div class="soft-panel home-summary-grid">
-          <div class="status-row">
-            <span class="avatar" data-user-avatar>😊</span>
-            <div class="status-copy">
-              <div class="status-name" data-user-name>꼬마 탐험가</div>
-              <div class="status-meta" data-user-summary>퀘스트 7개 · 8.3km</div>
-            </div>
-            <span class="xp-chip" data-user-xp>320XP</span>
+      <!-- 장착 중인 꿈돌이 히어로 카드 -->
+      <section class="gd-hero" data-gd-hero aria-label="내 꿈돌이">
+        <span class="gd-hero-img" data-gd-hero-img role="img" aria-label="장착 중인 꿈돌이"></span>
+        <div class="gd-hero-body">
+          <span class="gd-hero-quote" data-gd-hero-quote>오늘은 어디로 갈까?</span>
+          <div class="gd-hero-name-row">
+            <h1 class="gd-hero-name" data-gd-hero-name>기본 꿈돌이</h1>
+            <span class="gd-equipped-tag">장착중</span>
           </div>
+          <p class="gd-hero-meta"><span data-user-name>꼬마 탐험가</span> · <span data-user-summary>퀘스트 7개 · 8.3km</span></p>
           <div class="progress-caption">
-            <span data-next-level>Lv.4까지</span>
+            <span>EXP</span>
             <span data-user-progress>64%</span>
           </div>
           <div class="progress-bar"><div class="progress-fill" data-user-progress-fill style="width:64%"></div></div>
         </div>
       </section>
 
-      <section class="metric-grid home-metrics" aria-label="탐험 상태 요약">
-        <article class="metric-card"><span class="metric-icon">📍</span><strong data-location-name>대전 중앙로</strong><span>현재 위치 후보</span></article>
-        <article class="metric-card"><span class="metric-icon">🏷️</span><strong data-earned-badge-count>3개</strong><span>획득 뱃지</span></article>
-        <article class="metric-card"><span class="metric-icon">🗺️</span><strong data-nearby-quest-count>6개</strong><span>주변 퀘스트</span></article>
-        <article class="metric-card"><span class="metric-icon">🎁</span><strong data-reward-count>1개</strong><span>리워드 후보</span></article>
+      <!-- 꿈돌이 도감: 탭하면 장착, 잠금은 언락 조건 표시 -->
+      <section aria-label="꿈돌이 도감">
+        <h2 class="section-title">꿈돌이 도감<span class="gd-dex-caption">퀘스트·레벨업으로 언락!</span></h2>
+        <div class="gd-dex-grid" data-gd-dex></div>
       </section>
 
       <section aria-label="주요 화면 이동">
@@ -72,5 +69,7 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/ui.js"></script>
   <script src="assets/js/main.js"></script>
+  <script src="assets/js/ggumdori-dex.js"></script>
+  <script src="assets/js/scroll-fab.js"></script>
 </body>
 </html>
