@@ -8,9 +8,9 @@
 | Auto Scaling Group | app-kr1 | - | 10.0.21.* | qbook-app-subnet-kr1(10.0.21.0/24) | questbook-default-acg |
 | Server | qbook-web | - | 10.0.10.100 | qbook-web-subnet(10.0.10.0/24) | questbook-default-acg |
 | Auto Scaling Group | web-kr2 | - | 10.0.10.* | qbook-web-subnet(10.0.10.0/24) | questbook-default-acg |
-| Auto Scaling Group | web-kr1 | - | 10.0.11.* | qbook-web-subnet-kr1(10.0.10.0/24) | questbook-default-acg |
-| Load Balancer | qbook-private-lb | - | 10.0.250.6 | qbook-privatelb-subnet(10.0.250.0/24) | |
-| Load Balancer | qbook-public-lb | 101.79.28.118 | 10.0.255.6 | qbook-publiclb-subnet(10.0.255.0/24) | |
+| Auto Scaling Group | web-kr1 | - | 10.0.11.* | qbook-web-subnet-kr1(10.0.11.0/24) | questbook-default-acg |
+| Load Balancer | qbook-private-lb | - | 10.0.250.6 | qbook-privatelb-subnet(10.0.250.0/24), qbook-privatelb-subnet-kr1(10.0.251.0/24) | |
+| Load Balancer | qbook-public-lb | 101.79.28.118, 223.130.159.44 | 10.0.255.6 | qbook-publiclb-subnet(10.0.255.0/24), qbook-publiclb-subnet-kr1(10.0.254.0/24) | |
 | DB | qbook-db(서비스 이름), qbook-postgre-001-9ctp(서버 이름) | - | 10.0.100.6 | qbook-db-subnet(10.0.100.0/24) | cloud-postgresql-2cyi74 |
 | DB | qbook-db(서비스 이름), qbook-postgre-002-9cza(서버 이름) | - | 10.0.101.6 | qbook-db-subnet-kr1(10.0.101.0/24) | cloud-postgresql-2cyi74 |
 | Redis | qbook-cache(서비스 이름) | - | - | qbook-db-subnet(10.0.100.0/24) | cloud-cache-2cyidt |
