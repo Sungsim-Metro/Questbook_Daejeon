@@ -180,6 +180,73 @@ cd /opt/Questbook_Daejeon/services/app-api
 uv run python ../../scripts/check_object_storage.py
 ```
 
+### Phase 2-1 — Secret Manager 값을 .env로 동기화
+
+Secret Manager에 운영 key-value를 이미 등록했다면, 이후에는 `.env`를 직접 편집하지 않고 배포 시 Secret Manager ACTIVE 값을 내려받아 `/opt/Questbook_Daejeon/.env`를 갱신한다.
+
+전제:
+
+- Secret Manager 값은 JSON 객체 형태다. 예: `{"QUESTBOOK_JWT_SECRET":"...","QUESTBOOK_DATABASE_URL":"..."}`
+- qbook-app에서 Secret Manager API를 호출할 수 있도록 NAT 또는 아웃바운드 443 경로가 열려 있다.
+- `NCP_API_ACCESS_KEY`와 `NCP_API_SECRET_KEY`는 앱의 Object Storage 키가 아니라 Secret Manager 조회 권한이 있는 Sub Account API 키다.
+
+첫 적용은 qbook-app에서 dry-run으로 key 목록을 확인한 뒤 실제 반영한다.
+
+```bash
+cd /opt/Questbook_Daejeon
+
+export NCP_SECRET_MANAGER_SECRET_ID=<Secret Manager secretId>
+export NCP_API_ACCESS_KEY=<Secret Manager 조회 권한 Access Key>
+read -rsp "NCP API Secret Key: " NCP_API_SECRET_KEY
+echo
+export NCP_API_SECRET_KEY
+
+# dry-run: 비밀 값은 출력하지 않고 갱신될 key 이름만 확인한다.
+python3 scripts/sync_ncp_secret_env.py
+
+# 실제 반영: .env 백업 생성 → .env 갱신 → 앱 API 재시작 → 헬스체크
+python3 scripts/sync_ncp_secret_env.py \
+  --write \
+  --restart-service questbook-api \
+  --health-url http://127.0.0.1:8100/api/health
+
+unset NCP_API_SECRET_KEY
+```
+
+정상 출력 예시는 다음과 같다.
+
+```text
+Secret Manager에서 12개 key를 읽었습니다: NAVER_MAPS_API_KEY, ...
+dotenv 파일을 갱신했습니다: /opt/Questbook_Daejeon/.env
+기존 dotenv 백업을 생성했습니다: /opt/Questbook_Daejeon/.env.20260705183000.bak
+systemd 서비스를 재시작했습니다: questbook-api
+헬스체크가 성공했습니다: http://127.0.0.1:8100/api/health
+```
+
+반복 배포가 필요하면 `/root/.questbook-secret-manager.env` 같은 root 전용 파일에 bootstrap API 키만 보관하고 배포 전에 source한다. 이 파일은 앱 `.env`와 별개이며 저장소에 커밋하지 않는다.
+
+```bash
+install -m 600 /dev/null /root/.questbook-secret-manager.env
+nano /root/.questbook-secret-manager.env
+```
+
+```dotenv
+NCP_SECRET_MANAGER_SECRET_ID=<Secret Manager secretId>
+NCP_API_ACCESS_KEY=<Secret Manager 조회 권한 Access Key>
+NCP_API_SECRET_KEY=<Secret Manager 조회 권한 Secret Key>
+```
+
+이후 배포 명령:
+
+```bash
+cd /opt/Questbook_Daejeon
+set -a
+. /root/.questbook-secret-manager.env
+set +a
+python3 scripts/sync_ncp_secret_env.py --write --restart-service questbook-api --health-url http://127.0.0.1:8100/api/health
+unset NCP_API_SECRET_KEY
+```
+
 ## Phase 3 — systemd 서비스 등록
 
 ```bash
