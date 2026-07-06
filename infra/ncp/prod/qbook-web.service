@@ -1,0 +1,17 @@
+[Unit]
+Description=Questbook web-gateway container
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/etc/questbook/deploy.env
+ExecStartPre=-/usr/bin/docker rm -f qbook-web
+ExecStartPre=/usr/bin/docker pull ${REGISTRY}/qbook-web:${IMAGE_TAG}
+ExecStart=/usr/bin/docker run --name qbook-web --rm -p 8000:8000 \
+  --env-file /etc/questbook/web.env ${REGISTRY}/qbook-web:${IMAGE_TAG}
+ExecStop=/usr/bin/docker stop qbook-web
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
