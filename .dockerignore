@@ -1,0 +1,24 @@
+# 시크릿은 이미지에 절대 넣지 않는다.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.pytest_cache
+**/._*
+.questbook
+/Todo
+/plan
+/docs
+/images
+/assets
+/tests
+/infra
+/scripts
+/contracts
+/database
+/*.html
