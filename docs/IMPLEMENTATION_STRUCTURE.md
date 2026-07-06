@@ -1,6 +1,6 @@
 # 구현 준비 디렉토리 구조
 
-이 문서는 `docs/PROJECT_DESIGN.md`를 실제 코드로 옮기기 위한 새 구현 구조를 정의한다. 기존 루트의 정적 MVP 파일(`index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py`, `assets/`, `images/`)은 참조용 프로토타입으로 그대로 유지한다.
+이 문서는 `docs/PROJECT_DESIGN.md`를 실제 코드로 옮기기 위한 새 구현 구조를 정의한다. 초기 정적 MVP 파일(`legacy/static-mvp/`의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py`, `assets/`)은 참조용 프로토타입으로 아카이브해 두고, `images/` 샘플 스크린샷은 루트에 유지한다.
 
 ## 기본 원칙
 
@@ -74,14 +74,14 @@ scripts/             개발, 검수, 배포 보조 스크립트
 2. `contracts/openapi`에 추천, 퀘스트 생성, 퀘스트 완료 API 계약을 정의한다.
 3. 한국관광공사 OpenAPI 클라이언트와 Redis 30분 유저 단위 임시 캐시를 구현한다.
 4. `ReusableQuest`와 `UserQuestInstance`를 분리해 목업 퀘스트를 실제 추천 후보로 교체할 준비를 한다.
-5. `apps/user-web`에 현재 루트 정적 MVP를 옮겨 심을 때는 한 번에 이동하지 않고 화면 단위로 복제 후 검증한다.
+5. `apps/user-web`에 아카이브된 정적 MVP 화면을 옮겨 심을 때는 한 번에 이동하지 않고 화면 단위로 복제 후 검증한다.
 6. `database/migrations`에 사용자, 선호도, 퀘스트, 뱃지, 수첩 기준 PostgreSQL 스키마를 추가한다.
 7. PostgreSQL repository와 Redis 캐시를 기준으로 추천, 완료, 기록 흐름을 검증한다.
 8. 파트너와 리워드 기능은 MVP 이후 확장 단계로 남기되, 디렉토리와 모델 경계는 유지한다.
 
 ## 검수 기준
 
-- 기존 루트 프로토타입 파일이 이동되거나 삭제되지 않아야 한다.
+- 아카이브된 정적 프로토타입 파일은 `legacy/static-mvp/` 아래에서 실행 가능하게 유지되어야 한다.
 - 새 구현은 브라우저에서 secret 값을 직접 사용하지 않아야 한다.
 - OpenAPI 원본 응답 전체를 PostgreSQL 마이그레이션 또는 seed 데이터에 넣지 않아야 한다.
 - `services/app-api`의 테스트는 `uv` 기반 Python 3.11 환경에서 실행할 수 있어야 한다.
