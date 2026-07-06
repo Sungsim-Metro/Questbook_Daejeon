@@ -2,6 +2,10 @@ AGENTS.md
 .env
 .env.*
 !.env.example
+
+# macOS AppleDouble
+._*
+
 __pycache__/
 *.py[cod]
 .venv/
