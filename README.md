@@ -57,7 +57,7 @@ MVP 단계에서는 뱃지, 모험 수첩, 꿈돌이 도감 같은 비금전 보
 
 현재 저장소에는 두 실행 경로가 있다.
 
-- 기존 정적 MVP: 루트의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py`
+- 아카이브된 정적 프로토타입: `legacy/static-mvp/`의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py` (참조·데모용 보존)
 - baseline 분리 구현: `apps/user-web`, `services/web-gateway`, `services/app-api`
 
 baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 baseline 실행 전에는 Docker Compose로 PostgreSQL과 Redis를 먼저 기동한다. 실제 한국관광공사 TourAPI를 쓰려면 공공데이터포털에서 `한국관광공사_국문 관광정보 서비스_GW` 활용신청 후 `.env`에 `TOURAPI_SERVICE_KEY`를 넣는다. 브라우저 코드에는 키를 넣지 않고 앱 API가 서버 측에서 호출한다.
@@ -102,11 +102,11 @@ uv run --project services/app-api python scripts/check_object_storage.py
 - `infra/ncp/baseline-topology.yaml`: 설계서의 NCP VPC/subnet baseline 토폴로지
 - `scripts/backup_postgres.py`: 로컬 baseline PostgreSQL 백업 스크립트
 
-기존 정적 MVP의 지도 페이지는 NAVER Maps Dynamic Map을 사용한다. 브라우저에는 `NAVER_MAPS_API_KEY_ID`만 전달하고, `NAVER_MAPS_API_KEY`는 로컬 서버의 Geocoding, Reverse Geocoding 프록시에서만 사용한다.
+아카이브된 정적 프로토타입의 지도 페이지는 NAVER Maps Dynamic Map을 사용한다. 브라우저에는 `NAVER_MAPS_API_KEY_ID`만 전달하고, `NAVER_MAPS_API_KEY`는 로컬 서버의 Geocoding, Reverse Geocoding 프록시에서만 사용한다.
 
 ```bash
 cp .env.example .env
-uv run python server.py
+uv run python legacy/static-mvp/server.py
 ```
 
 `.env`에 다음 값을 입력한 뒤 `http://100.87.116.106:8000/index.html`로 접속한다. 같은 PC에서는 `http://127.0.0.1:8000/`도 사용할 수 있다.
