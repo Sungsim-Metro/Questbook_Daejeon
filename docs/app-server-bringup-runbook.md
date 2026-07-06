@@ -1,7 +1,7 @@
 # 앱 서버(qbook-app) 기동 런북
 
 작성일: 2026-07-03 · 실행자: 사용자 · 검토자: Claude
-관련 문서: `docs/superpowers/specs/2026-07-03-ncp-baseline-deployment-design.md` §7, `docs/Test_Cloud_Structure.md`
+관련 문서: `docs/Test_Cloud_Structure.md`, `infra/ncp/baseline-topology.yaml`
 
 ## 목표
 
