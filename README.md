@@ -60,33 +60,39 @@ MVP 단계에서는 뱃지, 모험 수첩, 꿈돌이 도감 같은 비금전 보
 - 아카이브된 정적 프로토타입: `legacy/static-mvp/`의 `index.html`, `map.html`, `quests.html`, `notes.html`, `badges.html`, `server.py` (참조·데모용 보존)
 - baseline 분리 구현: `apps/user-web`, `services/web-gateway`, `services/app-api`
 
-baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 baseline 실행 전에는 Docker Compose로 PostgreSQL과 Redis를 먼저 기동한다. 실제 한국관광공사 TourAPI를 쓰려면 공공데이터포털에서 `한국관광공사_국문 관광정보 서비스_GW` 활용신청 후 `.env`에 `TOURAPI_SERVICE_KEY`를 넣는다. 브라우저 코드에는 키를 넣지 않고 앱 API가 서버 측에서 호출한다.
+baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 `uv` 실행 경로에서는 Docker Compose로 PostgreSQL과 Redis 서비스만 먼저 기동한다. 웹·앱 API까지 컨테이너로 포함한 전체 스택은 저장소 루트에서 `docker compose up -d --build`로 기동한다. 실제 한국관광공사 TourAPI를 쓰려면 공공데이터포털에서 `한국관광공사_국문 관광정보 서비스_GW` 활용신청 후 `.env`에 `TOURAPI_SERVICE_KEY`를 넣는다. 브라우저 코드에는 키를 넣지 않고 앱 API가 서버 측에서 호출한다.
 
 NCP Object Storage 사진 증빙 저장은 `docs/object-storage-setup.md`를 따른다. 앱 API는 `boto3`로 비공개 버킷에 접근하며, 브라우저에는 API 키를 노출하지 않고 presigned URL만 발급한다.
 
 ```bash
 cp .env.example .env
 # .env에서 TOURAPI_SERVICE_KEY=공공데이터포털_서비스키 를 설정
-docker compose -f infra/local/postgres-redis.compose.yaml up -d
+docker compose up -d postgres redis
 uv run --project services/app-api python scripts/check_local_data_services.py
 uv run --project services/app-api python scripts/run_baseline.py
 ```
 
 실행 후 같은 PC에서는 `http://127.0.0.1:8000/`로 접속한다. 앱 API는 기본적으로 `http://127.0.0.1:8100`에서 실행되고, 웹 게이트웨이가 `/api` 요청을 앱 API로 프록시한다. 첫 화면에서는 demo-social 로그인과 만 14세 이상 확인, 개인정보·위치정보 수집·이용 동의 후 Bearer token을 받아 API를 호출한다.
 
+컨테이너 전체 스택을 검수할 때는 `.env`의 `QUESTBOOK_JWT_SECRET`을 강한 랜덤 값으로 교체한 뒤 다음 명령을 사용한다.
+
+```bash
+docker compose up -d --build
+```
+
 baseline 검수 명령은 다음과 같다.
 
 ```bash
-docker compose -f infra/local/postgres-redis.compose.yaml up -d
+docker compose up -d postgres redis
 uv run --project services/app-api pytest services/app-api/tests tests/smoke -v
 node --check apps/user-web/src/app.js
 node --check apps/user-web/public/service-worker.js
 ```
 
-PostgreSQL과 Redis 로컬 개발 서비스는 Docker Compose로 준비한다. 접속 URL 기본값은 `.env.example`과 `infra/local/postgres-redis.compose.yaml`에 맞춰져 있다.
+PostgreSQL과 Redis만 필요한 로컬 개발 서비스는 Docker Compose의 `postgres`, `redis` 서비스로 준비한다. 접속 URL 기본값은 `.env.example`과 루트 `docker-compose.yaml`에 맞춰져 있다.
 
 ```bash
-docker compose -f infra/local/postgres-redis.compose.yaml up -d
+docker compose up -d postgres redis
 uv run --project services/app-api python scripts/check_local_data_services.py
 ```
 

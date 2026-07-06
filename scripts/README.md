@@ -8,7 +8,7 @@
 - `check_object_storage.py`: NCP Object Storage 버킷 접근 가능 여부를 비밀 값 출력 없이 점검한다.
 - `sync_ncp_secret_env.py`: NCP Secret Manager의 ACTIVE 값을 운영 dotenv에 반영하고 systemd 서비스를 재시작한다.
 
-백업 전제: `docker compose -f infra/local/postgres-redis.compose.yaml up -d`로 로컬 PostgreSQL/Redis compose 스택을 먼저 실행한다.
+백업 전제: `docker compose up -d postgres redis`로 로컬 PostgreSQL/Redis compose 서비스를 먼저 실행한다.
 
 백업 명령:
 
@@ -25,8 +25,8 @@ PGPASSWORD=questbook_local_password pg_restore --clean --host 127.0.0.1 --port 5
 로컬에 `pg_dump`가 없으면 컨테이너 안에서 백업한 뒤 파일을 복사한다.
 
 ```bash
-docker exec questbook-postgres pg_dump --format=custom --username questbook --dbname questbook --file=/tmp/questbook.dump
-docker cp questbook-postgres:/tmp/questbook.dump .questbook/backups/questbook.dump
+docker compose exec postgres sh -c 'pg_dump --format=custom --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --file=/tmp/questbook.dump'
+docker compose cp postgres:/tmp/questbook.dump .questbook/backups/questbook.dump
 ```
 
 ## NCP Secret Manager 동기화

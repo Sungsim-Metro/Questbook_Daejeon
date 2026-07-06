@@ -1,11 +1,11 @@
 # 로컬 데이터 서비스
 
-Questbook 로컬 개발용 PostgreSQL과 Redis 실행 구성을 보관한다.
+Questbook 로컬 개발용 PostgreSQL과 Redis 보조 파일을 보관한다. 실행 구성은 저장소 루트의 `docker-compose.yaml`에서 관리한다.
 
 ## 실행
 
 ```bash
-docker compose -f infra/local/postgres-redis.compose.yaml up -d
+docker compose up -d postgres redis
 uv run --project services/app-api python scripts/check_local_data_services.py
 ```
 
@@ -19,11 +19,11 @@ uv run --project services/app-api python scripts/check_local_data_services.py
 ## 종료
 
 ```bash
-docker compose -f infra/local/postgres-redis.compose.yaml down
+docker compose down
 ```
 
 볼륨까지 삭제해야 하는 초기화 상황에서는 다음 명령을 사용한다.
 
 ```bash
-docker compose -f infra/local/postgres-redis.compose.yaml down -v
+docker compose down -v
 ```
