@@ -13,10 +13,12 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-# 변수 의미: 정적 파일로 제공할 저장소 루트 경로다.
+# 변수 의미: 정적 파일로 제공할 아카이브 프로토타입 루트 경로다.
 PROJECT_ROOT = Path(__file__).resolve().parent
-# 변수 의미: 로컬 dotenv 파일 경로다.
-DOTENV_PATH = PROJECT_ROOT / ".env"
+# 변수 의미: 리포지토리 루트 경로다(legacy/static-mvp 기준 두 단계 상위).
+REPOSITORY_ROOT = PROJECT_ROOT.parents[1]
+# 변수 의미: 리포지토리 루트의 로컬 dotenv 파일 경로다.
+DOTENV_PATH = REPOSITORY_ROOT / ".env"
 # 변수 의미: 공식 API 문서 기준의 NAVER Maps API 호스트다.
 NAVER_OPENAPI_BASE_URL = "https://naveropenapi.apigw.ntruss.com"
 # 변수 의미: Geocoding 엔드포인트 경로다.
@@ -185,7 +187,7 @@ class QuestbookRequestHandler(SimpleHTTPRequestHandler):
         """
         입력: http.server에서 전달되는 핸들러 생성자 인자.
         출력: 없음.
-        역할: 정적 파일 제공 디렉터리를 저장소 루트로 고정한다.
+        역할: 정적 파일 제공 디렉터리를 아카이브 프로토타입 루트로 고정한다.
         호출 예시: QuestbookRequestHandler(request, client_address, server)
         """
         super().__init__(*args, directory=str(PROJECT_ROOT), **kwargs)
