@@ -1,0 +1,15 @@
+# 클라우드 테스트 VM용 오버라이드(throwaway 스택).
+# 사용법: docker compose -f docker-compose.yaml -f docker-compose.cloud-test.yaml up -d --build
+# VM 재부팅·장애 시에도 항상 재기동한다.
+services:
+  postgres:
+    restart: always
+
+  redis:
+    restart: always
+
+  app:
+    restart: always
+
+  web:
+    restart: always
