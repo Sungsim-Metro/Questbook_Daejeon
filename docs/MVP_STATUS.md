@@ -4,13 +4,13 @@
 
 ## 1. 현재 구현 요약
 
-현재 저장소는 기존 정적 모바일 웹 프로토타입과 baseline 분리 구현을 함께 가진다. 기존 루트 HTML 화면은 제출용 목업 흐름을 보존하고, 새 baseline 구현은 `apps/user-web`, `services/web-gateway`, `services/app-api` 아래에서 설계서의 확장 이전 구조를 실제 실행 가능한 형태로 구현한다.
+현재 저장소는 아카이브된 정적 모바일 웹 프로토타입과 baseline 분리 구현을 함께 가진다. 초기 프로토타입 HTML 화면은 `legacy/static-mvp/` 아래에 참조·데모용으로 보존하고, 사용자 대면 구현의 기준은 `apps/user-web`, `services/web-gateway`, `services/app-api` 아래의 baseline 구현이다.
 
 baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 PostgreSQL 저장소, Redis 30분 TTL 캐시를 포함한다. 한국관광공사 TourAPI 키가 없으면 대전 fallback 장소 후보로 흐름을 검증하고, 키가 있으면 앱 서버가 TourAPI를 호출한다. OpenAPI 원본 응답 전체는 영구 DB에 저장하지 않고, 추천 계산에 필요한 최소 필드만 유저 단위 Redis 캐시에 30분 동안 보관한다.
 
 현재 구현은 다음 요소로 구성된다.
 
-- 기존 정적 HTML 화면
+- 아카이브된 정적 HTML 화면
 - 공통 CSS 스타일
 - 목업 데이터 기반 화면 렌더링
 - NAVER Dynamic Map 연동
@@ -36,13 +36,13 @@ baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 Po
 
 ### 2.1 홈 화면
 
-- 파일: `index.html`
+- 파일: `legacy/static-mvp/index.html`
 - 사용자 레벨, XP, 현재 위치 후보, 획득 뱃지, 주변 퀘스트 수, 보상 수를 표시한다.
 - 오늘의 추천 퀘스트를 목업 데이터 기반으로 표시한다.
 
 ### 2.2 지도 화면
 
-- 파일: `map.html`
+- 파일: `legacy/static-mvp/map.html`
 - NAVER Dynamic Map을 사용해 현재 위치와 퀘스트 장소 마커를 표시한다.
 - 브라우저 위치 권한을 사용해 현재 위치를 확인할 수 있다.
 - 주소 검색과 좌표 입력을 통해 지도 중심을 이동할 수 있다.
@@ -50,25 +50,25 @@ baseline 구현은 사용자 PWA, 웹 게이트웨이, Python 앱 API, 로컬 Po
 
 ### 2.3 퀘스트 화면
 
-- 파일: `quests.html`
+- 파일: `legacy/static-mvp/quests.html`
 - 방문형, 이동형, 소비형, 테마형, 활동형 퀘스트를 필터링해 보여준다.
-- 현재 데이터는 `assets/js/mock-data.js`의 목업 퀘스트 배열을 사용한다.
+- 현재 데이터는 `legacy/static-mvp/assets/js/mock-data.js`의 목업 퀘스트 배열을 사용한다.
 
 ### 2.4 탐험 노트 화면
 
-- 파일: `notes.html`
+- 파일: `legacy/static-mvp/notes.html`
 - 완료한 퀘스트와 활동 기록을 수첩 형태로 보여준다.
 - 현재 데이터는 목업 활동 기록을 사용한다.
 
 ### 2.5 뱃지 화면
 
-- 파일: `badges.html`
+- 파일: `legacy/static-mvp/badges.html`
 - 획득한 뱃지와 잠긴 뱃지, 수첩 스탬프를 표시한다.
 - 현재 데이터는 목업 뱃지 정의와 사용자 획득 상태를 사용한다.
 
 ## 3. 구현된 서버 기능
 
-기존 `server.py`는 Python 표준 라이브러리 기반 로컬 개발 서버이며 루트 정적 MVP와 NAVER Maps 프록시를 제공한다.
+아카이브된 `legacy/static-mvp/server.py`는 Python 표준 라이브러리 기반 로컬 개발 서버이며 정적 프로토타입과 NAVER Maps 프록시를 제공한다.
 
 구현된 기능은 다음과 같다.
 
@@ -99,13 +99,19 @@ baseline 분리 서버는 다음 파일로 구성된다.
 
 ```text
 .
-├─ index.html
-├─ map.html
-├─ quests.html
-├─ notes.html
-├─ badges.html
-├─ 모험가의_수첩_3단_목업.html
-├─ server.py
+├─ legacy/
+│  └─ static-mvp/
+│     ├─ index.html
+│     ├─ map.html
+│     ├─ quests.html
+│     ├─ notes.html
+│     ├─ badges.html
+│     ├─ 모험가의_수첩_3단_목업.html
+│     ├─ server.py
+│     ├─ README.md
+│     └─ assets/
+│        ├─ css/ (base, components, pages, retro)
+│        └─ js/  (main, map, mock-data, ui, ggumdori-dex, scroll-fab)
 ├─ README.md
 ├─ .env.example
 ├─ docs/
@@ -142,25 +148,15 @@ baseline 분리 서버는 다음 파일로 구성된다.
 │  └─ run_baseline.py
 ├─ tests/
 │  └─ smoke/test_baseline_http.py
-├─ images/
-│  ├─ index1.jpeg
-│  ├─ index2.jpeg
-│  └─ map.jpeg
-└─ assets/
-   ├─ css/
-   │  ├─ base.css
-   │  ├─ components.css
-   │  └─ pages.css
-   └─ js/
-      ├─ main.js
-      ├─ map.js
-      ├─ mock-data.js
-      └─ ui.js
+└─ images/
+   ├─ index1.jpeg
+   ├─ index2.jpeg
+   └─ map.jpeg
 ```
 
 ## 5. 현재 데이터 상태
 
-기존 루트 정적 MVP 화면 데이터는 `assets/js/mock-data.js`에서 제공한다.
+아카이브된 정적 프로토타입 화면 데이터는 `legacy/static-mvp/assets/js/mock-data.js`에서 제공한다.
 
 - 목업 사용자: 닉네임, 레벨, XP, 완료 퀘스트 수, 보상 수
 - 목업 위치: 대전 중앙로 좌표
