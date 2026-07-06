@@ -1,0 +1,91 @@
+# Questbook 통합 로컬/테스트 스택: web + app + postgres + redis.
+# 사용법:
+#   cp .env.example .env
+#   sed -i "s|^QUESTBOOK_JWT_SECRET=.*|QUESTBOOK_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env
+#   docker compose up -d --build
+name: questbook
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: questbook-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${QUESTBOOK_POSTGRES_DB:-questbook}
+      POSTGRES_USER: ${QUESTBOOK_POSTGRES_USER:-questbook}
+      POSTGRES_PASSWORD: ${QUESTBOOK_POSTGRES_PASSWORD:-questbook_local_password}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${QUESTBOOK_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - questbook-postgres-data:/var/lib/postgresql/data
+      - ./infra/local/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: questbook-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${QUESTBOOK_REDIS_PORT:-6379}:6379"
+    volumes:
+      - questbook-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  app:
+    build:
+      context: .
+      dockerfile: services/app-api/Dockerfile
+    image: qbook-app:local
+    container_name: questbook-app
+    restart: unless-stopped
+    # .env의 시크릿(OAuth, TourAPI, Object Storage 등)을 주입한다.
+    env_file:
+      - .env
+    # 컨테이너 네트워크 전용 값은 여기서 .env 값을 덮어쓴다(environment > env_file).
+    environment:
+      QUESTBOOK_APP_API_HOST: 0.0.0.0
+      QUESTBOOK_APP_API_PORT: "8100"
+      QUESTBOOK_DATABASE_URL: postgresql://${QUESTBOOK_POSTGRES_USER:-questbook}:${QUESTBOOK_POSTGRES_PASSWORD:-questbook_local_password}@postgres:5432/${QUESTBOOK_POSTGRES_DB:-questbook}
+      QUESTBOOK_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: .
+      dockerfile: services/web-gateway/Dockerfile
+    image: qbook-web:local
+    container_name: questbook-web
+    restart: unless-stopped
+    environment:
+      QUESTBOOK_WEB_HOST: 0.0.0.0
+      QUESTBOOK_WEB_PORT: "8000"
+      QUESTBOOK_APP_API_BASE_URL: http://app:8100
+    # 0.0.0.0 바인딩으로 Tailscale 인터페이스에서도 접근 가능하다.
+    ports:
+      - "${QUESTBOOK_WEB_PORT:-8000}:8000"
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  questbook-postgres-data:
+  questbook-redis-data:
