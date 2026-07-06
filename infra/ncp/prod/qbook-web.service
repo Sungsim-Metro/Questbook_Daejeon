@@ -1,7 +1,7 @@
 [Unit]
 Description=Questbook web-gateway container
-After=docker.service network-online.target
-Requires=docker.service
+After=docker.service network-online.target qbook-bootstrap.service
+Requires=docker.service qbook-bootstrap.service
 
 [Service]
 EnvironmentFile=/etc/questbook/deploy.env

@@ -1,0 +1,13 @@
+[Unit]
+Description=Questbook boot-time secret/deploy-config bootstrap
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/qbook-bootstrap.sh
+
+[Install]
+WantedBy=multi-user.target
