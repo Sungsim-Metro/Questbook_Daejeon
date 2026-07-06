@@ -1,0 +1,13 @@
+# 개발용 오버라이드: 소스를 마운트해 재빌드 없이 반영한다.
+# 사용법: docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d
+# - 정적 파일(apps/user-web)은 요청마다 다시 읽으므로 저장 즉시 반영된다.
+# - 파이썬 코드(app, gateway)는 컨테이너 재시작(docker compose restart app web)으로 반영된다.
+services:
+  app:
+    volumes:
+      - ./services/app-api/src:/app/services/app-api/src:ro
+
+  web:
+    volumes:
+      - ./services/web-gateway:/app/services/web-gateway:ro
+      - ./apps/user-web:/app/apps/user-web:ro
