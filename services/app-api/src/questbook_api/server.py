@@ -16,6 +16,7 @@ from questbook_api.infrastructure.cache import TourPlaceRedisCache
 from questbook_api.infrastructure.oauth_state import OAuthStateError, OAuthStateStore
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.object_storage.client import ObjectStorageClient
+from questbook_api.integrations.ocr.client import OcrClient, normalize_ocr_image_format
 from questbook_api.integrations.oauth import client as oauth_client
 from questbook_api.integrations.tourapi.client import TourApiClient
 from questbook_api.settings import AppSettings
@@ -56,6 +57,8 @@ class AppState:
     oauth_state: OAuthStateStore
     # 변수 의미: NCP Object Storage presigned URL 클라이언트다.
     object_storage: ObjectStorageClient | None = None
+    # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
+    ocr: OcrClient | None = None
 
 
 def build_json_bytes(payload: dict[str, Any]) -> bytes:
@@ -338,6 +341,9 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 if path == "/api/object-storage/config":
                     self._send_json(HTTPStatus.OK, self._object_storage_client().status())
                     return
+                if path == "/api/ocr/config":
+                    self._send_json(HTTPStatus.OK, self._ocr_client().status())
+                    return
                 if path == "/api/naver-map/geocode":
                     self._handle_naver_geocode(query)
                     return
@@ -393,6 +399,13 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     payload = self._read_json_body()
                     self._send_json(HTTPStatus.OK, self._handle_object_storage_download_url(user_id, payload))
                     return
+                if path_parts == ["api", "ocr", "receipt"]:
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
+                    user_id = self._required_user_id()
+                    # 변수 의미: OCR 요청 본문이다.
+                    payload = self._read_json_body()
+                    self._send_json(HTTPStatus.OK, self._handle_receipt_ocr(user_id, payload))
+                    return
                 if len(path_parts) == 4 and path_parts[:2] == ["api", "quests"]:
                     # 변수 의미: 토큰에서 검증한 사용자 ID다.
                     user_id = self._required_user_id()
@@ -406,6 +419,8 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     if action == "complete":
                         # 변수 의미: JSON 요청 본문이다.
                         payload = self._read_json_body()
+                        # 변수 의미: 사진 객체가 있으면 가능한 경우 OCR 결과를 보강한 완료 요청 본문이다.
+                        payload = self._with_optional_receipt_ocr(user_id, instance_id, payload)
                         self._send_json(HTTPStatus.OK, state.service.complete_quest(user_id, instance_id, payload))
                         return
             except PermissionError as error:
@@ -457,6 +472,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 "externalApis": {
                     "tourapi": state.service.tour_client.status(),
                     "objectStorage": self._object_storage_client().status(),
+                    "ocr": self._ocr_client().status(),
                 },
             }
 
@@ -512,6 +528,15 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             호출 예시: client = self._object_storage_client()
             """
             return state.object_storage or ObjectStorageClient(state.settings)
+
+        def _ocr_client(self) -> OcrClient:
+            """
+            입력: 없음.
+            출력: OCR 클라이언트.
+            역할: 테스트에서 주입한 클라이언트가 없으면 설정 기반 기본 클라이언트를 만든다.
+            호출 예시: client = self._ocr_client()
+            """
+            return state.ocr or OcrClient(state.settings)
 
         def _handle_demo_login(self, payload: dict[str, Any]) -> dict[str, Any]:
             """
@@ -745,6 +770,81 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             object_key = str(payload.get("objectKey") or "")
             return self._object_storage_client().create_presigned_download(user_id, object_key)
 
+        def _handle_receipt_ocr(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+            """
+            입력: 사용자 ID와 OCR 요청 본문.
+            출력: OCR 텍스트와 퀘스트 요구사항 보조 검증 결과.
+            역할: Object Storage의 영수증 사진을 OCR로 읽고 품목·상호명·시간을 대조한다.
+            호출 예시: response = self._handle_receipt_ocr("usr_x", payload)
+            """
+            # 변수 의미: OCR 대상 사용자별 퀘스트 인스턴스 ID다.
+            quest_instance_id = str(payload.get("questInstanceId") or "").strip()
+            # 변수 의미: OCR 대상 Object Storage 객체 키다.
+            object_key = str(payload.get("objectKey") or payload.get("photoRef") or "").strip()
+            if not quest_instance_id:
+                raise ValueError("questInstanceId is required.")
+            if not object_key:
+                raise ValueError("objectKey is required.")
+
+            # 변수 의미: 현재 사용자 prefix를 검증한 presigned 다운로드 정보다.
+            download = self._object_storage_client().create_presigned_download(user_id, object_key)
+            # 변수 의미: OCR 요청에 사용할 이미지 format이다.
+            image_format = normalize_ocr_image_format(str(payload.get("contentType") or object_key))
+            # 변수 의미: OCR API 호출 결과다.
+            ocr_result = self._ocr_client().extract_text_from_url(download["url"], image_format, "quest_receipt")
+            # 변수 의미: OCR 결과와 퀘스트 요구사항 대조 결과다.
+            requirement_result = state.service.evaluate_receipt_ocr(user_id, quest_instance_id, ocr_result["text"])
+            if not requirement_result.get("ok"):
+                raise ValueError(str(requirement_result.get("reason") or "quest_not_found"))
+            return {
+                "ocr": {
+                    "ok": True,
+                    "provider": ocr_result["provider"],
+                    "imageFormat": ocr_result["imageFormat"],
+                    "lines": ocr_result["lines"],
+                    "text": ocr_result["text"],
+                },
+                "requirementCheck": requirement_result.get("requirementCheck"),
+                "quest": requirement_result.get("quest"),
+            }
+
+        def _with_optional_receipt_ocr(
+            self,
+            user_id: str,
+            instance_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            """
+            입력: 사용자 ID, 퀘스트 인스턴스 ID, 완료 요청 본문.
+            출력: 가능한 경우 OCR 텍스트가 보강된 완료 요청 본문.
+            역할: GPS 완료 판정을 막지 않고 Object Storage 사진에서 OCR 보조 결과를 자동 첨부한다.
+            호출 예시: payload = self._with_optional_receipt_ocr("usr_x", "uqi_x", payload)
+            """
+            if payload.get("ocrText") or not self._ocr_client().is_configured():
+                return payload
+
+            # 변수 의미: 완료 요청에 포함된 사진 객체 키다.
+            object_key = str(payload.get("photoRef") or payload.get("objectKey") or "").strip()
+            if not object_key:
+                return payload
+
+            try:
+                # 변수 의미: OCR API가 읽을 수 있는 짧은 다운로드 URL이다.
+                download = self._object_storage_client().create_presigned_download(user_id, object_key)
+                # 변수 의미: OCR 요청 이미지 format이다.
+                image_format = normalize_ocr_image_format(str(payload.get("contentType") or object_key))
+                # 변수 의미: OCR API 호출 결과다.
+                ocr_result = self._ocr_client().extract_text_from_url(download["url"], image_format, "quest_receipt")
+            except Exception:
+                return payload
+
+            # 변수 의미: OCR 텍스트를 보강한 완료 요청 본문이다.
+            enriched_payload = dict(payload)
+            enriched_payload["ocrText"] = ocr_result["text"]
+            enriched_payload["ocrProvider"] = ocr_result["provider"]
+            enriched_payload["ocrQuestInstanceId"] = instance_id
+            return enriched_payload
+
         def _safe_error_code(self, error: Exception) -> str:
             """
             입력: 콜백 처리 중 발생한 예외.
@@ -975,6 +1075,8 @@ def build_state(settings: AppSettings) -> AppState:
     oauth_state = OAuthStateStore(settings.redis_url)
     # 변수 의미: NCP Object Storage presigned URL 클라이언트다.
     object_storage = ObjectStorageClient(settings)
+    # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
+    ocr = OcrClient(settings)
     return AppState(
         settings=settings,
         repository=repository,
@@ -982,6 +1084,7 @@ def build_state(settings: AppSettings) -> AppState:
         service=service,
         oauth_state=oauth_state,
         object_storage=object_storage,
+        ocr=ocr,
     )
 
 

@@ -173,6 +173,9 @@ const ACCESS_TOKEN_KEY = "questbook:user-web:access-token";
 // 브라우저 세션에 저장할 OAuth callback nonce 키입니다.
 const OAUTH_NONCE_KEY = "questbook:user-web:oauth-nonce";
 
+// 사진 증빙 기본 업로드 제한 바이트 값입니다.
+const DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 // 화면 전체의 현재 상태입니다.
 const state = {
   apiHealthy: false,
@@ -194,6 +197,8 @@ const state = {
   ggumdori: [...FALLBACK_GGUMDORI],
   questStatuses: readStoredQuestStatuses(),
   pendingQuestActions: {},
+  evidenceUploads: {},
+  actionDialog: null,
   selectedGgumdoriId: readSelectedGgumdoriId(),
   selectedMapInstanceId: FALLBACK_RECOMMENDATIONS[0]?.instanceId || "",
   accessToken: readStorageValue(ACCESS_TOKEN_KEY),
@@ -1653,6 +1658,117 @@ function renderRecommendationMeta() {
 
 /**
  * 입력: 추천 항목.
+ * 출력: Object Storage 업로드 목적.
+ * 역할: 퀘스트 인증 방식에 맞춰 영수증 또는 일반 사진 업로드 경로를 고른다.
+ * 호출 예시: const purpose = getEvidencePurpose(recommendation)
+ */
+function getEvidencePurpose(recommendation) {
+  // 퀘스트 인증 방식 표시 문자열입니다.
+  const verificationType = String(recommendation?.verificationType || "").toLowerCase();
+  if (verificationType.includes("receipt") || verificationType.includes("영수증") || recommendation?.category === "market") {
+    return "quest_receipt";
+  }
+  return "quest_photo";
+}
+
+/**
+ * 입력: 업로드 목적.
+ * 출력: 사용자에게 보여줄 증빙 이름.
+ * 역할: 카드 안 사진 제출 컨트롤의 문구를 정한다.
+ * 호출 예시: const label = getEvidenceLabel("quest_receipt")
+ */
+function getEvidenceLabel(purpose) {
+  return purpose === "quest_receipt" ? "영수증 사진" : "인증 사진";
+}
+
+/**
+ * 입력: OCR 요구사항 대조 결과.
+ * 출력: 카드에 표시할 OCR 요약 문구.
+ * 역할: 영수증 상호명, 품목, 시간 대조 결과를 짧게 보여준다.
+ * 호출 예시: const text = getReceiptRequirementText(check)
+ */
+function getReceiptRequirementText(requirementCheck) {
+  if (!requirementCheck) {
+    return "";
+  }
+
+  if (requirementCheck.passed) {
+    return "OCR 확인: 상호명·품목·시간 일치";
+  }
+
+  // 변수 의미: 누락된 구매 품목 목록입니다.
+  const missingItems = requirementCheck.missingItems || [];
+  if (missingItems.length > 0) {
+    return `OCR 확인: 누락 품목 ${missingItems.join(", ")}`;
+  }
+
+  return "OCR 확인: 일부 요구사항 불일치";
+}
+
+/**
+ * 입력: 증빙 업로드 상태.
+ * 출력: 카드에 표시할 상태 문구.
+ * 역할: 업로드, OCR, 실패 상태를 한 줄로 정리한다.
+ * 호출 예시: const text = getEvidenceStatusText(evidence)
+ */
+function getEvidenceStatusText(evidence) {
+  if (!evidence) {
+    return "사진을 제출하면 완료 요청에 함께 첨부됩니다.";
+  }
+  if (evidence.status === "uploading") {
+    return "사진 업로드 중";
+  }
+  if (evidence.status === "failed") {
+    return evidence.message || "사진 업로드 실패";
+  }
+  if (evidence.ocrStatus === "running") {
+    return "업로드 완료, OCR 확인 중";
+  }
+  if (evidence.ocrStatus === "failed") {
+    return "업로드 완료, OCR 확인은 실패했습니다.";
+  }
+  if (evidence.ocrStatus === "done") {
+    return getReceiptRequirementText(evidence.requirementCheck) || "업로드 완료";
+  }
+  return `${evidence.fileName || "사진"} 업로드 완료`;
+}
+
+/**
+ * 입력: 추천 항목, 액션 진행 여부.
+ * 출력: 증빙 업로드 패널 HTMLElement.
+ * 역할: 퀘스트 카드에서 사진 또는 영수증 사진을 선택하고 업로드하게 한다.
+ * 호출 예시: panel = createEvidencePanel(recommendation, false)
+ */
+function createEvidencePanel(recommendation, isActionPending) {
+  // 현재 추천 항목의 증빙 업로드 목적입니다.
+  const purpose = getEvidencePurpose(recommendation);
+  // 현재 추천 항목의 증빙 업로드 상태입니다.
+  const evidence = state.evidenceUploads[recommendation.instanceId];
+  // 증빙 패널 요소입니다.
+  const panel = createElement("div", "evidence-panel");
+  // 파일 선택 라벨 요소입니다.
+  const label = createElement("label", "evidence-upload-button");
+  // 파일 선택 input 요소입니다.
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.disabled = isActionPending || evidence?.status === "uploading" || evidence?.ocrStatus === "running";
+  input.addEventListener("change", () => {
+    // 변수 의미: 사용자가 선택한 첫 번째 이미지 파일입니다.
+    const file = input.files?.[0];
+    if (file) {
+      handleQuestEvidenceUpload(recommendation, file);
+    }
+    input.value = "";
+  });
+
+  label.append(createElement("span", "", getEvidenceLabel(purpose)), input);
+  panel.append(label, createElement("p", "evidence-status", getEvidenceStatusText(evidence)));
+  return panel;
+}
+
+/**
+ * 입력: 추천 항목.
  * 출력: 추천 카드 HTMLElement.
  * 역할: 추천 관광지와 연결 퀘스트를 카드로 만든다.
  * 호출 예시: createRecommendationCard(recommendation)
@@ -1715,10 +1831,13 @@ function createRecommendationCard(recommendation) {
   completeButton.addEventListener("click", () => handleQuestAction(recommendation.instanceId, "complete"));
   actions.append(acceptButton, completeButton);
 
+  // 사진 또는 영수증 증빙 업로드 패널입니다.
+  const evidencePanel = createEvidencePanel(recommendation, isActionPending);
+
   // 현재 상태 태그입니다.
   const statusTag = createElement("span", getQuestStatusClass(questStatus), getQuestStatusLabel(questStatus));
 
-  card.append(topline, statusTag, title, place, description, rewardRow, actions);
+  card.append(topline, statusTag, title, place, description, rewardRow, evidencePanel, actions);
   return card;
 }
 
@@ -2307,6 +2426,7 @@ function renderAll() {
   renderBadges();
   renderNotes();
   renderGgumdori();
+  renderActionDialog();
 }
 
 /**
@@ -2372,6 +2492,184 @@ function normalizeMeasuredLocation(position) {
 }
 
 /**
+ * 입력: 바이트 수.
+ * 출력: 화면 표시용 용량 문자열.
+ * 역할: 업로드 제한 초과 메시지를 사람이 읽기 쉽게 만든다.
+ * 호출 예시: const text = formatBytes(10485760)
+ */
+function formatBytes(bytes) {
+  // 변수 의미: 숫자로 변환한 바이트 값입니다.
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0MB";
+  }
+  return `${Math.round((size / 1024 / 1024) * 10) / 10}MB`;
+}
+
+/**
+ * 입력: 업로드 오류 객체.
+ * 출력: 사용자에게 보여줄 업로드 실패 문구.
+ * 역할: Object Storage 설정 누락, 인증 만료, 네트워크 오류를 구분한다.
+ * 호출 예시: const message = getEvidenceUploadFailureMessage(error)
+ */
+function getEvidenceUploadFailureMessage(error) {
+  if (isUnauthorizedError(error)) {
+    return "세션이 만료되어 사진을 업로드하지 않았습니다.";
+  }
+  if (Number(error?.status) === 503) {
+    return error?.payload?.message || "Object Storage 또는 OCR 설정이 필요합니다.";
+  }
+  return error?.message || "사진 업로드에 실패했습니다.";
+}
+
+/**
+ * 입력: presigned 업로드 정보와 이미지 파일.
+ * 출력: 업로드 완료 Promise.
+ * 역할: 앱 서버를 경유하지 않고 Object Storage로 사진 파일을 전송한다.
+ * 호출 예시: await uploadEvidenceFile(upload, file)
+ */
+async function uploadEvidenceFile(upload, file) {
+  // 변수 의미: Object Storage 업로드 응답입니다.
+  const response = await fetch(upload.url, {
+    method: upload.method || "PUT",
+    headers: upload.headers || { "Content-Type": file.type },
+    body: file,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Object Storage 업로드 실패: ${response.status}`);
+  }
+}
+
+/**
+ * 입력: 추천 항목과 업로드된 증빙 상태.
+ * 출력: OCR 요청 Promise.
+ * 역할: 영수증 사진을 OCR로 읽고 퀘스트 요구사항 대조 결과를 상태에 저장한다.
+ * 호출 예시: await runReceiptOcr(recommendation, evidence)
+ */
+async function runReceiptOcr(recommendation, evidence) {
+  // 변수 의미: OCR 대상 퀘스트 인스턴스 ID입니다.
+  const instanceId = recommendation.instanceId;
+  state.evidenceUploads[instanceId] = { ...evidence, ocrStatus: "running" };
+  renderAll();
+
+  try {
+    // OCR API 응답입니다.
+    const payload = await fetchJson("/api/ocr/receipt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        questInstanceId: instanceId,
+        objectKey: evidence.objectKey,
+        contentType: evidence.contentType,
+      }),
+    });
+
+    state.evidenceUploads[instanceId] = {
+      ...evidence,
+      ocrStatus: "done",
+      ocrText: payload.ocr?.text || "",
+      ocrLines: payload.ocr?.lines || [],
+      requirementCheck: payload.requirementCheck || null,
+    };
+    updateSystemStatus(true, getReceiptRequirementText(payload.requirementCheck) || "OCR 확인 완료");
+  } catch (error) {
+    state.evidenceUploads[instanceId] = {
+      ...evidence,
+      ocrStatus: "failed",
+      message: getEvidenceUploadFailureMessage(error),
+    };
+    updateSystemStatus(state.apiHealthy, "사진은 업로드됐고 OCR 확인은 실패했습니다.");
+  } finally {
+    renderAll();
+  }
+}
+
+/**
+ * 입력: 추천 항목과 사용자가 선택한 이미지 파일.
+ * 출력: 업로드 처리 Promise.
+ * 역할: presigned URL 발급, Object Storage 직접 업로드, 선택적 OCR 확인을 순서대로 수행한다.
+ * 호출 예시: await handleQuestEvidenceUpload(recommendation, file)
+ */
+async function handleQuestEvidenceUpload(recommendation, file) {
+  if (!ensureSessionReady()) {
+    return;
+  }
+
+  // 변수 의미: 업로드 대상 퀘스트 인스턴스 ID입니다.
+  const instanceId = recommendation.instanceId;
+  // 변수 의미: 업로드 목적입니다.
+  const purpose = getEvidencePurpose(recommendation);
+  // 변수 의미: 브라우저가 제공한 이미지 Content-Type입니다.
+  const contentType = file.type || "image/jpeg";
+
+  if (file.size > DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES) {
+    state.evidenceUploads[instanceId] = {
+      status: "failed",
+      fileName: file.name,
+      message: `${formatBytes(DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES)} 이하 이미지만 업로드할 수 있습니다.`,
+    };
+    renderAll();
+    return;
+  }
+
+  state.evidenceUploads[instanceId] = {
+    status: "uploading",
+    fileName: file.name,
+    contentType,
+    purpose,
+  };
+  renderAll();
+
+  try {
+    // Object Storage 업로드 URL 발급 응답입니다.
+    const upload = await fetchJson("/api/object-storage/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        purpose,
+        contentType,
+        questInstanceId: instanceId,
+      }),
+    });
+
+    if (file.size > toNumber(upload.maxUploadBytes, DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES)) {
+      throw new Error(`${formatBytes(upload.maxUploadBytes)} 이하 이미지만 업로드할 수 있습니다.`);
+    }
+
+    await uploadEvidenceFile(upload, file);
+
+    // 변수 의미: 업로드 완료 후 완료 요청에 첨부할 증빙 상태입니다.
+    const evidence = {
+      status: "uploaded",
+      fileName: file.name,
+      contentType: upload.contentType || contentType,
+      purpose,
+      objectKey: upload.objectKey,
+      uploadedAt: new Date().toISOString(),
+    };
+    state.evidenceUploads[instanceId] = evidence;
+    updateSystemStatus(true, `${getEvidenceLabel(purpose)} 업로드 완료`);
+
+    if (purpose === "quest_receipt") {
+      await runReceiptOcr(recommendation, evidence);
+    } else {
+      renderAll();
+    }
+  } catch (error) {
+    state.evidenceUploads[instanceId] = {
+      status: "failed",
+      fileName: file.name,
+      contentType,
+      purpose,
+      message: getEvidenceUploadFailureMessage(error),
+    };
+    updateSystemStatus(state.apiHealthy, getEvidenceUploadFailureMessage(error));
+    renderAll();
+  }
+}
+
+/**
  * 입력: 추천 항목.
  * 출력: 완료 인증 요청 본문 Promise.
  * 역할: 장소 좌표가 아니라 사용자의 실측 GPS 좌표로 완료 요청을 만든다.
@@ -2392,11 +2690,20 @@ async function buildCompletionBody(recommendation) {
   state.location = measuredLocation;
   syncNaverPositionMarker();
 
+  // 변수 의미: 현재 퀘스트에 업로드된 사진 증빙 상태입니다.
+  const evidence = state.evidenceUploads[recommendation?.instanceId || ""];
+  // 변수 의미: 완료 요청에 첨부할 Object Storage 객체 키입니다.
+  const objectKey = evidence?.objectKey || "";
+
   return {
     latitude: measuredLocation.lat,
     longitude: measuredLocation.lng,
     accuracyMeters: Math.round(measuredLocation.accuracyMeters),
-    photoAttached: false,
+    photoAttached: Boolean(objectKey),
+    photoRef: objectKey,
+    objectKey,
+    contentType: evidence?.contentType || "",
+    ocrText: evidence?.ocrText || "",
     storeName: "",
     checklistComplete: true,
     targetPlaceName: recommendation?.placeName || "",
@@ -2454,6 +2761,115 @@ function getRequestFailureMessage(error, action) {
   }
 
   return "요청에 실패해 상태를 변경하지 않았습니다.";
+}
+
+/**
+ * 입력: 퀘스트 액션, 추천 항목, API 결과, 선택 메시지.
+ * 출력: 없음.
+ * 역할: 수락과 완료 버튼 처리 결과를 팝업으로 보여줄 상태를 만든다.
+ * 호출 예시: showQuestActionDialog("complete", recommendation, result)
+ */
+function showQuestActionDialog(action, recommendation, actionResult = {}, message = "") {
+  // 변수 의미: 완료 버튼인지 여부입니다.
+  const isComplete = action === "complete";
+  // 변수 의미: 액션이 성공으로 처리됐는지 여부입니다.
+  const succeeded = isComplete ? actionResult?.ok !== false : !actionResult?.error;
+  // 변수 의미: 현재 퀘스트에 연결된 증빙 업로드 상태입니다.
+  const evidence = state.evidenceUploads[recommendation?.instanceId || ""];
+  // 변수 의미: 팝업에 표시할 세부 정보 목록입니다.
+  const details = [
+    recommendation?.questTitle || "퀘스트",
+    recommendation?.placeName || "장소 정보 없음",
+  ];
+
+  if (isComplete && actionResult?.verification) {
+    details.push(`GPS 판정: ${actionResult.verification.decision || "확인됨"}`);
+    if (actionResult.verification.distanceMeters !== undefined) {
+      details.push(`거리: ${actionResult.verification.distanceMeters}m`);
+    }
+  }
+
+  if (evidence?.objectKey) {
+    details.push(`${getEvidenceLabel(evidence.purpose)} 첨부 완료`);
+  }
+
+  if (evidence?.requirementCheck) {
+    details.push(getReceiptRequirementText(evidence.requirementCheck));
+  }
+
+  state.actionDialog = {
+    title: succeeded ? (isComplete ? "퀘스트 완료 확인" : "퀘스트 수락 확인") : "퀘스트 처리 실패",
+    message: message || (succeeded ? "버튼 입력이 정상 처리되었습니다." : "요청이 처리되지 않았습니다."),
+    details: details.filter(Boolean),
+    tone: succeeded ? "success" : "warning",
+  };
+  renderActionDialog();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 액션 결과 팝업을 닫는다.
+ * 호출 예시: closeActionDialog()
+ */
+function closeActionDialog() {
+  state.actionDialog = null;
+  renderActionDialog();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 수락과 완료 결과 팝업 DOM을 현재 상태와 동기화한다.
+ * 호출 예시: renderActionDialog()
+ */
+function renderActionDialog() {
+  // 기존 액션 팝업 요소입니다.
+  const existingDialog = select("#quest-action-dialog");
+  if (existingDialog) {
+    existingDialog.remove();
+  }
+
+  if (!state.actionDialog) {
+    return;
+  }
+
+  // 팝업 배경 요소입니다.
+  const overlay = createElement("div", "action-dialog-overlay");
+  overlay.id = "quest-action-dialog";
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) {
+      closeActionDialog();
+    }
+  });
+
+  // 팝업 본문 요소입니다.
+  const dialog = createElement("section", `action-dialog action-dialog--${state.actionDialog.tone}`);
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "quest-action-dialog-title");
+
+  // 팝업 제목 요소입니다.
+  const title = createElement("h2", "", state.actionDialog.title);
+  title.id = "quest-action-dialog-title";
+
+  // 팝업 안내 문구 요소입니다.
+  const message = createElement("p", "", state.actionDialog.message);
+  // 팝업 세부 정보 목록입니다.
+  const detailList = createElement("ul", "action-dialog-details");
+  state.actionDialog.details.forEach((detail) => {
+    detailList.append(createElement("li", "", detail));
+  });
+
+  // 팝업 닫기 버튼입니다.
+  const closeButton = createElement("button", "primary-action", "확인");
+  closeButton.type = "button";
+  closeButton.addEventListener("click", closeActionDialog);
+
+  dialog.append(title, message, detailList, closeButton);
+  overlay.append(dialog);
+  document.body.append(overlay);
+  closeButton.focus({ preventScroll: true });
 }
 
 /**
@@ -2566,7 +2982,10 @@ async function handleQuestAction(instanceId, action) {
     const actionResult = await fetchJson(path, requestOptions);
     if (action === "complete" && actionResult.ok === false) {
       state.apiHealthy = true;
-      updateSystemStatus(true, getActionFailureMessage(action, actionResult));
+      // 변수 의미: 완료 실패 안내 문구입니다.
+      const failureMessage = getActionFailureMessage(action, actionResult);
+      updateSystemStatus(true, failureMessage);
+      showQuestActionDialog(action, recommendation, actionResult, failureMessage);
       return;
     }
 
@@ -2581,7 +3000,10 @@ async function handleQuestAction(instanceId, action) {
       await Promise.allSettled([loadUser(), loadBadges(), loadNotes(), loadGgumdori()]);
     }
 
-    updateSystemStatus(true, action === "complete" ? "GPS 기준 완료됨" : "퀘스트 수락됨");
+    // 변수 의미: 액션 성공 안내 문구입니다.
+    const successMessage = action === "complete" ? "GPS 기준 완료됨" : "퀘스트 수락됨";
+    updateSystemStatus(true, successMessage);
+    showQuestActionDialog(action, recommendation, actionResult, successMessage);
   } catch (error) {
     if (!isUnauthorizedError(error)) {
       // 위치 권한 실패는 API 연결 상태를 바꾸지 않는다.
@@ -2590,7 +3012,10 @@ async function handleQuestAction(instanceId, action) {
         Number.isInteger(error?.code) ||
         String(error?.message || "").includes("위치");
       state.apiHealthy = isLocationError ? state.apiHealthy : false;
-      updateSystemStatus(state.apiHealthy, getRequestFailureMessage(error, action));
+      // 변수 의미: 요청 실패 안내 문구입니다.
+      const failureMessage = getRequestFailureMessage(error, action);
+      updateSystemStatus(state.apiHealthy, failureMessage);
+      showQuestActionDialog(action, recommendation, { ok: false, error }, failureMessage);
     }
   } finally {
     delete state.pendingQuestActions[instanceId];
@@ -2837,6 +3262,12 @@ function bindEvents() {
 
   window.addEventListener("hashchange", () => {
     setActiveView(readInitialView(), false);
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.actionDialog) {
+      closeActionDialog();
+    }
   });
 }
 

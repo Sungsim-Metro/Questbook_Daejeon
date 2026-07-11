@@ -112,6 +112,27 @@ class AppSettingsTest(unittest.TestCase):
         self.assertEqual(settings.object_storage_bucket_name, "qbook-evidence-test")
         self.assertEqual(settings.object_storage_presigned_url_ttl_seconds, 600)
 
+    def test_ocr_settings_read_ncp_clova_env(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: CLOVA OCR 설정이 환경 변수에서 읽히는지 확인한다.
+        호출 예시: self.test_ocr_settings_read_ncp_clova_env()
+        """
+        # 변수 의미: OCR 환경 변수가 포함된 앱 설정이다.
+        settings = self._settings_from_env({
+            "QUESTBOOK_APP_API_HOST": "127.0.0.1",
+            "NCP_CLOVA_OCR_INVOKE_URL": "https://example.com/custom/v1/ocr",
+            "NCP_CLOVA_OCR_SECRET_KEY": "ocr-secret",
+            "NCP_CLOVA_OCR_LANGUAGE": "ko",
+            "NCP_CLOVA_OCR_TIMEOUT_SECONDS": "12",
+        })
+
+        self.assertEqual(settings.ocr_invoke_url, "https://example.com/custom/v1/ocr")
+        self.assertEqual(settings.ocr_secret_key, "ocr-secret")
+        self.assertEqual(settings.ocr_language, "ko")
+        self.assertEqual(settings.ocr_timeout_seconds, 12)
+
 
 if __name__ == "__main__":
     unittest.main()

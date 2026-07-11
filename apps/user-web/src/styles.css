@@ -819,6 +819,52 @@ p {
   line-height: 1;
 }
 
+.evidence-panel {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px dashed rgba(10, 143, 72, 0.28);
+  border-radius: 12px;
+  background: rgba(237, 248, 241, 0.62);
+}
+
+.evidence-upload-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px 9px;
+  border: 1px solid rgba(10, 143, 72, 0.24);
+  border-radius: 12px;
+  color: var(--green-dark);
+  background: #fffdf7;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.evidence-upload-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.evidence-upload-button:has(input:disabled) {
+  color: #8a7f6e;
+  cursor: progress;
+  background: #eee6d5;
+}
+
+.evidence-status {
+  min-height: 19px;
+  margin: 0;
+  color: #5f655d;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
 .chip-row {
   display: flex;
   gap: 8px;
@@ -1260,9 +1306,67 @@ p {
   color: var(--green-dark);
 }
 
+.action-dialog-overlay {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(45, 58, 50, 0.38);
+}
+
+.action-dialog {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid rgba(10, 143, 72, 0.18);
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--paper-2);
+  box-shadow: 0 22px 54px rgba(45, 58, 50, 0.24);
+}
+
+.action-dialog--warning {
+  border-color: rgba(155, 63, 42, 0.24);
+}
+
+.action-dialog h2,
+.action-dialog p {
+  margin: 0;
+}
+
+.action-dialog h2 {
+  font-size: 25px;
+  line-height: 1.05;
+}
+
+.action-dialog p,
+.action-dialog li {
+  color: var(--sub);
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.action-dialog-details {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  list-style: none;
+}
+
+.action-dialog-details li {
+  padding: 7px 9px 8px;
+  border-radius: 10px;
+  background: #fff4d2;
+}
+
 .primary-action:focus-visible,
 .secondary-action:focus-visible,
 .card-action:focus-visible,
+.evidence-upload-button:focus-within,
 .ggumdori-select:focus-visible,
 .social-login-button:focus-visible,
 .map-secondary-button:focus-visible,

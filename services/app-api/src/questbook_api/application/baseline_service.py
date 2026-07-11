@@ -1,7 +1,8 @@
 # Questbook baseline 추천, 퀘스트 생성, 완료 유스케이스를 조합한다.
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+import re
 from threading import Lock
 from typing import Any
 
@@ -12,6 +13,30 @@ from questbook_api.integrations.object_storage.client import sanitize_object_key
 from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters
 
 
+# 변수 의미: 영수증 시간 비교와 표시에서 사용할 한국 시간대다.
+KOREA_TIMEZONE = timezone(timedelta(hours=9))
+# 변수 의미: 영수증 OCR에서 날짜 흔적을 찾기 위한 정규식이다.
+RECEIPT_DATE_PATTERN = re.compile(r"(20\d{2})[.\-/년\s]*(0?[1-9]|1[0-2])[.\-/월\s]*(0?[1-9]|[12]\d|3[01])")
+# 변수 의미: 영수증 OCR에서 시각 흔적을 찾기 위한 정규식이다.
+RECEIPT_TIME_PATTERN = re.compile(r"\b([01]?\d|2[0-3])[:시]\s*([0-5]\d)\b")
+# 변수 의미: 퀘스트 제목에서 구매 품목을 추출하기 위한 정규식 목록이다.
+RECEIPT_ITEM_PATTERNS = [
+    re.compile(r"(?:가서|에서)\s*([가-힣A-Za-z0-9 +#&().\-]{1,40}?)(?:을|를)?\s*(?:사먹기|먹기|구매|구입|사기|결제)"),
+    re.compile(r"([가-힣A-Za-z0-9 +#&().\-]{1,40}?)(?:을|를)\s*(?:사먹기|먹기|구매|구입|사기|결제)"),
+]
+# 변수 의미: 품목 추출 후 제거할 일반 안내 단어다.
+GENERIC_ITEM_WORDS = {
+    "방문",
+    "사진",
+    "영수증",
+    "인증",
+    "퀘스트",
+    "대표",
+    "메뉴",
+    "상권",
+    "로컬",
+}
+
 # 변수 의미: baseline 카테고리별 템플릿 기반 퀘스트 생성 정책이다.
 QUEST_TEMPLATES: dict[str, QuestTemplate] = {
     "nature": QuestTemplate("nature", "방문형", "gps", 50, "{place_name} 자연 관찰 체크인", "{place_name} 주변에서 오늘의 자연 단서를 기록하고 초록 탐험가 XP를 획득합니다."),
@@ -21,6 +46,142 @@ QUEST_TEMPLATES: dict[str, QuestTemplate] = {
     "mobility": QuestTemplate("mobility", "이동형", "gps_distance", 70, "{place_name} 이동 루트", "{place_name}을 출발점으로 가까운 관광지를 연결하는 이동형 퀘스트입니다."),
     "nightview": QuestTemplate("nightview", "활동형", "time_window_photo", 70, "{place_name} 야경 기록", "{place_name}에서 저녁 시간대 전망 기록을 남깁니다."),
 }
+
+
+def normalize_match_text(value: str) -> str:
+    """
+    입력: OCR 또는 퀘스트 비교 대상 문자열.
+    출력: 공백과 기호를 제거한 비교용 문자열.
+    역할: 영수증 OCR의 띄어쓰기 차이를 줄이고 장소·품목 포함 여부를 확인한다.
+    호출 예시: normalized = normalize_match_text("튀김 소보로")
+    """
+    return "".join(character for character in value.lower() if character.isalnum())
+
+
+def is_text_match(expected_value: str, actual_text: str) -> bool:
+    """
+    입력: 기대 문자열과 OCR 전체 텍스트.
+    출력: 두 문자열이 포함 관계로 일치하는지 여부.
+    역할: 장소명과 품목명을 같은 규칙으로 비교한다.
+    호출 예시: matched = is_text_match("성심당", receipt_text)
+    """
+    # 변수 의미: 비교용 기대 문자열이다.
+    normalized_expected = normalize_match_text(expected_value)
+    # 변수 의미: 비교용 OCR 문자열이다.
+    normalized_actual = normalize_match_text(actual_text)
+    if not normalized_expected or not normalized_actual:
+        return False
+    return normalized_expected in normalized_actual or normalized_actual in normalized_expected
+
+
+def extract_required_receipt_items(quest_title: str, quest_description: str, place_name: str) -> list[str]:
+    """
+    입력: 퀘스트 제목, 설명, 장소명.
+    출력: 영수증에서 확인할 품목 후보 목록.
+    역할: "성심당에 가서 튀김 소보로 사먹기" 같은 소비형 퀘스트에서 요구 품목을 추출한다.
+    호출 예시: items = extract_required_receipt_items("성심당에 가서 튀김 소보로 사먹기", "", "성심당")
+    """
+    # 변수 의미: 품목 추출에 사용할 퀘스트 문장 후보 목록이다.
+    sources = [quest_title, quest_description]
+    # 변수 의미: 중복 제거 전 품목 후보 목록이다.
+    candidates: list[str] = []
+    for source in sources:
+        for pattern in RECEIPT_ITEM_PATTERNS:
+            # 변수 의미: 현재 패턴으로 찾은 품목 후보들이다.
+            matches = pattern.findall(source or "")
+            candidates.extend(matches)
+
+    # 변수 의미: 정규화된 중복 제거용 집합이다.
+    seen: set[str] = set()
+    # 변수 의미: 최종 품목 목록이다.
+    required_items: list[str] = []
+    for candidate in candidates:
+        # 변수 의미: 장소명과 안내 단어를 제거한 품목 후보 문자열이다.
+        cleaned = candidate.replace(place_name, " ").strip(" .,-_()")
+        for word in GENERIC_ITEM_WORDS:
+            cleaned = cleaned.replace(word, " ")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        # 변수 의미: 중복 비교용 품목 토큰이다.
+        normalized = normalize_match_text(cleaned)
+        if not cleaned or len(normalized) < 2 or normalized in seen:
+            continue
+        seen.add(normalized)
+        required_items.append(cleaned)
+    return required_items
+
+
+def has_receipt_time_text(ocr_text: str) -> bool:
+    """
+    입력: OCR 전체 텍스트.
+    출력: 날짜 또는 시각 정보가 보이는지 여부.
+    역할: 영수증에 구매 시각을 확인할 단서가 있는지 판단한다.
+    호출 예시: has_time = has_receipt_time_text("2026.07.10 13:20 튀김소보로")
+    """
+    return bool(RECEIPT_DATE_PATTERN.search(ocr_text) or RECEIPT_TIME_PATTERN.search(ocr_text))
+
+
+def evaluate_quest_receipt_requirements(
+    expected_place_name: str,
+    quest_title: str,
+    quest_description: str,
+    ocr_text: str,
+    submitted_at: datetime | None = None,
+    required_items: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    입력: 기대 장소명, 퀘스트 제목과 설명, OCR 텍스트, 선택적 제출 시각과 요구 품목.
+    출력: 장소명, 품목, 시간 확인 결과.
+    역할: OCR 결과 문자가 소비형 퀘스트 요구사항과 맞는지 보조 검증한다.
+    호출 예시: result = evaluate_quest_receipt_requirements("성심당", "성심당에 가서 튀김 소보로 사먹기", "", text)
+    """
+    # 변수 의미: 검증 기준 시각이다.
+    verification_time = submitted_at or datetime.now(KOREA_TIMEZONE)
+    # 변수 의미: 명시 품목이 없을 때 퀘스트 문구에서 추출한 품목 목록이다.
+    item_requirements = required_items or extract_required_receipt_items(quest_title, quest_description, expected_place_name)
+    # 변수 의미: OCR에서 확인된 품목 목록이다.
+    matched_items = [item for item in item_requirements if is_text_match(item, ocr_text)]
+    # 변수 의미: OCR에서 확인되지 않은 품목 목록이다.
+    missing_items = [item for item in item_requirements if item not in matched_items]
+    # 변수 의미: 상호명 일치 여부다.
+    store_name_matched = is_text_match(expected_place_name, ocr_text)
+    # 변수 의미: 시간 정보 존재 여부다.
+    receipt_time_present = has_receipt_time_text(ocr_text)
+    # 변수 의미: 품목 조건 통과 여부다.
+    item_matched = not item_requirements or not missing_items
+    # 변수 의미: 세부 검증 결과 목록이다.
+    checks = [
+        {
+            "name": "store_name_match",
+            "passed": store_name_matched,
+            "reason": "" if store_name_matched else "store_name_not_matched",
+            "expectedPlaceName": expected_place_name,
+        },
+        {
+            "name": "required_item_match",
+            "passed": item_matched,
+            "reason": "" if item_matched else "required_item_not_matched",
+            "requiredItems": item_requirements,
+            "matchedItems": matched_items,
+            "missingItems": missing_items,
+        },
+        {
+            "name": "receipt_time_present",
+            "passed": receipt_time_present,
+            "reason": "" if receipt_time_present else "receipt_time_missing",
+            "checkedAt": verification_time.isoformat(),
+        },
+    ]
+    # 변수 의미: 통과한 세부 검증 수다.
+    passed_count = sum(1 for check in checks if check["passed"])
+    return {
+        "passed": all(check["passed"] for check in checks),
+        "matchScore": round(passed_count / len(checks), 3),
+        "expectedPlaceName": expected_place_name,
+        "requiredItems": item_requirements,
+        "matchedItems": matched_items,
+        "missingItems": missing_items,
+        "checks": checks,
+    }
 
 
 def build_region_key(latitude: float, longitude: float) -> str:
@@ -342,9 +503,16 @@ class BaselineQuestbookService:
         optional_checks: list[dict[str, Any]] = []
         if verification_type == "receipt_or_sign_photo":
             # 변수 의미: 소비형 인증 사진 첨부 여부다.
-            photo_attached = bool(payload.get("photoAttached"))
+            photo_attached = bool(payload.get("photoAttached") or payload.get("photoRef") or payload.get("objectKey"))
             # 변수 의미: OCR 또는 사용자가 확인한 상호명 텍스트다.
             ocr_text = str(payload.get("ocrText") or payload.get("storeName") or "")
+            # 변수 의미: OCR 텍스트와 소비형 퀘스트 요구사항의 보조 검증 결과다.
+            receipt_requirement_check = evaluate_quest_receipt_requirements(
+                instance["place_name"],
+                instance["title"],
+                instance["description"],
+                ocr_text,
+            )
             # 변수 의미: OCR 또는 상호명이 기대 장소명과 일치하는지 여부다.
             ocr_matched_store = self._is_store_name_match(instance["place_name"], ocr_text)
             optional_checks.append(
@@ -362,6 +530,19 @@ class BaselineQuestbookService:
                     "reason": "" if ocr_matched_store else "store_name_not_matched",
                     "ocrMatchedStore": ocr_matched_store,
                     "matchScore": 1.0 if ocr_matched_store else 0.0,
+                    "ignoredForDecision": True,
+                }
+            )
+            optional_checks.append(
+                {
+                    "name": "receipt_requirement_match",
+                    "passed": receipt_requirement_check["passed"],
+                    "reason": "" if receipt_requirement_check["passed"] else "receipt_requirement_not_matched",
+                    "matchScore": receipt_requirement_check["matchScore"],
+                    "requiredItems": receipt_requirement_check["requiredItems"],
+                    "matchedItems": receipt_requirement_check["matchedItems"],
+                    "missingItems": receipt_requirement_check["missingItems"],
+                    "checks": receipt_requirement_check["checks"],
                     "ignoredForDecision": True,
                 }
             )
@@ -432,13 +613,36 @@ class BaselineQuestbookService:
         역할: 소비형 baseline에서 금액·카드번호 없이 상호명만 대조한다.
         호출 예시: matched = self._is_store_name_match(\"성심당 본점\", \"성심당\")
         """
-        # 변수 의미: 공백과 기호를 제거한 기대 장소명이다.
-        normalized_expected = "".join(ch for ch in expected_name.lower() if ch.isalnum())
-        # 변수 의미: 공백과 기호를 제거한 OCR 텍스트다.
-        normalized_ocr = "".join(ch for ch in ocr_text.lower() if ch.isalnum())
-        if not normalized_expected or not normalized_ocr:
-            return False
-        return normalized_expected in normalized_ocr or normalized_ocr in normalized_expected
+        return is_text_match(expected_name, ocr_text)
+
+    def evaluate_receipt_ocr(
+        self,
+        user_id: str,
+        instance_id: str,
+        ocr_text: str,
+    ) -> dict[str, Any]:
+        """
+        입력: 사용자 ID, 사용자별 퀘스트 인스턴스 ID, OCR 텍스트.
+        출력: OCR 텍스트와 퀘스트 요구사항의 보조 검증 결과.
+        역할: 사진 업로드 후 완료 판정과 분리해 영수증 상호명·품목·시간을 확인한다.
+        호출 예시: result = service.evaluate_receipt_ocr("demo-user", "uqi_x", text)
+        """
+        # 변수 의미: 인스턴스와 공용 퀘스트 조인 정보다.
+        instance = self.repository.get_instance_with_quest(user_id, instance_id)
+        if instance is None:
+            return {"ok": False, "reason": "quest_not_found", "retryable": False}
+        # 변수 의미: OCR 요구사항 보조 검증 결과다.
+        requirement_check = evaluate_quest_receipt_requirements(
+            instance["place_name"],
+            instance["title"],
+            instance["description"],
+            ocr_text,
+        )
+        return {
+            "ok": True,
+            "quest": self._quest_payload_from_joined(instance),
+            "requirementCheck": requirement_check,
+        }
 
     def _normalize_photo_ref(self, user_id: str, payload: dict[str, Any]) -> str | None:
         """

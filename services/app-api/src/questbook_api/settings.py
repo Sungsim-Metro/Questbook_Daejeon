@@ -186,6 +186,14 @@ class AppSettings:
     object_storage_max_upload_bytes: int = 10 * 1024 * 1024
     # 변수 의미: S3 호환 요청의 bucket addressing style이다.
     object_storage_addressing_style: str = "path"
+    # 변수 의미: NCP CLOVA OCR API Gateway Invoke URL이다.
+    ocr_invoke_url: str = ""
+    # 변수 의미: NCP CLOVA OCR API Secret Key다.
+    ocr_secret_key: str = ""
+    # 변수 의미: OCR 인식 언어 설정이다.
+    ocr_language: str = "ko"
+    # 변수 의미: OCR 상위 요청 제한 시간 초 단위 값이다.
+    ocr_timeout_seconds: int = 8
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -262,4 +270,8 @@ class AppSettings:
             object_storage_addressing_style=normalize_object_storage_addressing_style(
                 get_env("NCP_OBJECT_STORAGE_ADDRESSING_STYLE", "path")
             ),
+            ocr_invoke_url=get_env("NCP_CLOVA_OCR_INVOKE_URL"),
+            ocr_secret_key=get_env("NCP_CLOVA_OCR_SECRET_KEY"),
+            ocr_language=get_env("NCP_CLOVA_OCR_LANGUAGE", "ko") or "ko",
+            ocr_timeout_seconds=get_int_env("NCP_CLOVA_OCR_TIMEOUT_SECONDS", 8, 1, 30),
         )
