@@ -80,6 +80,17 @@ qbook-app-subnet(10.0.20.0/24)이 **연결된 라우트 테이블**에 `0.0.0.0/
 
 상세 절차와 CORS XML 예시는 `docs/object-storage-setup.md`를 따른다.
 
+### 0-7. CLOVA OCR General 도메인 준비
+
+콘솔 → AI Services → CLOVA OCR:
+
+1. 한국어 General 도메인을 생성한다.
+2. 콘솔 데모에서 JPEG 또는 PNG 영수증의 상호명·품목·시간이 인식되는지 확인한다.
+3. API Gateway 자동 연동을 완료한다.
+4. `/general`까지 포함된 APIGW Invoke URL과 OCR Secret Key를 운영 비밀 저장소에 보관한다.
+
+상세 콘솔 절차, 키 구분, 실제 호출 검증은 `docs/clova-ocr-setup.md`를 따른다.
+
 ---
 
 ## Phase 1 — 서버 기본 준비 (SSH)
@@ -143,6 +154,10 @@ NCP_OBJECT_STORAGE_SECRET_KEY=<Object Storage Secret Key>
 NCP_OBJECT_STORAGE_PRESIGNED_URL_TTL_SECONDS=600
 NCP_OBJECT_STORAGE_MAX_UPLOAD_BYTES=10485760
 NCP_OBJECT_STORAGE_ADDRESSING_STYLE=path
+NCP_CLOVA_OCR_INVOKE_URL=<API Gateway의 전체 General Invoke URL>
+NCP_CLOVA_OCR_SECRET_KEY=<CLOVA OCR 도메인의 Secret Key>
+NCP_CLOVA_OCR_LANGUAGE=ko
+NCP_CLOVA_OCR_TIMEOUT_SECONDS=8
 ```
 
 꺾쇠 자리 값의 의미와 콘솔에서 찾는 곳:
@@ -155,6 +170,8 @@ NCP_OBJECT_STORAGE_ADDRESSING_STYLE=path
 | `<REDIS_PRIVATE_DOMAIN>` | Redis의 VPC 내부 DNS 이름. URL 끝 `/0`은 논리 DB 0번(기본값) | Cloud DB for Redis → qbook-cache 상세 → "Private 도메인" |
 | `<Object Storage 버킷 이름>` | 사진 증빙 원본을 저장할 비공개 버킷 | Object Storage → Bucket |
 | `<Object Storage Access Key ID>` / `<Object Storage Secret Key>` | S3 호환 API 인증에 사용할 키 | Sub Account 또는 계정 보안 설정의 API 인증 키 |
+| `<API Gateway의 전체 General Invoke URL>` | `/general`까지 포함된 OCR 호출 주소 | CLOVA OCR → Domain → General 도메인 → API Gateway 연동 → APIGW Invoke URL |
+| `<CLOVA OCR 도메인의 Secret Key>` | `X-OCR-SECRET` 헤더에 사용할 OCR 전용 비밀 키 | CLOVA OCR → Domain → General 도메인 → API Gateway 연동 → Secret Key |
 
 ```bash
 chmod 600 /opt/Questbook_Daejeon/.env

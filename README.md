@@ -7,7 +7,9 @@
 - `docs/PROJECT_DESIGN.md`: 목표 기능, 데이터 정책, 시스템 아키텍처, 네트워크 구조, 확장 설계
 - `docs/MVP_STATUS.md`: 현재 구현 현황, 미구현 기능, 다음 구현 작업
 - `docs/Design.md`: 원본 요구사항 메모
+- `docs/deploy-cloud.md`: 테스트 VM 이미지 빌드부터 Registry, 다중 VM, ALB, 롤백까지의 클라우드 배포 런북
 - `docs/object-storage-setup.md`: NCP Object Storage 사진 증빙 저장 준비 절차
+- `docs/clova-ocr-setup.md`: NCP CLOVA OCR 도메인·API Gateway·키·실제 영수증 검증 연동 절차
 
 ## 샘플 이미지
 
@@ -63,6 +65,7 @@ MVP 단계에서는 뱃지, 모험 수첩, 꿈돌이 도감 같은 비금전 보
 baseline 분리 구현은 설계서의 확장 이전 구조에 맞춰 사용자 PWA, 웹 게이트웨이, Python 앱 API, PostgreSQL 저장소, Redis 캐시 계층을 분리한다. 로컬 `uv` 실행 경로에서는 Docker Compose로 PostgreSQL과 Redis 서비스만 먼저 기동한다. 웹·앱 API까지 컨테이너로 포함한 전체 스택은 저장소 루트에서 `docker compose up -d --build`로 기동한다. 실제 한국관광공사 TourAPI를 쓰려면 공공데이터포털에서 `한국관광공사_국문 관광정보 서비스_GW` 활용신청 후 `.env`에 `TOURAPI_SERVICE_KEY`를 넣는다. 브라우저 코드에는 키를 넣지 않고 앱 API가 서버 측에서 호출한다.
 
 NCP Object Storage 사진 증빙 저장은 `docs/object-storage-setup.md`를 따른다. 앱 API는 `boto3`로 비공개 버킷에 접근하며, 브라우저에는 API 키를 노출하지 않고 presigned URL만 발급한다.
+NCP CLOVA OCR 실제 연동은 `docs/clova-ocr-setup.md`를 따른다. 현재 구현은 General OCR의 전체 텍스트를 서버에서 받아 상호명·품목·시간을 보조 검증하며, 완료 여부는 기존 GPS 판정만 사용한다.
 
 ```bash
 cp .env.example .env
