@@ -377,6 +377,26 @@ class BaselineHttpSmokeTest(unittest.TestCase):
         # 변수 의미: 완료 후 수첩 응답이다.
         notes_payload = fetch_json(f"http://127.0.0.1:{self.web_port}/api/notes", access_token=self.access_token)
         self.assertGreaterEqual(len(notes_payload["notes"]), 1)
+        # 변수 의미: 수정할 첫 번째 수첩 기록이다.
+        first_note = notes_payload["notes"][0]
+        self.assertIn("photoRef", first_note)
+        self.assertIn("entry", first_note)
+
+        # 변수 의미: 웹 게이트웨이를 통과한 수첩 리뷰 저장 응답이다.
+        updated_note_payload = fetch_json(
+            f"http://127.0.0.1:{self.web_port}/api/notes/{first_note['id']}",
+            method="PATCH",
+            payload={
+                "entryType": "review",
+                "title": "대전 시장 탐험 후기",
+                "body": "현장에서 퀘스트를 완료하고 남긴 리뷰입니다.",
+                "rating": 5,
+            },
+            access_token=self.access_token,
+        )
+        self.assertEqual(updated_note_payload["note"]["entry"]["type"], "review")
+        self.assertEqual(updated_note_payload["note"]["entry"]["rating"], 5)
+        self.assertEqual(updated_note_payload["note"]["entry"]["body"], "현장에서 퀘스트를 완료하고 남긴 리뷰입니다.")
 
 
 if __name__ == "__main__":

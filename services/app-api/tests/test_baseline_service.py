@@ -1,6 +1,7 @@
 # Questbook baseline 앱 서비스 유스케이스를 검증한다.
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 import sys
 from threading import Barrier, Thread
@@ -147,6 +148,11 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
         # 변수 의미: 추천 장소 좌표다.
         place = recommendation["place"]
         self.service.accept_quest("demo-user", instance_id)
+        # 변수 의미: 완료 기록과 수첩에서 다시 조회할 사진 객체 키다.
+        photo_ref = (
+            f"users/demo-user/quests/{instance_id}/"
+            "evidence/quest_receipt/test-receipt.jpg"
+        )
 
         # 변수 의미: 퀘스트 완료 요청 결과다.
         completion = self.service.complete_quest(
@@ -157,6 +163,7 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
                 "longitude": place["longitude"],
                 "accuracyMeters": 10,
                 "photoAttached": True,
+                "photoRef": photo_ref,
                 "ocrText": place["title"],
                 "checklistComplete": True,
             },
@@ -166,7 +173,183 @@ class BaselineQuestbookServiceTest(unittest.TestCase):
         self.assertEqual(completion["completion"]["earnedXp"], 60)
         self.assertGreaterEqual(self.repository.get_user("demo-user")["level"]["totalXp"], 60)
         self.assertTrue(any(badge["categoryCode"] == "market" and badge["earned"] for badge in self.repository.list_badges("demo-user")))
-        self.assertEqual(len(self.repository.list_notes("demo-user")), 1)
+        # 변수 의미: 완료 기록과 결합해 조회한 수첩 기록이다.
+        notes = self.repository.list_notes("demo-user")
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["questTitle"], recommendation["quest"]["title"])
+        self.assertEqual(notes[0]["earnedXp"], 60)
+        self.assertEqual(
+            datetime.fromisoformat(notes[0]["completedAt"]),
+            datetime.fromisoformat(completion["completion"]["completedAt"]),
+        )
+        self.assertEqual(notes[0]["photoRef"], photo_ref)
+        self.assertEqual(
+            notes[0]["entry"],
+            {
+                "type": "diary",
+                "title": "",
+                "body": "",
+                "rating": None,
+                "updatedAt": None,
+            },
+        )
+
+    def test_update_note_entry_persists_review_and_diary(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 같은 수첩 기록에 리뷰와 일기를 저장하고 평점 정책을 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_update_note_entry_persists_review_and_diary
+        """
+        # 변수 의미: 수락된 자연 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("nature")
+        # 변수 의미: 수첩 기록을 만들기 위한 퀘스트 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+            },
+        )
+        self.assertTrue(completion["ok"])
+        # 변수 의미: 갱신할 수첩 기록 ID다.
+        note_id = completion["completion"]["noteId"]
+
+        # 변수 의미: 사용자 리뷰 저장 결과다.
+        review_result = self.service.update_note_entry(
+            "demo-user",
+            note_id,
+            {
+                "entryType": "review",
+                "title": "다시 가고 싶은 곳",
+                "body": "전시가 알차고 동선이 편했습니다.",
+                "rating": 5,
+            },
+        )
+        self.assertIsNotNone(review_result)
+        assert review_result is not None
+        self.assertEqual(
+            review_result["entry"],
+            {
+                "type": "review",
+                "title": "다시 가고 싶은 곳",
+                "body": "전시가 알차고 동선이 편했습니다.",
+                "rating": 5,
+                "updatedAt": review_result["entry"]["updatedAt"],
+            },
+        )
+        self.assertIsNotNone(review_result["entry"]["updatedAt"])
+
+        # 변수 의미: 같은 기록을 일기로 바꿔 저장한 결과다.
+        diary_result = self.service.update_note_entry(
+            "demo-user",
+            note_id,
+            {
+                "entryType": "diary",
+                "title": "오늘의 탐험",
+                "body": "새로운 장소를 천천히 둘러봤다.",
+                "rating": None,
+            },
+        )
+        self.assertIsNotNone(diary_result)
+        assert diary_result is not None
+        self.assertEqual(diary_result["entry"]["type"], "diary")
+        self.assertEqual(diary_result["entry"]["rating"], None)
+        # 변수 의미: DB에서 다시 조회한 갱신 후 수첩 기록이다.
+        persisted_note = self.repository.list_notes("demo-user")[0]
+        self.assertEqual(persisted_note["entry"], diary_result["entry"])
+
+    def test_update_note_entry_hides_other_users_note(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 다른 사용자가 수첩 기록 ID를 알아도 내용을 변경하지 못하는지 확인한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_update_note_entry_hides_other_users_note
+        """
+        # 변수 의미: 수락된 자연 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("nature")
+        # 변수 의미: demo-user의 수첩 기록을 만들기 위한 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+            },
+        )
+        # 변수 의미: 다른 사용자가 수정하려는 demo-user의 수첩 기록 ID다.
+        note_id = completion["completion"]["noteId"]
+        self.repository.ensure_user("other-user")
+
+        # 변수 의미: 타 사용자 ID로 보낸 수첩 기록 갱신 결과다.
+        denied_result = self.service.update_note_entry(
+            "other-user",
+            note_id,
+            {
+                "entryType": "diary",
+                "title": "바꾸기 시도",
+                "body": "이 내용은 저장되면 안 됩니다.",
+                "rating": None,
+            },
+        )
+
+        self.assertIsNone(denied_result)
+        self.assertEqual(self.repository.list_notes("demo-user")[0]["entry"]["body"], "")
+        self.assertEqual(self.repository.list_notes("other-user"), [])
+
+    def test_update_note_entry_validates_payload_boundaries(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 기록 유형, 제목, 본문, 리뷰 평점의 허용 범위를 검증한다.
+        호출 예시: python -m unittest ...BaselineQuestbookServiceTest.test_update_note_entry_validates_payload_boundaries
+        """
+        # 변수 의미: 수락된 자연 퀘스트와 추천 장소다.
+        instance_id, place, _recommendation = self._prepare_accepted_recommendation("nature")
+        # 변수 의미: 검증 대상 수첩 기록을 만들기 위한 완료 결과다.
+        completion = self.service.complete_quest(
+            "demo-user",
+            instance_id,
+            {
+                "latitude": place["latitude"],
+                "longitude": place["longitude"],
+                "accuracyMeters": 10,
+            },
+        )
+        # 변수 의미: payload 검증에 사용할 수첩 기록 ID다.
+        note_id = completion["completion"]["noteId"]
+        # 변수 의미: 최대 허용 길이와 평점 경계를 통과하는 리뷰 저장 결과다.
+        boundary_result = self.service.update_note_entry(
+            "demo-user",
+            note_id,
+            {
+                "entryType": "review",
+                "title": "제" * 100,
+                "body": "본" * 2000,
+                "rating": 1,
+            },
+        )
+        self.assertIsNotNone(boundary_result)
+
+        # 변수 의미: 각각의 입력 검증에서 거부돼야 하는 payload 목록이다.
+        invalid_payloads = [
+            {"entryType": "memo", "title": "", "body": "본문", "rating": None},
+            {"entryType": "diary", "title": "제" * 101, "body": "본문", "rating": None},
+            {"entryType": "diary", "title": "", "body": "   ", "rating": None},
+            {"entryType": "diary", "title": "", "body": "본" * 2001, "rating": None},
+            {"entryType": "review", "title": "", "body": "본문", "rating": None},
+            {"entryType": "review", "title": "", "body": "본문", "rating": 0},
+            {"entryType": "review", "title": "", "body": "본문", "rating": 6},
+            {"entryType": "review", "title": "", "body": "본문", "rating": True},
+            {"entryType": "diary", "title": "", "body": "본문", "rating": 5},
+        ]
+        for invalid_payload in invalid_payloads:
+            with self.subTest(invalid_payload=invalid_payload):
+                with self.assertRaises(ValueError):
+                    self.service.update_note_entry("demo-user", note_id, invalid_payload)
 
     def test_market_completion_uses_gps_when_photo_is_missing(self) -> None:
         """
