@@ -13,7 +13,11 @@ from unittest.mock import patch
 APP_API_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(APP_API_SRC))
 
-from questbook_api.integrations.tourapi.client import TourApiClient, normalize_service_key
+from questbook_api.integrations.tourapi.client import (
+    TourApiClient,
+    map_tourapi_category,
+    normalize_service_key,
+)
 
 
 class FakeTourApiResponse:
@@ -79,6 +83,194 @@ class TourApiClientTest(unittest.TestCase):
         """
         self.assertEqual(normalize_service_key("abc%2Bdef%2Fghi%3D"), "abc+def/ghi=")
 
+    def test_map_tourapi_category_maps_official_lcls_codes(self) -> None:
+        """
+        입력: 공식 lclsSystmCode2 코드표의 대표 신분류 코드.
+        출력: Questbook 내부 카테고리 코드와 표시 이름.
+        역할: 신분류 전용 응답이 여섯 개 내부 카테고리로 매핑되는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_maps_official_lcls_codes()
+        """
+        # 변수 의미: 공식 신분류 코드와 기대하는 Questbook 카테고리의 대표 사례다.
+        category_cases = [
+            ("NA", "", "", "nature"),
+            ("VE", "VE03", "VE030100", "nature"),
+            ("EV", "EV01", "EV010500", "nature"),
+            ("EX", "EX05", "EX050700", "nature"),
+            ("VE", "VE07", "VE070500", "science"),
+            ("VE", "VE02", "VE020500", "science"),
+            ("EX", "EX06", "EX060200", "science"),
+            ("EX", "EX06", "EX060600", "science"),
+            ("EX", "EX06", "EX060700", "science"),
+            ("EX", "EX06", "EX060900", "science"),
+            ("FD", "", "", "market"),
+            ("SH", "", "", "market"),
+            ("EV", "EV01", "EV010300", "market"),
+            ("EX", "EX06", "EX060300", "market"),
+            ("EX", "EX06", "EX060800", "market"),
+            ("LS", "", "", "mobility"),
+            ("VE", "VE11", "VE110200", "mobility"),
+            ("VE", "VE01", "VE010200", "nightview"),
+            ("VE", "VE04", "VE040100", "downtown"),
+        ]
+
+        # 변수 의미: 한 개 신분류 1·2·3Depth 코드와 기대하는 내부 카테고리 코드다.
+        for lcls_one, lcls_two, lcls_three, expected_category_code in category_cases:
+            # 변수 의미: 현재 공식 신분류 대표 사례로 구성한 TourAPI 항목이다.
+            raw_item = {
+                "lclsSystm1": lcls_one,
+                "lclsSystm2": lcls_two,
+                "lclsSystm3": lcls_three,
+                "title": "분류 테스트 장소",
+            }
+            with self.subTest(raw_item=raw_item):
+                # 변수 의미: 신분류 입력을 변환한 실제 내부 카테고리 코드다.
+                actual_category_code, _category_name = map_tourapi_category(raw_item)
+                self.assertEqual(actual_category_code, expected_category_code)
+
+    def test_map_tourapi_category_prefers_lcls_over_legacy_categories(self) -> None:
+        """
+        입력: 서로 다른 의미의 신분류와 구분류를 함께 가진 TourAPI 항목.
+        출력: 신분류를 기준으로 결정된 내부 카테고리.
+        역할: 과도기 동시 응답에서 cat1/2/3가 신분류를 덮어쓰지 않는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_prefers_lcls_over_legacy_categories()
+        """
+        # 변수 의미: 음식 신분류와 과학 구분류가 충돌하는 TourAPI 항목이다.
+        raw_item = {
+            "lclsSystm1": "FD",
+            "lclsSystm2": "FD01",
+            "lclsSystm3": "FD010100",
+            "cat1": "A02",
+            "cat2": "A0206",
+            "cat3": "A02060100",
+            "title": "분류 테스트 장소",
+        }
+
+        # 변수 의미: 충돌하는 분류를 변환한 실제 내부 카테고리 코드다.
+        category_code, _category_name = map_tourapi_category(raw_item)
+
+        self.assertEqual(category_code, "market")
+
+    def test_map_tourapi_category_uses_legacy_cat3_when_lcls_is_empty(self) -> None:
+        """
+        입력: 신분류 값은 비어 있고 cat3만 채워진 구형 TourAPI 항목.
+        출력: 구분류를 기준으로 결정된 내부 카테고리.
+        역할: 신분류가 없을 때 cat1/2/3 fallback이 유지되는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_uses_legacy_cat3_when_lcls_is_empty()
+        """
+        # 변수 의미: 서로 다른 빈 값 형태와 레저스포츠 cat3를 가진 TourAPI 항목이다.
+        raw_item = {
+            "lclsSystm1": "",
+            "lclsSystm2": None,
+            "lclsSystm3": "   ",
+            "cat3": "A03020700",
+            "title": "분류 테스트 장소",
+        }
+
+        # 변수 의미: 구분류 fallback으로 변환한 실제 내부 카테고리 코드다.
+        category_code, _category_name = map_tourapi_category(raw_item)
+
+        self.assertEqual(category_code, "mobility")
+
+    def test_map_tourapi_category_reads_each_legacy_category_depth(self) -> None:
+        """
+        입력: 신분류 없이 cat1, cat2, cat3 중 하나만 가진 구형 TourAPI 항목.
+        출력: 각 구분류 Depth를 기준으로 결정된 내부 카테고리.
+        역할: 세 구분류 필드가 모두 과도기 fallback 입력으로 유지되는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_reads_each_legacy_category_depth()
+        """
+        # 변수 의미: 구분류 필드별 대표 코드와 기대하는 내부 카테고리 사례다.
+        legacy_cases = [
+            ("cat1", "A01", "nature"),
+            ("cat2", "A0206", "science"),
+            ("cat3", "A05020900", "market"),
+        ]
+
+        # 변수 의미: 현재 검사할 구분류 필드 이름, 값, 기대 카테고리다.
+        for field_name, field_value, expected_category_code in legacy_cases:
+            # 변수 의미: 한 개 구분류 Depth만 가진 TourAPI 항목이다.
+            raw_item = {field_name: field_value, "title": "분류 테스트 장소"}
+            with self.subTest(field_name=field_name):
+                # 변수 의미: 구분류 입력을 변환한 실제 내부 카테고리 코드다.
+                actual_category_code, _category_name = map_tourapi_category(raw_item)
+                self.assertEqual(actual_category_code, expected_category_code)
+
+    def test_map_tourapi_category_preserves_legacy_code_and_title_priority(self) -> None:
+        """
+        입력: 구분류 코드와 더 높은 기존 우선순위의 제목 키워드가 충돌하는 항목.
+        출력: 변경 전 TourAPI 매핑 순서와 같은 내부 카테고리.
+        역할: 신분류 migration이 구분류-only 항목의 기존 분류 결과를 바꾸지 않는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_preserves_legacy_code_and_title_priority()
+        """
+        # 변수 의미: 기존 분류 순서를 보존해야 하는 코드·제목 충돌 사례다.
+        legacy_priority_cases = [
+            ({"cat1": "A02", "title": "성심당 본점"}, "market"),
+            ({"cat1": "A01", "title": "보문산 전망대"}, "nightview"),
+        ]
+
+        # 변수 의미: 현재 검사할 구분류 충돌 항목과 기존 기대 카테고리다.
+        for raw_item, expected_category_code in legacy_priority_cases:
+            with self.subTest(raw_item=raw_item):
+                # 변수 의미: 구분류 충돌 항목을 변환한 실제 내부 카테고리 코드다.
+                actual_category_code, _category_name = map_tourapi_category(raw_item)
+                self.assertEqual(actual_category_code, expected_category_code)
+
+    def test_map_tourapi_category_does_not_fallback_for_unknown_lcls_code(self) -> None:
+        """
+        입력: 미등록 신분류 코드와 유효한 구분류가 함께 있는 TourAPI 항목.
+        출력: 제목 기본 규칙으로 결정된 내부 카테고리.
+        역할: 신분류 값이 존재하면 미등록 코드여도 구분류를 사용하지 않는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_does_not_fallback_for_unknown_lcls_code()
+        """
+        # 변수 의미: 미등록 신분류와 과학 구분류가 함께 있는 TourAPI 항목이다.
+        raw_item = {
+            "lclsSystm1": "ZZ",
+            "lclsSystm2": "ZZ99",
+            "lclsSystm3": "ZZ999999",
+            "cat1": "A02",
+            "cat2": "A0206",
+            "cat3": "A02060100",
+            "title": "미등록 분류 장소",
+        }
+
+        # 변수 의미: 미등록 신분류 입력을 변환한 실제 내부 카테고리 코드다.
+        category_code, _category_name = map_tourapi_category(raw_item)
+
+        self.assertEqual(category_code, "downtown")
+
+    def test_map_tourapi_category_does_not_prefix_match_fixed_lcls_leaf_codes(self) -> None:
+        """
+        입력: 공식 3Depth 고정 코드 뒤에 문자가 추가된 미등록 신분류 값.
+        출력: 공식 고정 코드 카테고리가 아닌 기본 내부 카테고리.
+        역할: 3Depth leaf 코드를 branch 접두사처럼 과잉 매칭하지 않는지 확인한다.
+        호출 예시: self.test_map_tourapi_category_does_not_prefix_match_fixed_lcls_leaf_codes()
+        """
+        # 변수 의미: Questbook이 exact match로만 인정해야 하는 공식 3Depth 코드다.
+        fixed_leaf_codes = [
+            "VE010200",
+            "VE020500",
+            "EX060200",
+            "EX060600",
+            "EX060700",
+            "EX060900",
+            "EV010500",
+            "EX050700",
+            "EV010300",
+            "EX060300",
+            "EX060800",
+        ]
+
+        # 변수 의미: 뒤에 문자를 붙여 미등록 값으로 만든 공식 3Depth 코드다.
+        for fixed_leaf_code in fixed_leaf_codes:
+            # 변수 의미: 미등록 3Depth 코드만 가진 TourAPI 항목이다.
+            raw_item = {
+                "lclsSystm3": f"{fixed_leaf_code}X",
+                "title": "미등록 분류 장소",
+            }
+            with self.subTest(raw_item=raw_item):
+                # 변수 의미: 미등록 3Depth 입력을 변환한 실제 내부 카테고리 코드다.
+                category_code, _category_name = map_tourapi_category(raw_item)
+                self.assertEqual(category_code, "downtown")
+
     def test_fetch_nearby_uses_live_tourapi_payload(self) -> None:
         """
         입력: 없음.
@@ -97,11 +289,12 @@ class TourApiClientTest(unittest.TestCase):
                         "item": [
                             {
                                 "contentid": "12345",
-                                "title": "대전 과학관",
+                                "title": "대전 전시 체험 공간",
                                 "mapx": "127.3845000",
                                 "mapy": "36.3504000",
-                                "cat1": "A02",
-                                "cat2": "",
+                                "lclsSystm1": "VE",
+                                "lclsSystm2": "VE07",
+                                "lclsSystm3": "VE070500",
                             }
                         ]
                     }
@@ -128,6 +321,9 @@ class TourApiClientTest(unittest.TestCase):
         # 변수 의미: 실제 요청 URL에서 파싱한 쿼리 파라미터다.
         query = parse_qs(urlparse(requested_urls[0]).query)
         self.assertEqual(query["serviceKey"][0], "decoded+/key=")
+        self.assertNotIn("lclsSystm1", query)
+        self.assertNotIn("lclsSystm2", query)
+        self.assertNotIn("lclsSystm3", query)
         self.assertEqual(status, "live")
         self.assertEqual(len(places), 1)
         self.assertEqual(places[0].content_id, "12345")
