@@ -157,6 +157,18 @@ class QuestbookGatewayHandler(BaseHTTPRequestHandler):
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
+    def do_PATCH(self) -> None:
+        """
+        입력: PATCH 요청.
+        출력: 앱 API 프록시 응답.
+        역할: 수첩 기록 수정 요청을 앱 서버로 전달한다.
+        호출 예시: PATCH /api/notes/note_x
+        """
+        if self.path.startswith("/api/"):
+            self._proxy_request("PATCH")
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
     def log_message(self, format: str, *args: Any) -> None:
         """
         입력: 표준 HTTP 로그 포맷과 인자.

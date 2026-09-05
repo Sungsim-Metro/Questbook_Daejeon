@@ -176,6 +176,12 @@ const OAUTH_NONCE_KEY = "questbook:user-web:oauth-nonce";
 // 사진 증빙 기본 업로드 제한 바이트 값입니다.
 const DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+// 수첩 기록 제목의 최대 글자 수입니다.
+const NOTE_ENTRY_TITLE_MAX_LENGTH = 100;
+
+// 수첩 기록 본문의 최대 글자 수입니다.
+const NOTE_ENTRY_BODY_MAX_LENGTH = 2000;
+
 // 화면 전체의 현재 상태입니다.
 const state = {
   apiHealthy: false,
@@ -194,6 +200,9 @@ const state = {
   recommendations: [...FALLBACK_RECOMMENDATIONS],
   badges: [...FALLBACK_BADGES],
   notes: [...FALLBACK_NOTES],
+  notesSource: "fallback",
+  notePhotos: {},
+  noteDrafts: {},
   ggumdori: [...FALLBACK_GGUMDORI],
   questStatuses: readStoredQuestStatuses(),
   pendingQuestActions: {},
@@ -306,6 +315,23 @@ function readInitialView() {
   const viewFromHash = window.location.hash.replace(/^#view-/, "");
 
   return VIEW_META[viewFromHash] ? viewFromHash : "home";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 로그아웃 상태에서 내부 화면 해시를 제거하고 앱 화면 상태를 홈으로 되돌린다.
+ * 호출 예시: resetLoggedOutNavigation()
+ */
+function resetLoggedOutNavigation() {
+  // 로그인 화면에서 노출하지 않을 내부 화면 해시를 제거한 URL입니다.
+  const cleanUrl = `${window.location.pathname}${window.location.search}`;
+
+  state.activeView = "home";
+  if (window.location.hash) {
+    window.history.replaceState(null, "", cleanUrl);
+  }
+  setActiveView("home", false);
 }
 
 /**
@@ -556,7 +582,14 @@ function isUnauthorizedError(error) {
  */
 function resetExpiredSession(message = "세션이 만료되었습니다. 다시 동의 후 시작하세요.") {
   state.accessToken = "";
+  state.notes = [];
+  state.notesSource = "api";
+  state.notePhotos = {};
+  state.noteDrafts = {};
   removeStorageValue(ACCESS_TOKEN_KEY);
+  removeSessionValue(OAUTH_NONCE_KEY);
+  resetLoggedOutNavigation();
+  renderNotes();
   setConsentPanelVisible(true);
   setConsentMessage(message);
   updateSystemStatus(false, "다시 로그인 필요");
@@ -843,6 +876,7 @@ function ensureSessionReady() {
     return true;
   }
 
+  resetLoggedOutNavigation();
   setConsentPanelVisible(true);
   updateSystemStatus(false, "동의 대기");
   return false;
@@ -1022,15 +1056,27 @@ function normalizeBadge(rawBadge) {
 function normalizeNote(rawNote) {
   // 수첩 원본 응답입니다.
   const note = rawNote || {};
+  // 사용자가 작성한 일기 또는 리뷰 원본입니다.
+  const entry = note.entry && typeof note.entry === "object" ? note.entry : {};
+  // 리뷰일 때만 사용할 별점입니다.
+  const rating = toNumber(entry.rating, 0);
 
   return {
     id: String(note.id || note.noteId || createClientId("note")),
-    title: note.title || note.questTitle || "퀘스트 완료 기록",
+    title: note.questTitle || note.title || "퀘스트 완료 기록",
     placeName: note.placeName || note.placeReference?.placeName || "대전 관광지",
     createdAt: note.createdAt || note.completedAt || new Date().toISOString(),
     earnedXp: toNumber(note.earnedXp, 0),
     badges: Array.isArray(note.badges) ? note.badges.map((badge) => badge.name || badge) : [],
     memo: note.memo || note.summary || "완료한 퀘스트가 수첩에 기록되었습니다.",
+    photoRef: String(note.photoRef || note.objectKey || ""),
+    entry: {
+      type: entry.type === "review" ? "review" : "diary",
+      title: String(entry.title || ""),
+      body: String(entry.body || ""),
+      rating: entry.type === "review" && Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : null,
+      updatedAt: entry.updatedAt || "",
+    },
   };
 }
 
@@ -2304,6 +2350,494 @@ function renderBadges() {
 }
 
 /**
+ * 입력: 수첩 기록.
+ * 출력: 화면 입력 상태 객체.
+ * 역할: 서버 기록을 일기·리뷰 편집 폼의 초기 상태로 변환한다.
+ * 호출 예시: const draft = createNoteDraft(note)
+ */
+function createNoteDraft(note) {
+  // 편집 폼의 기준이 되는 서버 기록입니다.
+  const entry = note.entry || {};
+
+  return {
+    type: entry.type === "review" ? "review" : "diary",
+    title: String(entry.title || ""),
+    body: String(entry.body || ""),
+    rating: entry.type === "review" ? toNumber(entry.rating, 0) || "" : "",
+    dirty: false,
+    pending: false,
+    isOpen: false,
+    message: "",
+    tone: "",
+  };
+}
+
+/**
+ * 입력: 수첩 기록.
+ * 출력: 해당 기록의 현재 편집 상태.
+ * 역할: 전체 화면 재렌더링 뒤에도 작성 중인 값을 잃지 않게 편집 상태를 보존한다.
+ * 호출 예시: const draft = getNoteDraft(note)
+ */
+function getNoteDraft(note) {
+  if (!state.noteDrafts[note.id]) {
+    state.noteDrafts[note.id] = createNoteDraft(note);
+  }
+
+  return state.noteDrafts[note.id];
+}
+
+/**
+ * 입력: 사진이 연결된 수첩 기록과 즉시 렌더링 여부.
+ * 출력: 다운로드 URL 발급 완료 Promise.
+ * 역할: 현재 사용자 사진의 짧은 presigned GET URL을 발급받아 카드 상태에 저장한다.
+ * 호출 예시: await requestNotePhoto(note, true)
+ */
+async function requestNotePhoto(note, shouldRender = false) {
+  if (!note.photoRef) {
+    delete state.notePhotos[note.id];
+    return;
+  }
+
+  // 동시에 진행된 요청 중 최신 응답만 반영하기 위한 요청 식별자입니다.
+  const requestId = createClientId("note-photo");
+  state.notePhotos[note.id] = {
+    status: "loading",
+    url: "",
+    objectKey: note.photoRef,
+    requestId,
+    error: "",
+  };
+
+  if (shouldRender) {
+    renderNotes();
+  }
+
+  try {
+    // Object Storage 다운로드 URL 발급 응답입니다.
+    const payload = await fetchJson("/api/object-storage/download-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objectKey: note.photoRef }),
+    });
+    // 응답을 반영할 현재 사진 요청 상태입니다.
+    const currentPhoto = state.notePhotos[note.id];
+
+    if (currentPhoto?.requestId !== requestId) {
+      return;
+    }
+    if (!payload.url) {
+      throw new Error("missing download url");
+    }
+
+    state.notePhotos[note.id] = {
+      status: "ready",
+      url: String(payload.url),
+      objectKey: String(payload.objectKey || note.photoRef),
+      expiresInSeconds: toNumber(payload.expiresInSeconds, 0),
+      requestId,
+      error: "",
+    };
+  } catch (error) {
+    // 실패 응답을 반영할 현재 사진 요청 상태입니다.
+    const currentPhoto = state.notePhotos[note.id];
+    if (isUnauthorizedError(error) || currentPhoto?.requestId !== requestId) {
+      return;
+    }
+
+    state.notePhotos[note.id] = {
+      status: "failed",
+      url: "",
+      objectKey: note.photoRef,
+      requestId,
+      error: "사진을 불러오지 못했습니다.",
+    };
+  } finally {
+    if (shouldRender && state.accessToken) {
+      renderNotes();
+    }
+  }
+}
+
+/**
+ * 입력: 이미지 표시가 실패한 수첩 기록.
+ * 출력: 없음.
+ * 역할: 만료되거나 읽을 수 없는 사진 URL을 재발급 가능한 실패 상태로 바꾼다.
+ * 호출 예시: markNotePhotoFailed(note)
+ */
+function markNotePhotoFailed(note) {
+  // 브라우저가 표시하지 못한 현재 사진 상태입니다.
+  const currentPhoto = state.notePhotos[note.id];
+  if (!currentPhoto || currentPhoto.status !== "ready") {
+    return;
+  }
+
+  state.notePhotos[note.id] = {
+    ...currentPhoto,
+    status: "failed",
+    error: "사진 주소가 만료되었거나 이미지를 표시할 수 없습니다.",
+  };
+  renderNotes();
+}
+
+/**
+ * 입력: 수첩 기록.
+ * 출력: 사진 표시 HTMLElement.
+ * 역할: 사진 로딩, 원본 열기, 실패 재시도 상태를 접근 가능한 한 영역으로 만든다.
+ * 호출 예시: const photo = createNotePhoto(note)
+ */
+function createNotePhoto(note) {
+  // 수첩 기록의 사진 조회 상태입니다.
+  const photoState = state.notePhotos[note.id] || { status: "loading" };
+  // 사진과 상태 문구를 감싸는 영역입니다.
+  const panel = createElement("section", "note-photo-panel");
+  panel.setAttribute("aria-label", "퀘스트 인증 사진");
+
+  if (photoState.status === "ready" && photoState.url) {
+    // 인증 사진과 설명을 묶는 요소입니다.
+    const figure = createElement("figure", "note-photo-figure");
+    // Object Storage에서 불러온 인증 사진입니다.
+    const image = document.createElement("img");
+    image.className = "note-photo-image";
+    image.src = photoState.url;
+    image.alt = `${note.placeName}에서 완료한 ${note.title} 인증 사진`;
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => markNotePhotoFailed(note), { once: true });
+
+    // 사진의 용도를 알려주는 설명입니다.
+    const caption = createElement("figcaption", "note-photo-caption", "퀘스트 완료 시 첨부한 인증 사진");
+    figure.append(image, caption);
+
+    // 별도 탭에서 원본 사진을 확인하는 링크입니다.
+    const originalLink = createElement("a", "card-action card-action--secondary note-photo-link", "원본 사진 열기");
+    originalLink.href = photoState.url;
+    originalLink.target = "_blank";
+    originalLink.rel = "noopener noreferrer";
+    originalLink.referrerPolicy = "no-referrer";
+    originalLink.setAttribute("aria-label", `${note.title} 인증 사진 원본을 새 탭에서 열기`);
+    panel.append(figure, originalLink);
+    return panel;
+  }
+
+  if (photoState.status === "failed") {
+    // 사진 조회 실패 안내 문구입니다.
+    const errorMessage = createElement("p", "note-photo-status note-photo-status--error", photoState.error || "사진을 불러오지 못했습니다.");
+    // 새 presigned URL을 요청하는 재시도 버튼입니다.
+    const retryButton = createElement("button", "card-action card-action--secondary", "사진 다시 불러오기");
+    retryButton.type = "button";
+    retryButton.addEventListener("click", () => requestNotePhoto(note, true));
+    panel.append(errorMessage, retryButton);
+    if (photoState.url) {
+      // 브라우저 미지원 이미지도 별도 탭에서 확인할 수 있는 원본 링크입니다.
+      const originalLink = createElement("a", "card-action card-action--secondary note-photo-link", "원본 사진 열기");
+      originalLink.href = photoState.url;
+      originalLink.target = "_blank";
+      originalLink.rel = "noopener noreferrer";
+      originalLink.referrerPolicy = "no-referrer";
+      originalLink.setAttribute("aria-label", `${note.title} 인증 사진 원본을 새 탭에서 열기`);
+      panel.append(originalLink);
+    }
+    return panel;
+  }
+
+  panel.setAttribute("aria-busy", "true");
+  panel.append(createElement("p", "note-photo-status", "인증 사진을 불러오는 중입니다…"));
+  return panel;
+}
+
+/**
+ * 입력: 수첩 기록.
+ * 출력: 사용자 일기·리뷰 표시 HTMLElement.
+ * 역할: 시스템 완료 요약과 사용자가 작성한 기록을 구분해 읽기 화면에 표시한다.
+ * 호출 예시: const entry = createNoteEntryDisplay(note)
+ */
+function createNoteEntryDisplay(note) {
+  // 화면에 표시할 사용자 작성 기록입니다.
+  const entry = note.entry || {};
+  // 작성된 제목 또는 본문이 있는지 여부입니다.
+  const hasEntry = Boolean(String(entry.title || "").trim() || String(entry.body || "").trim());
+
+  if (!hasEntry) {
+    return createElement("p", "note-entry-empty", "아직 작성한 일기나 리뷰가 없습니다.");
+  }
+
+  // 사용자 기록 전체 영역입니다.
+  const section = createElement("section", "note-entry-display");
+  section.setAttribute("aria-label", entry.type === "review" ? "나의 리뷰" : "나의 일기");
+  // 기록 유형과 리뷰 별점을 표시하는 머리글입니다.
+  const header = createElement("div", "note-entry-header");
+  header.append(createElement("span", "type-chip", entry.type === "review" ? "리뷰" : "일기"));
+
+  if (entry.type === "review" && entry.rating) {
+    // 숫자 평점을 별 문자로 표현한 읽기 전용 요소입니다.
+    const rating = createElement("span", "note-entry-rating", `${"★".repeat(entry.rating)}${"☆".repeat(5 - entry.rating)}`);
+    rating.setAttribute("aria-label", `별점 5점 만점에 ${entry.rating}점`);
+    header.append(rating);
+  }
+
+  section.append(header);
+  if (entry.title) {
+    section.append(createElement("h4", "note-entry-title", entry.title));
+  }
+  section.append(createElement("p", "note-entry-body", entry.body));
+  if (entry.updatedAt) {
+    section.append(createElement("p", "note-entry-updated", `마지막 수정 ${formatDate(entry.updatedAt)}`));
+  }
+  return section;
+}
+
+/**
+ * 입력: 저장할 수첩 기록 ID.
+ * 출력: 기록 저장 완료 Promise.
+ * 역할: 편집 상태를 검증해 현재 사용자의 수첩 기록을 PATCH로 갱신한다.
+ * 호출 예시: await saveNoteEntry("note_x")
+ */
+async function saveNoteEntry(noteId) {
+  // 저장 대상 수첩 기록입니다.
+  const note = state.notes.find((item) => item.id === noteId);
+  // 저장 대상의 현재 편집 상태입니다.
+  const draft = note ? getNoteDraft(note) : null;
+  if (!note || !draft || draft.pending) {
+    return;
+  }
+
+  // 앞뒤 공백을 제거한 기록 제목입니다.
+  const title = String(draft.title || "").trim();
+  // 앞뒤 공백을 제거한 기록 본문입니다.
+  const body = String(draft.body || "").trim();
+  // 서버에 저장할 기록 유형입니다.
+  const entryType = draft.type === "review" ? "review" : "diary";
+  // 리뷰에만 저장할 숫자 평점입니다.
+  const rating = entryType === "review" ? Number(draft.rating) : null;
+
+  draft.isOpen = true;
+  draft.tone = "error";
+  if (title.length > NOTE_ENTRY_TITLE_MAX_LENGTH) {
+    draft.message = `제목은 ${NOTE_ENTRY_TITLE_MAX_LENGTH}자 이내로 작성하세요.`;
+    renderNotes();
+    return;
+  }
+  if (!body) {
+    draft.message = "일기 또는 리뷰 본문을 작성하세요.";
+    renderNotes();
+    return;
+  }
+  if (body.length > NOTE_ENTRY_BODY_MAX_LENGTH) {
+    draft.message = `본문은 ${NOTE_ENTRY_BODY_MAX_LENGTH}자 이내로 작성하세요.`;
+    renderNotes();
+    return;
+  }
+  if (entryType === "review" && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
+    draft.message = "리뷰 별점을 1점부터 5점 사이에서 선택하세요.";
+    renderNotes();
+    return;
+  }
+  if (!ensureSessionReady()) {
+    return;
+  }
+
+  draft.pending = true;
+  draft.message = "기록을 저장하는 중입니다…";
+  draft.tone = "pending";
+  renderNotes();
+
+  try {
+    // 수첩 기록 갱신 API 응답입니다.
+    const payload = await fetchJson(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryType, title, body, rating }),
+    });
+    // 서버가 반환한 최신 수첩 기록입니다.
+    const updatedRawNote = payload.note || payload.data;
+    if (!updatedRawNote || typeof updatedRawNote !== "object") {
+      throw new Error("missing updated note");
+    }
+    // 화면 구조로 정규화한 최신 수첩 기록입니다.
+    const updatedNote = normalizeNote(updatedRawNote);
+    state.notes = state.notes.map((item) => (item.id === noteId ? updatedNote : item));
+    state.noteDrafts[noteId] = {
+      ...createNoteDraft(updatedNote),
+      isOpen: true,
+      message: "일기·리뷰 기록을 저장했습니다.",
+      tone: "success",
+    };
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return;
+    }
+
+    draft.pending = false;
+    draft.message = Number(error?.status) === 404
+      ? "이 수첩 기록을 찾을 수 없습니다. 목록을 새로고침하세요."
+      : "기록을 저장하지 못했습니다. 잠시 뒤 다시 시도하세요.";
+    draft.tone = "error";
+  } finally {
+    if (state.accessToken) {
+      renderNotes();
+    }
+  }
+}
+
+/**
+ * 입력: 수첩 기록과 목록 순번.
+ * 출력: 일기·리뷰 편집 details HTMLElement.
+ * 역할: 기록 종류, 제목, 본문, 리뷰 별점을 모바일 입력 폼으로 제공한다.
+ * 호출 예시: const editor = createNoteEditor(note, 0)
+ */
+function createNoteEditor(note, noteIndex) {
+  // 재렌더링 사이에 보존되는 현재 편집 상태입니다.
+  const draft = getNoteDraft(note);
+  // 입력 요소 ID 중복을 피하기 위한 접두사입니다.
+  const fieldPrefix = `note-entry-${noteIndex}`;
+  // 접고 펼칠 수 있는 편집 영역입니다.
+  const details = createElement("details", "note-editor");
+  details.open = Boolean(draft.isOpen);
+  details.append(createElement("summary", "note-editor-summary", "일기·리뷰 작성 또는 수정"));
+
+  // 기록 입력을 묶는 폼입니다.
+  const form = createElement("form", "note-entry-form");
+  form.setAttribute("aria-busy", draft.pending ? "true" : "false");
+
+  // 기록 종류 선택 필드입니다.
+  const typeField = createElement("label", "note-field");
+  const typeLabel = createElement("span", "note-field-label", "기록 종류");
+  const typeSelect = document.createElement("select");
+  typeSelect.id = `${fieldPrefix}-type`;
+  typeSelect.name = "entryType";
+  [
+    ["diary", "일기"],
+    ["review", "리뷰"],
+  ].forEach(([value, label]) => {
+    // 기록 종류 선택지입니다.
+    const option = createElement("option", "", label);
+    option.value = value;
+    option.selected = draft.type === value;
+    typeSelect.append(option);
+  });
+  typeSelect.disabled = draft.pending;
+  typeField.append(typeLabel, typeSelect);
+
+  // 제목 입력 필드입니다.
+  const titleField = createElement("label", "note-field");
+  const titleLabel = createElement("span", "note-field-label", "제목 (선택)");
+  const titleInput = document.createElement("input");
+  titleInput.id = `${fieldPrefix}-title`;
+  titleInput.name = "title";
+  titleInput.type = "text";
+  titleInput.maxLength = NOTE_ENTRY_TITLE_MAX_LENGTH;
+  titleInput.value = draft.title;
+  titleInput.placeholder = "탐험에서 기억하고 싶은 제목";
+  titleInput.disabled = draft.pending;
+  // 제목 글자 수 표시입니다.
+  const titleCount = createElement("span", "note-character-count", `${draft.title.length}/${NOTE_ENTRY_TITLE_MAX_LENGTH}`);
+  titleCount.id = `${fieldPrefix}-title-count`;
+  titleInput.setAttribute("aria-describedby", titleCount.id);
+  titleField.append(titleLabel, titleInput, titleCount);
+
+  // 본문 입력 필드입니다.
+  const bodyField = createElement("label", "note-field");
+  const bodyLabel = createElement("span", "note-field-label", "본문 (필수)");
+  const bodyInput = document.createElement("textarea");
+  bodyInput.id = `${fieldPrefix}-body`;
+  bodyInput.name = "body";
+  bodyInput.rows = 6;
+  bodyInput.required = true;
+  bodyInput.maxLength = NOTE_ENTRY_BODY_MAX_LENGTH;
+  bodyInput.value = draft.body;
+  bodyInput.placeholder = "오늘의 탐험, 느낀 점, 다시 찾고 싶은 이유를 남겨보세요.";
+  bodyInput.disabled = draft.pending;
+  // 본문 글자 수 표시입니다.
+  const bodyCount = createElement("span", "note-character-count", `${draft.body.length}/${NOTE_ENTRY_BODY_MAX_LENGTH}`);
+  bodyCount.id = `${fieldPrefix}-body-count`;
+  bodyInput.setAttribute("aria-describedby", bodyCount.id);
+  bodyField.append(bodyLabel, bodyInput, bodyCount);
+
+  // 리뷰일 때만 표시하는 별점 필드입니다.
+  const ratingField = createElement("label", "note-field note-rating-field");
+  const ratingLabel = createElement("span", "note-field-label", "별점 (필수)");
+  const ratingSelect = document.createElement("select");
+  ratingSelect.id = `${fieldPrefix}-rating`;
+  ratingSelect.name = "rating";
+  // 아직 별점을 선택하지 않은 상태를 위한 안내 선택지입니다.
+  const emptyRatingOption = createElement("option", "", "별점을 선택하세요");
+  emptyRatingOption.value = "";
+  ratingSelect.append(emptyRatingOption);
+  [1, 2, 3, 4, 5].forEach((value) => {
+    // 1점부터 5점까지의 별점 선택지입니다.
+    const option = createElement("option", "", `${value}점 ${"★".repeat(value)}`);
+    option.value = String(value);
+    option.selected = Number(draft.rating) === value;
+    ratingSelect.append(option);
+  });
+  ratingField.append(ratingLabel, ratingSelect);
+
+  // 저장 처리 결과를 스크린리더에도 알리는 상태 문구입니다.
+  const status = createElement("p", `note-editor-status${draft.tone ? ` note-editor-status--${draft.tone}` : ""}`, draft.message);
+  status.setAttribute("role", "status");
+  // 수첩 기록 저장 버튼입니다.
+  const saveButton = createElement("button", "card-action card-action--primary note-save-button", draft.pending ? "저장 중…" : "기록 저장");
+  saveButton.type = "submit";
+  saveButton.disabled = draft.pending;
+  saveButton.setAttribute("aria-busy", draft.pending ? "true" : "false");
+
+  /**
+   * 입력: 없음.
+   * 출력: 없음.
+   * 역할: 기록 종류에 맞춰 별점 입력의 노출과 필수 상태를 갱신한다.
+   * 호출 예시: updateRatingField()
+   */
+  function updateRatingField() {
+    // 현재 선택된 기록이 리뷰인지 여부입니다.
+    const isReview = typeSelect.value === "review";
+    ratingField.hidden = !isReview;
+    ratingSelect.disabled = !isReview || draft.pending;
+    ratingSelect.required = isReview;
+  }
+
+  updateRatingField();
+  typeSelect.addEventListener("change", () => {
+    draft.type = typeSelect.value === "review" ? "review" : "diary";
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+    updateRatingField();
+  });
+  titleInput.addEventListener("input", () => {
+    draft.title = titleInput.value;
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+    titleCount.textContent = `${titleInput.value.length}/${NOTE_ENTRY_TITLE_MAX_LENGTH}`;
+  });
+  bodyInput.addEventListener("input", () => {
+    draft.body = bodyInput.value;
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+    bodyCount.textContent = `${bodyInput.value.length}/${NOTE_ENTRY_BODY_MAX_LENGTH}`;
+  });
+  ratingSelect.addEventListener("change", () => {
+    draft.rating = ratingSelect.value;
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+  });
+  details.addEventListener("toggle", () => {
+    draft.isOpen = details.open;
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveNoteEntry(note.id);
+  });
+
+  form.append(typeField, titleField, bodyField, ratingField, status, saveButton);
+  details.append(form);
+  return details;
+}
+
+/**
  * 입력: 없음.
  * 출력: 없음.
  * 역할: 모험가의 수첩 기록을 최신순 카드로 렌더링한다.
@@ -2318,27 +2852,54 @@ function renderNotes() {
   }
 
   list.replaceChildren();
+  if (state.notes.length === 0) {
+    // API가 정상 반환한 빈 수첩 상태입니다.
+    const emptyState = createElement("section", "note-empty-state");
+    emptyState.append(
+      createElement("h3", "", "아직 탐험 기록이 없습니다"),
+      createElement("p", "empty-message", "퀘스트를 완료하면 인증 사진과 일기·리뷰를 이곳에 차곡차곡 남길 수 있습니다."),
+    );
+    list.append(emptyState);
+    return;
+  }
 
-  state.notes.forEach((note) => {
+  state.notes.forEach((note, noteIndex) => {
     // 수첩 기록 카드 요소입니다.
     const card = createElement("article", "note-card");
     // 수첩 아이콘 요소입니다.
     const icon = createElement("span", "note-icon", "▤");
+    icon.setAttribute("aria-hidden", "true");
     // 수첩 텍스트 묶음입니다.
     const copy = createElement("div", "note-copy");
+    // 날짜와 획득 경험치를 묶는 상단 행입니다.
     const topline = createElement("div", "note-topline");
     topline.append(createElement("span", "note-date", formatDate(note.createdAt)), createElement("span", "category-tag", `${note.earnedXp} XP`));
 
+    // 완료한 퀘스트 제목입니다.
     const title = createElement("h3", "", note.title);
+    // 완료 장소 이름입니다.
     const place = createElement("p", "card-place", note.placeName);
+    // 시스템이 만든 퀘스트 완료 요약입니다.
     const memo = createElement("p", "card-description", note.memo);
+    // 완료로 획득한 뱃지 목록입니다.
     const badges = createElement("div", "note-badges");
 
     note.badges.forEach((badge) => {
       badges.append(createElement("span", "", String(badge)));
     });
 
-    copy.append(topline, title, place, memo, badges);
+    copy.append(topline, title, place, memo);
+    if (note.badges.length > 0) {
+      copy.append(badges);
+    }
+    if (note.photoRef) {
+      copy.append(createNotePhoto(note));
+    }
+    if (state.notesSource === "api") {
+      copy.append(createNoteEntryDisplay(note), createNoteEditor(note, noteIndex));
+    } else {
+      copy.append(createElement("p", "note-entry-empty", "API에 연결하면 실제 탐험 기록에 일기와 리뷰를 남길 수 있습니다."));
+    }
     card.append(icon, copy);
     list.append(card);
   });
@@ -3084,7 +3645,7 @@ async function loadBadges() {
 /**
  * 입력: 없음.
  * 출력: 수첩 기록 로드 Promise.
- * 역할: /api/notes를 호출하고 실패 시 기본 수첩 기록을 사용한다.
+ * 역할: /api/notes와 각 사진의 다운로드 URL을 호출하고 API의 빈 목록도 그대로 유지한다.
  * 호출 예시: await loadNotes()
  */
 async function loadNotes() {
@@ -3093,10 +3654,40 @@ async function loadNotes() {
     const payload = await fetchJson("/api/notes");
     // 정규화한 수첩 기록 목록입니다.
     const notes = unwrapList(payload).map(normalizeNote);
+    // 새 서버 응답과 병합하기 전의 편집 상태입니다.
+    const previousDrafts = state.noteDrafts;
 
-    state.notes = notes.length > 0 ? notes : [...FALLBACK_NOTES];
+    state.notes = notes;
+    state.notesSource = "api";
+    state.notePhotos = {};
+    state.noteDrafts = Object.fromEntries(
+      notes.map((note) => {
+        // 사용자가 아직 저장하지 않은 입력이 있는 기존 편집 상태입니다.
+        const previousDraft = previousDrafts[note.id];
+        if (previousDraft?.dirty || previousDraft?.pending) {
+          return [note.id, previousDraft];
+        }
+
+        return [
+          note.id,
+          {
+            ...createNoteDraft(note),
+            isOpen: Boolean(previousDraft?.isOpen),
+          },
+        ];
+      }),
+    );
+
+    // 사진이 있는 완료 기록마다 현재 사용자용 presigned GET URL을 발급합니다.
+    const photoRequests = notes
+      .filter((note) => note.photoRef)
+      .map((note) => requestNotePhoto(note));
+    await Promise.allSettled(photoRequests);
   } catch (error) {
     state.notes = [...FALLBACK_NOTES];
+    state.notesSource = "fallback";
+    state.notePhotos = {};
+    state.noteDrafts = {};
   }
 }
 

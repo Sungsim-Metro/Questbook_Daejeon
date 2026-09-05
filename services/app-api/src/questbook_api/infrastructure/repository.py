@@ -197,8 +197,57 @@ CREATE TABLE IF NOT EXISTS adventure_notes (
   badges_json JSONB NOT NULL,
   distance_km DOUBLE PRECISION NOT NULL,
   share_image_url TEXT,
+  entry_type TEXT NOT NULL DEFAULT 'diary' CHECK (entry_type IN ('diary', 'review')),
+  entry_title TEXT NOT NULL DEFAULT '',
+  entry_body TEXT NOT NULL DEFAULT '',
+  entry_rating SMALLINT CHECK (entry_rating IS NULL OR entry_rating BETWEEN 1 AND 5),
+  entry_updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE adventure_notes
+  ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'diary'
+  CHECK (entry_type IN ('diary', 'review'));
+ALTER TABLE adventure_notes
+  ADD COLUMN IF NOT EXISTS entry_title TEXT NOT NULL DEFAULT '';
+ALTER TABLE adventure_notes
+  ADD COLUMN IF NOT EXISTS entry_body TEXT NOT NULL DEFAULT '';
+ALTER TABLE adventure_notes
+  ADD COLUMN IF NOT EXISTS entry_rating SMALLINT
+  CHECK (entry_rating IS NULL OR entry_rating BETWEEN 1 AND 5);
+ALTER TABLE adventure_notes
+  ADD COLUMN IF NOT EXISTS entry_updated_at TIMESTAMPTZ;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'adventure_notes_entry_type_check'
+      AND conrelid = 'adventure_notes'::regclass
+  ) THEN
+    ALTER TABLE adventure_notes
+      ADD CONSTRAINT adventure_notes_entry_type_check
+      CHECK (entry_type IN ('diary', 'review')) NOT VALID;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'adventure_notes_entry_rating_check'
+      AND conrelid = 'adventure_notes'::regclass
+  ) THEN
+    ALTER TABLE adventure_notes
+      ADD CONSTRAINT adventure_notes_entry_rating_check
+      CHECK (entry_rating IS NULL OR entry_rating BETWEEN 1 AND 5) NOT VALID;
+  END IF;
+END
+$$;
+
+ALTER TABLE adventure_notes
+  VALIDATE CONSTRAINT adventure_notes_entry_type_check;
+ALTER TABLE adventure_notes
+  VALIDATE CONSTRAINT adventure_notes_entry_rating_check;
 
 CREATE INDEX IF NOT EXISTS idx_adventure_notes_user_created
   ON adventure_notes(user_id, created_at);
@@ -1113,28 +1162,96 @@ class QuestbookRepository:
             # 변수 의미: 사용자 수첩 기록 row 목록이다.
             rows = self._connection.execute(
                 """
-                SELECT id, reusable_quest_id, quest_completion_id, place_name, summary,
-                       badges_json, distance_km, share_image_url, created_at
-                FROM adventure_notes
-                WHERE user_id = %s
-                ORDER BY created_at DESC
+                SELECT an.id, an.reusable_quest_id, an.quest_completion_id, an.place_name,
+                       an.summary, an.badges_json, an.distance_km, an.share_image_url,
+                       an.entry_type, an.entry_title, an.entry_body, an.entry_rating,
+                       an.entry_updated_at, an.created_at, rq.title AS quest_title,
+                       qc.earned_xp, qc.completed_at, qc.photo_ref
+                FROM adventure_notes an
+                JOIN quest_completions qc
+                  ON qc.id = an.quest_completion_id AND qc.user_id = an.user_id
+                JOIN reusable_quests rq ON rq.id = an.reusable_quest_id
+                WHERE an.user_id = %s
+                ORDER BY an.created_at DESC
                 """,
                 (user_id,),
             ).fetchall()
-            return [
-                {
-                    "id": row["id"],
-                    "reusableQuestId": row["reusable_quest_id"],
-                    "questCompletionId": row["quest_completion_id"],
-                    "placeName": row["place_name"],
-                    "summary": row["summary"],
-                    "badges": row["badges_json"],
-                    "distanceKm": row["distance_km"],
-                    "shareImageUrl": row["share_image_url"],
-                    "createdAt": row["created_at"],
-                }
-                for row in rows
-            ]
+            return [self._note_payload_from_row(row) for row in rows]
+
+    def update_note_entry(
+        self,
+        user_id: str,
+        note_id: str,
+        entry_type: str,
+        title: str,
+        body: str,
+        rating: int | None,
+    ) -> dict[str, Any] | None:
+        """
+        입력: 사용자 ID, 수첩 기록 ID, 기록 유형, 제목, 본문, 선택적 평점.
+        출력: 갱신된 수첩 기록 또는 사용자 소유 기록이 없으면 None.
+        역할: 현재 사용자가 소유한 수첩 기록에만 일기 또는 리뷰 내용을 저장한다.
+        호출 예시: note = repository.update_note_entry("demo-user", "note_x", "review", "좋았어요", "다시 방문하고 싶습니다.", 5)
+        """
+        with self._lock, self._connection.transaction():
+            # 변수 의미: 사용자 기록을 마지막으로 수정한 시각이다.
+            updated_at = now_iso()
+            # 변수 의미: 사용자 소유권 조건을 통과해 갱신된 수첩 기록 row다.
+            row = self._connection.execute(
+                """
+                WITH updated_note AS (
+                  UPDATE adventure_notes
+                  SET entry_type = %s,
+                      entry_title = %s,
+                      entry_body = %s,
+                      entry_rating = %s,
+                      entry_updated_at = %s
+                  WHERE id = %s AND user_id = %s
+                  RETURNING *
+                )
+                SELECT an.id, an.reusable_quest_id, an.quest_completion_id, an.place_name,
+                       an.summary, an.badges_json, an.distance_km, an.share_image_url,
+                       an.entry_type, an.entry_title, an.entry_body, an.entry_rating,
+                       an.entry_updated_at, an.created_at, rq.title AS quest_title,
+                       qc.earned_xp, qc.completed_at, qc.photo_ref
+                FROM updated_note an
+                JOIN quest_completions qc
+                  ON qc.id = an.quest_completion_id AND qc.user_id = an.user_id
+                JOIN reusable_quests rq ON rq.id = an.reusable_quest_id
+                """,
+                (entry_type, title, body, rating, updated_at, note_id, user_id),
+            ).fetchone()
+            return self._note_payload_from_row(row) if row is not None else None
+
+    def _note_payload_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """
+        입력: 완료 기록과 공용 퀘스트가 결합된 수첩 row.
+        출력: 수첩 API 응답 형식의 딕셔너리.
+        역할: 수첩 목록 조회와 사용자 기록 갱신 응답을 같은 형식으로 변환한다.
+        호출 예시: payload = self._note_payload_from_row(row)
+        """
+        return {
+            "id": row["id"],
+            "reusableQuestId": row["reusable_quest_id"],
+            "questCompletionId": row["quest_completion_id"],
+            "questTitle": row["quest_title"],
+            "placeName": row["place_name"],
+            "summary": row["summary"],
+            "earnedXp": row["earned_xp"],
+            "badges": row["badges_json"],
+            "distanceKm": row["distance_km"],
+            "photoRef": row["photo_ref"],
+            "shareImageUrl": row["share_image_url"],
+            "completedAt": row["completed_at"],
+            "createdAt": row["created_at"],
+            "entry": {
+                "type": row["entry_type"],
+                "title": row["entry_title"],
+                "body": row["entry_body"],
+                "rating": row["entry_rating"],
+                "updatedAt": row["entry_updated_at"],
+            },
+        }
 
     def list_ggumdori(self, user_id: str) -> dict[str, Any]:
         """

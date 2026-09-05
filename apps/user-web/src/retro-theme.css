@@ -153,6 +153,34 @@ body {
   box-shadow: 5px 5px 0 rgba(27, 27, 27, 0.85) !important;
 }
 
+.note-photo-panel,
+.note-entry-display,
+.note-entry-empty,
+.note-editor,
+.note-empty-state {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  background: #fff;
+}
+
+.note-photo-figure {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+}
+
+.note-editor[open] .note-editor-summary {
+  border-bottom: 2px solid var(--px-line);
+  background: var(--px-blue-soft);
+}
+
+.note-field input,
+.note-field select,
+.note-field textarea {
+  border-radius: 0;
+  border: 2px solid var(--px-line);
+  font-size: 16px;
+}
+
 /* 아이콘 박스 */
 .card-icon,
 .badge-symbol,
