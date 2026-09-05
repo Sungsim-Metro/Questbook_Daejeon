@@ -1,17 +1,21 @@
 // 사용자 모바일 웹/PWA의 정적 자산과 추천 API 응답 캐시를 관리하는 서비스워커입니다.
 
 // 정적 자산 캐시 이름입니다.
-const STATIC_CACHE_NAME = "questbook-user-web-static-v8";
+const STATIC_CACHE_NAME = "questbook-user-web-static-v18";
+
+// 배포마다 주소가 달라지도록 해 오래된 CSS/JS 캐시와 즉시 분리합니다.
+const STATIC_ASSET_VERSION = "20260904-4";
+
 
 // 설치 시 미리 저장할 정적 자산 경로입니다.
 const STATIC_ASSETS = [
   "./index.html",
   "./manifest.webmanifest",
   "./service-worker.js",
-  "../src/app.js",
-  "../src/styles.css",
-  "../src/retro-theme.css",
-  "../src/scroll-fab.js",
+  `../src/app.js?v=${STATIC_ASSET_VERSION}`,
+  `../src/styles.css?v=${STATIC_ASSET_VERSION}`,
+  `../src/retro-theme.css?v=${STATIC_ASSET_VERSION}`,
+  `../src/scroll-fab.js?v=${STATIC_ASSET_VERSION}`,
   "./assets/ggumdori/default-1.svg",
   "./assets/ggumdori/science-1.svg",
   "./assets/ggumdori/science-2.svg",
@@ -62,18 +66,32 @@ self.addEventListener("activate", (event) => {
 /**
  * 입력: Fetch API 요청 객체.
  * 출력: Response Promise.
- * 역할: 정적 자산은 캐시 우선으로 응답하고 없으면 네트워크를 사용한다.
+ * 역할: 새 배포를 즉시 반영하도록 네트워크를 우선하고 실패하면 캐시를 사용한다.
  * 호출 예시: event.respondWith(handleStaticRequest(event.request))
  */
 async function handleStaticRequest(request) {
-  // 정적 자산 캐시에서 찾은 응답입니다.
-  const cachedResponse = await caches.match(request);
+  try {
+    const networkResponse = await fetch(request);
+    if (networkResponse.ok) {
+      const cache = await caches.open(STATIC_CACHE_NAME);
+      cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (error) {
+    const cachedResponse = await caches.match(request);
+    if (cachedResponse) {
+      return cachedResponse;
+    }
 
-  if (cachedResponse) {
-    return cachedResponse;
+    if (request.mode === "navigate") {
+      const fallbackPage = await caches.match("./index.html");
+      if (fallbackPage) {
+        return fallbackPage;
+      }
+    }
+
+    throw error;
   }
-
-  return fetch(request);
 }
 
 /**

@@ -38,10 +38,11 @@ const VIEW_META = {
   quests: { title: "퀘스트 목록", eyebrow: "QUEST", icon: "✓", label: "퀘스트", navIcon: "✓" },
   notes: { title: "탐험 노트", eyebrow: "NOTE", icon: "▤", label: "수첩", navIcon: "▤" },
   badges: { title: "뱃지 수첩", eyebrow: "BADGE", icon: "●", label: "뱃지", navIcon: "●" },
+  customize: { title: "꿈돌이 꾸미기", eyebrow: "CUSTOM", icon: "✦", label: "꾸미기", navIcon: "✦" },
 };
 
 // 하단 탭의 표시 순서입니다.
-const NAVIGATION_ITEMS = ["home", "map", "quests", "notes", "badges"];
+const NAVIGATION_ITEMS = ["home", "map", "quests", "customize", "notes"];
 
 // NAVER Maps JavaScript SDK URL입니다.
 const NAVER_MAPS_SDK_URL = "https://oapi.map.naver.com/openapi/v3/maps.js";
@@ -176,6 +177,11 @@ const OAUTH_NONCE_KEY = "questbook:user-web:oauth-nonce";
 // 사진 증빙 기본 업로드 제한 바이트 값입니다.
 const DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+// 백엔드 없이 배포한 디자인 초안을 바로 확인할 때 사용하는 명시적 미리보기 모드입니다.
+const IS_DESIGN_PREVIEW = new URLSearchParams(window.location.search).has("prototype");
+
+// 정적 Sites 배포에서는 별도 앱 API 없이 로컬 체험 세션을 사용한다.
+const IS_HOSTED_STATIC_PREVIEW = window.location.hostname.endsWith(".chatgpt.site");
 // 수첩 기록 제목의 최대 글자 수입니다.
 const NOTE_ENTRY_TITLE_MAX_LENGTH = 100;
 
@@ -209,8 +215,10 @@ const state = {
   evidenceUploads: {},
   actionDialog: null,
   selectedGgumdoriId: readSelectedGgumdoriId(),
+  customizerPreviewId: readSelectedGgumdoriId(),
+  customizerCategory: "all",
   selectedMapInstanceId: FALLBACK_RECOMMENDATIONS[0]?.instanceId || "",
-  accessToken: readStorageValue(ACCESS_TOKEN_KEY),
+  accessToken: readStorageValue(ACCESS_TOKEN_KEY) || (IS_DESIGN_PREVIEW ? "design-preview" : ""),
   naverMapConfigured: false,
   naverMapConfig: {
     keyId: "",
@@ -689,6 +697,46 @@ function setOAuthLoginPending(provider, isPending) {
 
 /**
  * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 정적 디자인 초안에서 백엔드 호출 없이 로컬 체험 세션을 시작한다.
+ * 호출 예시: startLocalDemoSession()
+ */
+function startLocalDemoSession() {
+  state.accessToken = "design-preview";
+  writeStorageValue(ACCESS_TOKEN_KEY, state.accessToken);
+  setConsentPanelVisible(false);
+  setConsentMessage("");
+  updateSystemStatus(false, "체험 모드");
+  renderAll();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 정적 배포에서 서버가 필요한 OAuth 버튼의 현재 상태를 명확히 표시한다.
+ * 호출 예시: configureHostedPreviewLogin()
+ */
+function configureHostedPreviewLogin() {
+  if (!IS_HOSTED_STATIC_PREVIEW) {
+    return;
+  }
+
+  [
+    ["#naver-login-button", "네이버 로그인 · 연동 준비 중"],
+    ["#google-login-button", "구글 로그인 · 연동 준비 중"],
+  ].forEach(([selector, label]) => {
+    const button = select(selector);
+    if (!button) {
+      return;
+    }
+    button.textContent = label;
+    button.disabled = true;
+    button.title = "앱 서버와 OAuth 키를 연결한 뒤 사용할 수 있습니다.";
+  });
+}
+
+/**
+ * 입력: 없음.
  * 출력: demo-social 로그인 처리 Promise.
  * 역할: 만 14세 이상 확인과 개인정보·위치정보 동의를 서버에 기록하고 access token을 받는다.
  * 호출 예시: await handleDemoLogin()
@@ -705,6 +753,11 @@ async function handleDemoLogin() {
 
   if (!ageInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
     setConsentMessage("세 항목을 모두 확인해야 추천 기능을 사용할 수 있습니다.");
+    return;
+  }
+
+  if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+    startLocalDemoSession();
     return;
   }
 
@@ -1292,9 +1345,12 @@ function registerServiceWorker() {
     return;
   }
 
-  navigator.serviceWorker.register("./service-worker.js").catch(() => {
-    updateSystemStatus(false, "서비스워커 등록 실패");
-  });
+  navigator.serviceWorker
+    .register("./service-worker.js?v=20260904-4", { updateViaCache: "none" })
+    .then((registration) => registration.update())
+    .catch(() => {
+      updateSystemStatus(false, "서비스워커 등록 실패");
+    });
 }
 
 /**
@@ -1516,8 +1572,11 @@ function renderProfile() {
     "selected-ggumdori-name",
     `${selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이"} 선택 중`,
   );
+  const customizeLink = createElement("button", "profile-customize-link", "꿈돌이 바꾸기 →");
+  customizeLink.type = "button";
+  customizeLink.dataset.viewTarget = "customize";
 
-  profileText.append(name, meta, selectedName);
+  profileText.append(name, meta, selectedName, customizeLink);
   main.append(avatar, profileText);
 
   // 레벨 진행률 설명입니다.
@@ -2906,6 +2965,32 @@ function renderNotes() {
 }
 
 /**
+ * 입력: 꿈돌이 img 요소와 화면별 클래스 이름.
+ * 출력: 없음.
+ * 역할: 이미지의 실제 크기를 읽어 세로형과 일반형 표시 규칙을 자동 적용한다.
+ * 호출 예시: configureGgumdoriArtwork(image, "ggumdori-card-art")
+ */
+function configureGgumdoriArtwork(image, contextClass) {
+  image.classList.add("ggumdori-art", contextClass);
+
+  const applyAspectClass = () => {
+    if (!image.naturalWidth || !image.naturalHeight) {
+      return;
+    }
+
+    const isPortrait = image.naturalHeight / image.naturalWidth >= 1.25;
+    image.classList.toggle("ggumdori-art--portrait", isPortrait);
+    image.classList.toggle("ggumdori-art--standard", !isPortrait);
+    image.classList.add("is-aspect-ready");
+  };
+
+  image.addEventListener("load", applyAspectClass, { once: true });
+  if (image.complete) {
+    applyAspectClass();
+  }
+}
+
+/**
  * 입력: 꿈돌이 항목.
  * 출력: 도감 카드 HTMLElement.
  * 역할: 해금 여부와 선택 버튼을 가진 꿈돌이 카드를 만든다.
@@ -2929,6 +3014,7 @@ function createGgumdoriCard(item) {
     image.src = item.imageRef;
     image.alt = item.unlocked ? item.name : `${item.name} 잠김`;
     image.loading = "lazy";
+    configureGgumdoriArtwork(image, "ggumdori-card-art");
     figure.append(image);
   } else {
     figure.textContent = item.unlocked ? item.name.slice(0, 1) : "?";
@@ -2941,6 +3027,7 @@ function createGgumdoriCard(item) {
   button.disabled = !item.unlocked || state.selectedGgumdoriId === item.id;
   button.addEventListener("click", () => {
     state.selectedGgumdoriId = item.id;
+    state.customizerPreviewId = item.id;
     writeStorageValue(SELECTED_GGUMDORI_KEY, item.id);
     renderAll();
   });
@@ -2970,6 +3057,91 @@ function renderGgumdori() {
 /**
  * 입력: 없음.
  * 출력: 없음.
+ * 역할: 보유한 꿈돌이 테마를 미리 보고 장착하는 게임형 꾸미기 화면을 그린다.
+ * 호출 예시: renderCustomizer()
+ */
+function renderCustomizer() {
+  const character = select("#customizer-character");
+  const grid = select("#customizer-item-grid");
+  const equipButton = select("#customizer-equip-button");
+
+  if (!character || !grid || !equipButton) {
+    return;
+  }
+
+  let previewItem = state.ggumdori.find((item) => item.id === state.customizerPreviewId);
+  if (!previewItem) {
+    previewItem = getSelectedGgumdori();
+    state.customizerPreviewId = previewItem?.id || "";
+  }
+
+  character.replaceChildren();
+  if (previewItem?.imageRef) {
+    const image = document.createElement("img");
+    image.src = previewItem.imageRef;
+    image.alt = `${previewItem.name} 미리보기`;
+    character.append(image);
+  }
+
+  const stageLabel = select("#customizer-stage-label");
+  const itemName = select("#customizer-item-name");
+  const itemCondition = select("#customizer-item-condition");
+  const collectionCount = select("#customizer-collection-count");
+  const unlockedCount = state.ggumdori.filter((item) => item.unlocked).length;
+
+  if (stageLabel) stageLabel.textContent = previewItem?.name || "꿈돌이";
+  if (itemName) itemName.textContent = previewItem?.name || "꿈돌이";
+  if (itemCondition) itemCondition.textContent = previewItem?.condition || "획득 조건 확인";
+  if (collectionCount) collectionCount.textContent = `획득 ${unlockedCount}/${state.ggumdori.length}`;
+
+  const filteredItems = state.ggumdori.filter(
+    (item) => state.customizerCategory === "all" || item.themeCategory === state.customizerCategory,
+  );
+
+  grid.replaceChildren();
+  filteredItems.forEach((item) => {
+    const tile = createElement("button", `customizer-item${item.id === previewItem?.id ? " is-previewing" : ""}${item.id === state.selectedGgumdoriId ? " is-equipped" : ""}${item.unlocked ? "" : " is-locked"}`);
+    tile.type = "button";
+    tile.setAttribute("role", "listitem");
+    tile.setAttribute("aria-label", item.unlocked ? `${item.name} 미리보기` : `${item.name}, ${item.condition} 달성 시 해금`);
+    tile.disabled = !item.unlocked;
+
+    const thumb = createElement("span", "customizer-item-thumb");
+    if (item.imageRef) {
+      const image = document.createElement("img");
+      image.src = item.imageRef;
+      image.alt = "";
+      image.loading = "lazy";
+      configureGgumdoriArtwork(image, "customizer-item-art");
+      thumb.append(image);
+    }
+
+    const status = createElement("span", "customizer-item-status", item.unlocked ? (item.id === state.selectedGgumdoriId ? "장착" : "보유") : "잠김");
+    const name = createElement("span", "customizer-item-label", item.name.replace(" 꿈돌이", ""));
+    tile.append(thumb, status, name);
+    tile.addEventListener("click", () => {
+      state.customizerPreviewId = item.id;
+      renderCustomizer();
+      const feedback = select("#customizer-feedback");
+      if (feedback) feedback.textContent = `${item.name} 모습을 미리 보는 중이에요.`;
+    });
+    grid.append(tile);
+  });
+
+  const isEquipped = previewItem?.id === state.selectedGgumdoriId;
+  equipButton.disabled = !previewItem?.unlocked || isEquipped;
+  equipButton.textContent = isEquipped ? "현재 장착 중" : "이 모습으로 장착";
+
+  document.querySelectorAll("[data-customize-category]").forEach((button) => {
+    const isActive = button.dataset.customizeCategory === state.customizerCategory;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
  * 역할: 전체 화면을 현재 상태 기준으로 다시 그린다.
  * 호출 예시: renderAll()
  */
@@ -2987,6 +3159,7 @@ function renderAll() {
   renderBadges();
   renderNotes();
   renderGgumdori();
+  renderCustomizer();
   renderActionDialog();
 }
 
@@ -3834,6 +4007,30 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-customize-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.customizerCategory = button.dataset.customizeCategory || "all";
+      renderCustomizer();
+    });
+  });
+
+  const equipButton = select("#customizer-equip-button");
+  if (equipButton) {
+    equipButton.addEventListener("click", () => {
+      const previewItem = state.ggumdori.find((item) => item.id === state.customizerPreviewId);
+      if (!previewItem?.unlocked) return;
+
+      state.selectedGgumdoriId = previewItem.id;
+      writeStorageValue(SELECTED_GGUMDORI_KEY, previewItem.id);
+      renderProfile();
+      renderGgumdori();
+      renderCustomizer();
+
+      const feedback = select("#customizer-feedback");
+      if (feedback) feedback.textContent = `${previewItem.name} 장착 완료! 홈 화면에도 적용됐어요.`;
+    });
+  }
+
   document.addEventListener("click", (event) => {
     // 실제 클릭 대상 요소입니다.
     const target = event.target instanceof Element ? event.target : null;
@@ -3870,6 +4067,7 @@ function bindEvents() {
  */
 function initializeApp() {
   registerServiceWorker();
+  configureHostedPreviewLogin();
   // OAuth callback code를 token으로 교환 중인지 여부입니다.
   const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();

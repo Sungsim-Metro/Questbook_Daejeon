@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#03c75a" />
+    <meta name="theme-color" content="#0d4c9b" />
     <meta
       name="description"
       content="대전 관광지를 퀘스트, 뱃지, 모험가의 수첩, 꿈돌이 도감으로 연결하는 모바일 웹/PWA"
@@ -15,8 +15,8 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='20' fill='%2303c75a'/%3E%3Cpath d='M25 22h38a8 8 0 0 1 8 8v44H28a8 8 0 0 1-8-8V27a5 5 0 0 1 5-5Z' fill='%23fffaf0'/%3E%3Cpath d='M34 36h26M34 48h19M34 60h23' stroke='%230a8f48' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="../src/styles.css" />
-    <link rel="stylesheet" href="../src/retro-theme.css" />
+    <link rel="stylesheet" href="../src/styles.css?v=20260904-4" />
+    <link rel="stylesheet" href="../src/retro-theme.css?v=20260904-4" />
   </head>
   <body data-active-view="home">
     <a class="skip-link" href="#main-content">본문으로 이동</a>
@@ -40,7 +40,7 @@
       <main class="app-main" id="main-content">
         <section class="consent-panel" id="consent-panel" aria-labelledby="consent-title" hidden>
           <p class="page-kicker">시작 전 확인</p>
-          <h2 class="page-title" id="consent-title">데모 소셜 로그인</h2>
+          <h2 class="page-title" id="consent-title">체험 시작 전 확인</h2>
           <p class="page-copy">
             추천과 퀘스트 인증을 위해 닉네임, 활동 기록, 현재 위치를 필요한 순간에만 사용합니다.
           </p>
@@ -58,7 +58,7 @@
               <span>위치정보 수집·이용에 동의합니다.</span>
             </label>
           </div>
-          <button class="primary-action" type="button" id="demo-login-button">동의하고 시작</button>
+          <button class="primary-action" type="button" id="demo-login-button">동의하고 체험 시작</button>
           <div class="oauth-login-list">
             <button class="social-login-button" type="button" id="naver-login-button">네이버로 시작</button>
             <button class="social-login-button" type="button" id="google-login-button">구글로 시작</button>
@@ -70,9 +70,9 @@
           <section class="view-panel is-active" id="view-home" data-view-panel="home" aria-labelledby="home-title">
             <section class="hero-panel home-hero">
               <div class="home-hero-copy">
-                <p class="page-kicker">로그인 완료</p>
-                <h2 class="page-title" id="home-title">선택한 꿈돌이와 오늘의 탐험</h2>
-                <p class="page-copy">내 레벨, 최근 뱃지, 추천 퀘스트를 한 화면에서 확인합니다.</p>
+                <p class="page-kicker">TODAY'S PARTNER</p>
+                <h2 class="page-title" id="home-title">오늘의 꿈돌이</h2>
+                <p class="page-copy">장착한 꿈돌이와 대전 탐험을 시작해요.</p>
               </div>
               <div class="profile-panel" id="profile-panel" aria-live="polite"></div>
               <div class="hero-actions">
@@ -199,6 +199,49 @@
             </section>
           </section>
 
+          <section class="view-panel customizer-view" id="view-customize" data-view-panel="customize" aria-labelledby="customize-title" hidden>
+            <section class="customizer-screen" aria-label="꿈돌이 꾸미기">
+              <div class="customizer-summary">
+                <div>
+                  <p class="customizer-kicker">DAEJEON QUEST LOOK</p>
+                  <h2 id="customize-title">꿈돌이 꾸미기</h2>
+                </div>
+                <span class="starlight-balance" aria-label="보유 별조각 1250개">별조각 · 1,250</span>
+              </div>
+
+              <div class="customizer-stage">
+                <span class="stage-label" id="customizer-stage-label">착용 미리보기</span>
+                <div class="stage-sparkles" aria-hidden="true">✦ · ✧</div>
+                <div class="customizer-character" id="customizer-character" aria-live="polite"></div>
+                <div class="stage-platform" aria-hidden="true"><span></span></div>
+                <div class="equipped-slots" aria-label="장착 슬롯">
+                  <span>머리</span><span>의상</span><span>소품</span><span>효과</span>
+                </div>
+              </div>
+
+              <div class="customizer-tray">
+                <div class="customizer-tabs" role="tablist" aria-label="꾸미기 카테고리">
+                  <button class="customizer-tab is-active" type="button" role="tab" aria-selected="true" data-customize-category="all">전체</button>
+                  <button class="customizer-tab" type="button" role="tab" aria-selected="false" data-customize-category="science">과학</button>
+                  <button class="customizer-tab" type="button" role="tab" aria-selected="false" data-customize-category="nature">자연</button>
+                  <button class="customizer-tab" type="button" role="tab" aria-selected="false" data-customize-category="market">먹거리</button>
+                </div>
+
+                <div class="customizer-item-heading">
+                  <div>
+                    <strong id="customizer-item-name">기본 꿈돌이</strong>
+                    <span id="customizer-item-condition">기본 지급</span>
+                  </div>
+                  <span id="customizer-collection-count">획득 0/0</span>
+                </div>
+
+                <div class="customizer-item-grid" id="customizer-item-grid" role="list" aria-label="보유 꾸미기"></div>
+                <button class="customizer-equip-button" type="button" id="customizer-equip-button">이 모습으로 장착</button>
+                <p class="customizer-feedback" id="customizer-feedback" aria-live="polite">아이템을 눌러 꿈돌이에게 미리 입혀보세요.</p>
+              </div>
+            </section>
+          </section>
+
           <section class="view-panel" id="view-notes" data-view-panel="notes" aria-labelledby="notes-title" hidden>
             <section class="hero-panel">
               <p class="page-kicker">모험가의 수첩</p>
@@ -220,7 +263,7 @@
       <nav class="bottom-nav" id="bottom-nav" aria-label="주요 화면 이동"></nav>
     </div>
 
-    <script type="module" src="../src/app.js"></script>
-    <script src="../src/scroll-fab.js"></script>
+    <script type="module" src="../src/app.js?v=20260904-4"></script>
+    <script src="../src/scroll-fab.js?v=20260904-4"></script>
   </body>
 </html>
