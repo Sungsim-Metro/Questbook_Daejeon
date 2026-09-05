@@ -1251,6 +1251,227 @@ p {
 
 .note-copy {
   min-width: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.note-photo-panel {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(10, 143, 72, 0.24);
+  border-radius: 14px;
+  background: rgba(232, 248, 238, 0.56);
+}
+
+.note-photo-figure {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(94, 78, 54, 0.16);
+  border-radius: 10px;
+  background: #f3eee3;
+}
+
+.note-photo-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: block;
+  object-fit: contain;
+  background: #ede6d8;
+}
+
+.note-photo-caption,
+.note-photo-status,
+.note-entry-empty,
+.note-entry-updated,
+.note-character-count,
+.note-editor-status {
+  margin: 0;
+  color: var(--sub);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.note-photo-caption {
+  padding: 7px 9px;
+  background: #fffdf7;
+}
+
+.note-photo-status {
+  padding: 6px 4px;
+}
+
+.note-photo-status--error,
+.note-editor-status--error {
+  color: #9a352f;
+}
+
+.note-photo-link {
+  width: 100%;
+}
+
+.note-entry-display,
+.note-entry-empty {
+  padding: 10px;
+  border: 1px dashed rgba(10, 143, 72, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 250, 240, 0.82);
+}
+
+.note-entry-display {
+  display: grid;
+  gap: 7px;
+}
+
+.note-entry-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.note-entry-rating {
+  color: #ba7915;
+  font-family: system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  font-size: 17px;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+
+.note-entry-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.note-entry-body {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.note-editor {
+  overflow: hidden;
+  border: 1px solid rgba(10, 143, 72, 0.24);
+  border-radius: 12px;
+  background: #fffdf7;
+}
+
+.note-editor-summary {
+  min-height: var(--tap-size);
+  display: flex;
+  align-items: center;
+  padding: 9px 11px;
+  color: var(--green-dark);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.note-editor[open] .note-editor-summary {
+  border-bottom: 1px solid rgba(10, 143, 72, 0.18);
+  background: var(--green-soft);
+}
+
+.note-entry-form {
+  min-width: 0;
+  display: grid;
+  gap: 11px;
+  padding: 11px;
+}
+
+.note-field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.note-field-label {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.note-field input,
+.note-field select,
+.note-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--tap-size);
+  padding: 9px 10px;
+  border: 1px solid rgba(94, 78, 54, 0.28);
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.note-field textarea {
+  min-height: 132px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.note-field input::placeholder,
+.note-field textarea::placeholder {
+  color: #978d7d;
+  opacity: 1;
+}
+
+.note-field input[disabled],
+.note-field select[disabled],
+.note-field textarea[disabled] {
+  cursor: progress;
+  opacity: 0.66;
+}
+
+.note-rating-field[hidden] {
+  display: none;
+}
+
+.note-character-count {
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.note-editor-status {
+  min-height: 19px;
+}
+
+.note-editor-status:empty {
+  display: none;
+}
+
+.note-editor-status--success {
+  color: var(--green-dark);
+}
+
+.note-editor-status--pending {
+  color: #725d28;
+}
+
+.note-save-button {
+  width: 100%;
+}
+
+.note-empty-state {
+  display: grid;
+  gap: 8px;
+  padding: clamp(20px, 7vw, 32px) var(--panel-padding);
+  border: 1px dashed rgba(10, 143, 72, 0.3);
+  border-radius: 18px;
+  text-align: center;
+  background: rgba(255, 253, 247, 0.88);
+}
+
+.note-empty-state h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
 }
 
 .data-note {
@@ -1375,6 +1596,15 @@ p {
 .nav-link:focus-visible,
 .map-marker:focus-visible,
 .map-place-button:focus-visible {
+  outline: 3px solid rgba(3, 199, 90, 0.34);
+  outline-offset: 2px;
+}
+
+.note-editor-summary:focus-visible,
+.note-field input:focus-visible,
+.note-field select:focus-visible,
+.note-field textarea:focus-visible,
+.note-photo-link:focus-visible {
   outline: 3px solid rgba(3, 199, 90, 0.34);
   outline-offset: 2px;
 }

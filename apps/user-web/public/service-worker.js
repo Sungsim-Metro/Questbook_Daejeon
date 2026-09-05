@@ -6,6 +6,7 @@ const STATIC_CACHE_NAME = "questbook-user-web-static-v18";
 // 배포마다 주소가 달라지도록 해 오래된 CSS/JS 캐시와 즉시 분리합니다.
 const STATIC_ASSET_VERSION = "20260904-4";
 
+
 // 설치 시 미리 저장할 정적 자산 경로입니다.
 const STATIC_ASSETS = [
   "./index.html",

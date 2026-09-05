@@ -385,6 +385,76 @@ class BaselineQuestbookService:
             return {"ok": False, "reason": "already_completed", "retryable": False}
         return {"ok": True, "verification": verification_result, "completion": completion}
 
+    def update_note_entry(
+        self,
+        user_id: str,
+        note_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """
+        입력: 사용자 ID, 수첩 기록 ID, 일기 또는 리뷰 입력 페이로드.
+        출력: 갱신된 수첩 기록 또는 사용자 소유 기록이 없으면 None.
+        역할: 사용자 수첩 입력을 검증하고 본인 기록에만 저장한다.
+        호출 예시: note = service.update_note_entry("demo-user", "note_x", {"entryType": "diary", "title": "오늘의 기록", "body": "즐거운 탐험이었다.", "rating": None})
+        """
+        # 변수 의미: 앞뒤 공백을 제거한 수첩 기록 ID다.
+        normalized_note_id = note_id.strip()
+        if not normalized_note_id:
+            raise ValueError("noteId is required.")
+
+        # 변수 의미: 클라이언트가 요청한 수첩 기록 유형 원본 값이다.
+        raw_entry_type = payload.get("entryType")
+        if not isinstance(raw_entry_type, str):
+            raise ValueError("entryType must be diary or review.")
+        # 변수 의미: 소문자로 정규화한 수첩 기록 유형이다.
+        entry_type = raw_entry_type.strip().lower()
+        if entry_type not in {"diary", "review"}:
+            raise ValueError("entryType must be diary or review.")
+
+        # 변수 의미: 클라이언트가 입력한 제목 원본 값이다.
+        raw_title = payload.get("title", "")
+        if raw_title is None:
+            raw_title = ""
+        if not isinstance(raw_title, str):
+            raise ValueError("title must be a string.")
+        # 변수 의미: 앞뒤 공백을 제거한 사용자 기록 제목이다.
+        title = raw_title.strip()
+        if len(title) > 100:
+            raise ValueError("title must be 100 characters or fewer.")
+
+        # 변수 의미: 클라이언트가 입력한 본문 원본 값이다.
+        raw_body = payload.get("body")
+        if not isinstance(raw_body, str):
+            raise ValueError("body is required.")
+        # 변수 의미: 앞뒤 공백을 제거한 사용자 기록 본문이다.
+        body = raw_body.strip()
+        if not body:
+            raise ValueError("body is required.")
+        if len(body) > 2000:
+            raise ValueError("body must be 2000 characters or fewer.")
+
+        # 변수 의미: 클라이언트가 입력한 평점 원본 값이다.
+        raw_rating = payload.get("rating")
+        # 변수 의미: 저장할 리뷰 평점이며 일기에는 사용하지 않는다.
+        rating: int | None = None
+        if entry_type == "review":
+            if isinstance(raw_rating, bool) or not isinstance(raw_rating, int):
+                raise ValueError("review rating must be an integer from 1 to 5.")
+            if raw_rating < 1 or raw_rating > 5:
+                raise ValueError("review rating must be an integer from 1 to 5.")
+            rating = raw_rating
+        elif raw_rating is not None:
+            raise ValueError("diary rating must be null.")
+
+        return self.repository.update_note_entry(
+            user_id,
+            normalized_note_id,
+            entry_type,
+            title,
+            body,
+            rating,
+        )
+
     def _build_quest_data(
         self,
         user_id: str,
