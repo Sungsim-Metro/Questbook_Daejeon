@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -143,7 +144,7 @@ def parse_required_float(raw_value: str, name: str, minimum: float, maximum: flo
         parsed_value = float(raw_value)
     except ValueError as error:
         raise ValueError(f"{name} must be a number.") from error
-    if parsed_value < minimum or parsed_value > maximum:
+    if not math.isfinite(parsed_value) or parsed_value < minimum or parsed_value > maximum:
         raise ValueError(f"{name} is outside the supported range.")
     return parsed_value
 
@@ -264,7 +265,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             # 변수 의미: 요청 경로다.
             path = parsed_url.path
             # 변수 의미: 파싱된 쿼리 파라미터다.
-            query = parse_qs(parsed_url.query)
+            query = parse_qs(parsed_url.query, keep_blank_values=True)
             try:
                 if path in {"/health", "/api/health"}:
                     self._send_json(HTTPStatus.OK, self._health_payload())
@@ -283,11 +284,20 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     self._send_json(HTTPStatus.OK, {"user": state.service.bootstrap_user(user_id)})
                     return
                 if path == "/api/recommendations":
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
                     user_id = self._required_user_id()
+                    # 변수 의미: 실측 위치 주변 또는 사용자가 선택한 계획 위치 검색 모드다.
+                    mode = query.get("mode", ["nearby"])[0]
+                    if mode not in {"nearby", "planning"}:
+                        raise ValueError("mode must be nearby or planning.")
                     # 변수 의미: 기준 위도다.
-                    latitude = parse_float_query(query, "lat", 36.327)
+                    latitude = parse_required_float(
+                        query.get("lat", ["" if mode == "planning" else "36.327"])[0], "lat", -90.0, 90.0,
+                    )
                     # 변수 의미: 기준 경도다.
-                    longitude = parse_float_query(query, "lng", 127.427)
+                    longitude = parse_required_float(
+                        query.get("lng", ["" if mode == "planning" else "127.427"])[0], "lng", -180.0, 180.0,
+                    )
                     # 변수 의미: 요청 카테고리 키다.
                     category_key = query.get("category", ["all"])[0]
                     # 변수 의미: 추천 검색 반경이다.
@@ -303,7 +313,20 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                             category_key,
                             radius_meters,
                             force_refresh,
+                            mode,
                         ),
+                    )
+                    return
+                if path == "/api/places/recommendations":
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
+                    user_id = self._required_user_id()
+                    # 변수 의미: 사용자가 명시적으로 선택한 지역 관광지 카테고리 필터다.
+                    category_key = query.get("category", ["all"])[0]
+                    # 변수 의미: 사용자별 대전 관광지 캐시를 우회할지 여부다.
+                    force_refresh = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
+                    self._send_json(
+                        HTTPStatus.OK,
+                        state.service.get_place_recommendations(user_id, category_key, force_refresh),
                     )
                     return
                 if path == "/api/badges":
@@ -352,6 +375,9 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     return
             except PermissionError as error:
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(error)})
+                return
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": str(error)})
                 return
             except Exception as error:
                 self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error", "message": str(error)})
@@ -447,7 +473,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             """
             입력: PATCH 요청.
             출력: JSON API 응답.
-            역할: 현재 사용자의 수첩 기록 내용을 수정한다.
+            역할: 현재 사용자의 관심사 또는 수첩 기록 내용을 수정한다.
             호출 예시: PATCH /api/notes/note_x
             """
             # 변수 의미: 파싱된 요청 URL이다.
@@ -455,6 +481,15 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             # 변수 의미: 요청 경로 토큰이다.
             path_parts = [part for part in parsed_url.path.split("/") if part]
             try:
+                if path_parts == ["api", "me", "preferences"]:
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
+                    user_id = self._required_user_id()
+                    # 변수 의미: 관심 카테고리 배열을 포함한 요청 본문이다.
+                    payload = self._read_json_body()
+                    # 변수 의미: 인증된 사용자 본인에게 저장한 관심사와 설정 여부다.
+                    preference = state.service.update_preferences(user_id, payload)
+                    self._send_json(HTTPStatus.OK, {"preference": preference})
+                    return
                 if len(path_parts) == 3 and path_parts[:2] == ["api", "notes"]:
                     # 변수 의미: 토큰에서 검증한 사용자 ID다.
                     user_id = self._required_user_id()

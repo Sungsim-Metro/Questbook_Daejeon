@@ -1,10 +1,10 @@
 // 사용자 모바일 웹/PWA의 정적 자산과 추천 API 응답 캐시를 관리하는 서비스워커입니다.
 
 // 정적 자산 캐시 이름입니다.
-const STATIC_CACHE_NAME = "questbook-user-web-static-v18";
+const STATIC_CACHE_NAME = "questbook-user-web-static-v20";
 
 // 배포마다 주소가 달라지도록 해 오래된 CSS/JS 캐시와 즉시 분리합니다.
-const STATIC_ASSET_VERSION = "20260904-4";
+const STATIC_ASSET_VERSION = "20260906-2";
 
 
 // 설치 시 미리 저장할 정적 자산 경로입니다.

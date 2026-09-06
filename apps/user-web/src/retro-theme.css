@@ -3113,3 +3113,300 @@ body[data-active-view="customize"] .app-main {
     padding-left: 5px;
   }
 }
+
+/* 관심사와 여행 계획은 기존 여행 수첩 색상과 버튼 크기를 이어받습니다. */
+.view-panel > .planning-settings,
+.view-panel > .attractions-section {
+  padding: 20px 16px;
+  border: 2px solid var(--travel-ink);
+  border-radius: 22px;
+  background: var(--travel-card);
+  box-shadow: var(--travel-shadow);
+  scroll-margin-top: 18px;
+}
+
+.planning-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.planning-section-heading .section-title {
+  margin-top: 4px;
+}
+
+.planning-label {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--travel-ink);
+  background: #ffdc94;
+  font-size: 11px;
+}
+
+.interest-fieldset {
+  min-width: 0;
+  margin: 14px 0 20px;
+  padding: 0 0 18px;
+  border: 0;
+  border-bottom: 1px dashed var(--travel-line);
+}
+
+.interest-fieldset legend,
+.planning-field > span {
+  color: var(--travel-ink);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.planning-help {
+  margin: 10px 0;
+  color: #536675;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.planning-help:empty {
+  display: none;
+}
+
+.interest-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.interest-option {
+  position: relative;
+  cursor: pointer;
+}
+
+.interest-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.interest-option span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 45px;
+  padding: 8px 5px;
+  border: 1px solid var(--travel-line);
+  border-radius: 12px;
+  color: var(--travel-ink);
+  background: #f1f7f4;
+  font-size: 13px;
+}
+
+.interest-option input:checked + span {
+  border: 2px solid var(--travel-teal);
+  color: #174c40;
+  background: #ddf1e7;
+  font-weight: 700;
+}
+
+.interest-option input:checked + span::after {
+  content: " ✓";
+  margin-left: 5px;
+}
+
+.interest-option input:disabled + span {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.recommendation-mode-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.planning-mode-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 78px;
+  padding: 12px 10px;
+  border: 1px solid var(--travel-line);
+  border-radius: 13px;
+  color: var(--travel-ink);
+  background: #f1f7f4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.planning-mode-button strong {
+  font-size: 15px;
+}
+
+.planning-mode-button span {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.planning-mode-button.is-active {
+  border: 2px solid var(--travel-orange);
+  background: #fff0dc;
+}
+
+.planning-reference {
+  margin: 14px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #254d43;
+  background: #e5f2e9;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.planning-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.planning-controls[hidden],
+#nearby-guidance[hidden] {
+  display: none;
+}
+
+.planning-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.planning-field input,
+.planning-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid #93aaa2;
+  border-radius: 9px;
+  color: var(--travel-ink);
+  background: #fffef8;
+  font-size: 16px;
+}
+
+.planning-form {
+  display: grid;
+  gap: 10px;
+}
+
+.planning-coordinate-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.planning-coordinate-details {
+  padding: 12px;
+  border: 1px dashed #8ea99d;
+  border-radius: 10px;
+}
+
+.planning-coordinate-details summary {
+  padding: 3px 0;
+  color: #2b5449;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.planning-coordinate-details[open] summary {
+  margin-bottom: 14px;
+}
+
+.planning-address-results,
+.attraction-list {
+  display: grid;
+  gap: 12px;
+}
+
+.planning-address-result {
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.6;
+}
+
+.attraction-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin: 15px 0;
+}
+
+.attraction-tools .secondary-action {
+  padding-inline: 10px;
+  font-size: 12px;
+}
+
+.attraction-card {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px 12px;
+  border: 1px solid var(--travel-line);
+  border-radius: 15px;
+  background: #f4f9f5;
+}
+
+.attraction-card .card-title,
+.attraction-card .card-place {
+  margin: 0;
+}
+
+.attraction-card .card-title {
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.attraction-card .secondary-action {
+  width: 100%;
+  font-size: 12px;
+}
+
+.attraction-reason {
+  margin: 0;
+  color: #355c4b;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.interest-option input:focus-visible + span,
+.planning-mode-button:focus-visible,
+.planning-field input:focus-visible,
+.planning-field select:focus-visible,
+.planning-coordinate-details summary:focus-visible {
+  outline: 3px solid #dd733b;
+  outline-offset: 3px;
+}
+
+@media (max-width: 360px) {
+  .view-panel > .planning-settings,
+  .view-panel > .attractions-section {
+    padding-inline: 12px;
+  }
+
+  .planning-label {
+    display: none;
+  }
+
+  .interest-option span {
+    font-size: 12px;
+  }
+}

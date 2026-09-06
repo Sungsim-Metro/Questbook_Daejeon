@@ -52,22 +52,125 @@ paths:
       responses:
         "200":
           description: 사용자 요약
-  /api/recommendations:
+  /api/me/preferences:
+    patch:
+      summary: 인증된 사용자가 관심 카테고리를 직접 선택하거나 해제한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [categories]
+              properties:
+                categories:
+                  type: array
+                  maxItems: 6
+                  uniqueItems: true
+                  description: 빈 배열은 관심사 전체 해제이며 명시적으로 설정한 상태로 저장된다.
+                  items:
+                    $ref: "#/components/schemas/InterestCategory"
+      responses:
+        "200":
+          description: 저장된 관심사. 이후 로그인과 추천에 즉시 적용된다.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [preference]
+                properties:
+                  preference:
+                    $ref: "#/components/schemas/UserPreference"
+        "400":
+          description: 배열이 아닌 값, 중복 또는 지원하지 않는 카테고리
+        "401":
+          description: 유효한 인증 토큰 없음
+  /api/places/recommendations:
     get:
-      summary: 현재 위치와 카테고리 기준 추천 관광지와 퀘스트 후보를 반환한다.
+      summary: 현재 위치와 활동 이력 없이 관심사 기준으로 대전 전체 관광지를 추천한다.
+      description: 관심사 일치 장소를 우선하며 같은 그룹은 안정적으로 정렬한다. 관광지 조회로 퀘스트 인스턴스를 생성하지 않는다.
       security:
         - bearerAuth: []
       parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            default: all
+            enum: [all, nature, science, downtown, market, mobility, nightview]
+        - name: refresh
+          in: query
+          schema:
+            type: string
+            default: "0"
+            enum: ["0", "1", "false", "true", "no", "yes"]
+      responses:
+        "200":
+          description: 대전 관광지 추천. 정상 빈 목록은 그대로 반환하고 예시 또는 일부 조회는 cache.sourceStatus로 구분한다.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scope, preference, recommendations, cache, attribution]
+                properties:
+                  scope:
+                    type: string
+                    const: daejeon
+                  preference:
+                    $ref: "#/components/schemas/UserPreference"
+                  recommendations:
+                    type: array
+                    maxItems: 30
+                    items:
+                      type: object
+                      required: [place, score, matchesPreference, reason]
+                      properties:
+                        place:
+                          $ref: "#/components/schemas/TourPlace"
+                        score:
+                          type: number
+                        matchesPreference:
+                          type: boolean
+                        reason:
+                          type: string
+                  cache:
+                    $ref: "#/components/schemas/RecommendationCache"
+                  attribution:
+                    type: string
+        "400":
+          description: 지원하지 않는 카테고리
+        "401":
+          description: 유효한 인증 토큰 없음
+  /api/recommendations:
+    get:
+      summary: 현재 위치 또는 사용자가 정한 계획 위치 주변의 관광지와 퀘스트 후보를 반환한다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: mode
+          in: query
+          schema:
+            type: string
+            default: nearby
+            enum: [nearby, planning]
         - name: lat
           in: query
-          required: true
+          required: false
+          description: planning 모드에는 필수다. nearby에서 생략하면 기존 기본 좌표를 사용한다.
           schema:
             type: number
+            minimum: -90
+            maximum: 90
         - name: lng
           in: query
-          required: true
+          required: false
+          description: planning 모드에는 필수다. NaN 또는 무한대는 허용하지 않는다.
           schema:
             type: number
+            minimum: -180
+            maximum: 180
         - name: category
           in: query
           required: false
@@ -80,9 +183,15 @@ paths:
           schema:
             type: integer
             default: 5000
+            minimum: 100
+            maximum: 20000
       responses:
         "200":
-          description: 추천 결과. OpenAPI 원본 전체가 아니라 최소 장소 필드와 퀘스트 후보만 포함한다.
+          description: 기존 추천 결과에 mode와 referenceLocation(latitude, longitude, radiusMeters)을 포함한다. 거리는 이 기준 위치에서의 거리이며 실제 GPS를 증명하지 않는다.
+        "400":
+          description: 잘못된 모드, planning 좌표 누락 또는 범위를 벗어난 좌표
+        "401":
+          description: 유효한 인증 토큰 없음
   /api/quests/{instanceId}/accept:
     post:
       summary: 추천 퀘스트를 수행하기로 선택한다.
@@ -284,6 +393,64 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    InterestCategory:
+      type: string
+      enum: [nature, science, downtown, market, mobility, nightview]
+    UserPreference:
+      type: object
+      required: [categories, distanceRangeMeters, pace, isConfigured]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/InterestCategory"
+        distanceRangeMeters:
+          type: integer
+        pace:
+          type: string
+        isConfigured:
+          type: boolean
+          description: 사용자가 관심사를 직접 저장한 적이 있는지 여부. 신규 사용자와 미설정 기존 사용자는 false다.
+    TourPlace:
+      type: object
+      required: [contentId, title, latitude, longitude, categoryCode, categoryName, summary, distanceMeters, source]
+      properties:
+        contentId:
+          type: string
+        title:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        categoryCode:
+          $ref: "#/components/schemas/InterestCategory"
+        categoryName:
+          type: string
+        summary:
+          type: string
+        distanceMeters:
+          type: [number, "null"]
+          description: 대전 전체 추천에서는 거리 기준이 없으므로 null이다.
+        source:
+          type: string
+    RecommendationCache:
+      type: object
+      required: [hit, sourceStatus, fetchedAt, expiresAt, ttlSeconds]
+      properties:
+        hit:
+          type: boolean
+        sourceStatus:
+          type: string
+          description: live는 실시간 조회, live:partial은 제한 내 일부 조회, fallback으로 시작하면 예시 장소다.
+        fetchedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        ttlSeconds:
+          type: integer
     AdventureNoteEntry:
       type: object
       required: [type, title, body, rating, updatedAt]

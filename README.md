@@ -47,7 +47,13 @@ OpenAPI 관광지 데이터를 기반으로 방문형, 이동형, 활동형, 소
 
 ### 4. 위치기반 맞춤 퀘스트 추천 기능
 
-MVP에서는 뱃지 획득 이력을 기반으로 관광 성향에 맞는 퀘스트를 개인화 추천한다.
+홈에서 자연 관찰, 과학 문화, 원도심 걷기, 지역 상권, 이동형, 야경 기록의 관심 카테고리를 여러 개 선택해 저장할 수 있다. 신규 사용자도 활동 이력 없이 추천을 시작하고, 기존 사용자는 관심사를 언제든 변경할 수 있다.
+
+현재 위치 모드에서는 주변 퀘스트를 추천한다. 계획 모드에서는 주요 지점, 주소 검색, 지도 클릭 또는 위경도 입력으로 정한 위치를 기준으로 퀘스트를 추천한다. 계획 위치는 실제 GPS와 별도로 관리하며, 퀘스트 완료 시에는 현장에서 측정한 GPS로 인증한다.
+
+홈의 대전 관광지 추천은 현재 위치와 상관없이 대전 지역을 조회하고 직접 선택한 관심 카테고리를 우선 표시한다. 관광지의 주변 퀘스트 보기로 계획 모드에 연결할 수 있다. 관심사가 비어 있으면 일반 목록을 제공한다. TourAPI 키가 없거나 장애가 있으면 예시 장소라는 출처를 표시한다.
+
+관광지는 기존 30분 Redis 캐시에만 보관한다. 대전 지역 조회는 최대 5페이지를 수집하고 제한 내 일부만 가져왔을 때 화면에 안내한다. 기존 주변 퀘스트 점수에는 거리, 관심사, 뱃지와 완료 이력도 반영한다.
 연관 관광지 API와 집중률 API를 활용한 혼잡 분산 추천은 향후 고도화 기능으로 두며, 실교통량·내비게이션 데이터 연계가 필요하다.
 
 ### 5. 리워드 및 지역상권 연계
@@ -90,6 +96,7 @@ docker compose up -d postgres redis
 uv run --project services/app-api pytest services/app-api/tests tests/smoke -v
 node --check apps/user-web/src/app.js
 node --check apps/user-web/public/service-worker.js
+node --test apps/user-web/tests/test_planning.mjs
 ```
 
 PostgreSQL과 Redis만 필요한 로컬 개발 서비스는 Docker Compose의 `postgres`, `redis` 서비스로 준비한다. 접속 URL 기본값은 `.env.example`과 루트 `docker-compose.yaml`에 맞춰져 있다.

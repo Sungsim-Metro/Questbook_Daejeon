@@ -222,6 +222,8 @@ class BaselineHttpSmokeTest(unittest.TestCase):
             )
             cls.environment["QUESTBOOK_DATABASE_URL"] = TEST_DATABASE_URL
             cls.environment["QUESTBOOK_REDIS_URL"] = TEST_REDIS_URL
+            # 변수 의미: 스모크 테스트는 실제 관광 API 대신 결정적인 대전 예시 장소를 사용한다.
+            cls.environment["TOURAPI_SERVICE_KEY"] = ""
             cls.environment["QUESTBOOK_APP_API_HOST"] = "127.0.0.1"
             cls.environment["QUESTBOOK_APP_API_PORT"] = str(cls.app_port)
             cls.environment["QUESTBOOK_APP_API_BASE_URL"] = f"http://127.0.0.1:{cls.app_port}"
@@ -318,6 +320,107 @@ class BaselineHttpSmokeTest(unittest.TestCase):
 
         with self.assertRaises(HTTPError) as error_context:
             fetch_json(f"http://127.0.0.1:{self.web_port}/api/me")
+        self.assertEqual(error_context.exception.code, 401)
+
+    def test_preferences_and_planning_through_gateway(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 데모 계정의 관심사 저장과 재로그인 유지, 대전 추천 및 계획점 주변 조회를 검증한다.
+        호출 예시: pytest tests/smoke/test_baseline_http.py -k preferences_and_planning
+        """
+        # 변수 의미: 공통 데모 계정에 접속하는 로그인 본문이다.
+        login_body = {
+            "providerUserId": "demo-user",
+            "ageConfirmed": True,
+            "privacyConsent": True,
+            "locationConsent": True,
+        }
+        # 변수 의미: 게이트웨이 API 기준 주소다.
+        api_url = f"http://127.0.0.1:{self.web_port}/api"
+        # 변수 의미: 아직 관심사를 설정하지 않은 데모 사용자의 로그인 결과와 인증 토큰이다.
+        login = fetch_json(f"{api_url}/auth/demo-login", "POST", login_body)
+        token = str(login["accessToken"])
+        # 변수 의미: 사용자 활동 이력이 없는 초기 선호도다.
+        initial = fetch_json(f"{api_url}/me", access_token=token)["user"]
+        self.assertEqual(initial["preference"]["categories"], [])
+        self.assertFalse(initial["preference"]["isConfigured"])
+        self.assertEqual(initial["stats"]["completedQuestCount"], 0)
+
+        # 변수 의미: 직접 선택한 관심사 저장 응답이다.
+        saved = fetch_json(
+            f"{api_url}/me/preferences", "PATCH", {"categories": ["science"]}, token,
+        )
+        self.assertEqual(saved["preference"]["categories"], ["science"])
+        self.assertTrue(saved["preference"]["isConfigured"])
+        # 변수 의미: 다시 로그인한 사용자의 서버 저장 선호도다.
+        relogin = fetch_json(f"{api_url}/auth/demo-login", "POST", login_body)
+        token = str(relogin["accessToken"])
+        persisted = fetch_json(f"{api_url}/me", access_token=token)["user"]
+        self.assertEqual(persisted["preference"], saved["preference"])
+        # 변수 의미: 위경도 없이 조회하는 대전 전체 관광지 추천 응답이다.
+        city = fetch_json(f"{api_url}/places/recommendations", access_token=token)
+        self.assertEqual(city["scope"], "daejeon")
+        self.assertEqual(city["recommendations"][0]["place"]["categoryCode"], "science")
+        self.assertTrue(city["recommendations"][0]["matchesPreference"])
+        self.assertTrue(all("quest" not in item for item in city["recommendations"]))
+        self.assertTrue(all(item["place"]["distanceMeters"] is None for item in city["recommendations"]))
+        # 변수 의미: 여행 전 선택한 과학관 좌표 기준 계획 모드 쿼리다.
+        query = urlencode({"mode": "planning", "lat": 36.3762, "lng": 127.3745, "category": "science"})
+        planned = fetch_json(f"{api_url}/recommendations?{query}", access_token=token)
+        self.assertEqual(planned["mode"], "planning")
+        self.assertEqual(planned["referenceLocation"]["latitude"], 36.3762)
+        self.assertEqual(planned["referenceLocation"]["longitude"], 127.3745)
+        self.assertEqual(planned["recommendations"][0]["place"]["distanceMeters"], 0)
+        # 변수 의미: 계획 조회로 생성된 퀘스트의 현장 인증 대상 식별자다.
+        instance_id = planned["recommendations"][0]["quest"]["instanceId"]
+        fetch_json(f"{api_url}/quests/{instance_id}/accept", "POST", {}, token)
+        # 변수 의미: 계획 장소와 떨어진 실제 제출 위치의 인증 응답이다.
+        remote_completion = fetch_json(
+            f"{api_url}/quests/{instance_id}/complete", "POST",
+            {"latitude": 37.5665, "longitude": 126.9780, "accuracyMeters": 15}, token,
+        )
+        self.assertFalse(remote_completion["ok"])
+        # 변수 의미: 계획점을 다른 도시로 옮겼을 때 예시 대전 장소가 끼어들지 않는 결과다.
+        distant = fetch_json(
+            f"{api_url}/recommendations?mode=planning&lat=37.5665&lng=126.9780",
+            access_token=token,
+        )
+        self.assertEqual(distant["recommendations"], [])
+
+        # 변수 의미: 모든 관심사를 명시적으로 해제한 저장 응답이다.
+        cleared = fetch_json(f"{api_url}/me/preferences", "PATCH", {"categories": []}, token)
+        self.assertEqual(cleared["preference"]["categories"], [])
+        self.assertTrue(cleared["preference"]["isConfigured"])
+
+    def test_planning_rejects_invalid_inputs_and_unauthenticated_changes(self) -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 계획 좌표와 관심사 입력 및 인증 경계를 실제 HTTP 경로에서 검증한다.
+        호출 예시: pytest tests/smoke/test_baseline_http.py -k planning_rejects
+        """
+        # 변수 의미: 인증과 좌표 검증을 확인할 API 기준 주소다.
+        api_url = f"http://127.0.0.1:{self.web_port}/api"
+        for query in [
+            "mode=planning", "mode=planning&lat=36.3", "mode=invalid&lat=36.3&lng=127.4",
+            "mode=planning&lat=nan&lng=127.4", "mode=planning&lat=36.3&lng=inf",
+            "mode=planning&lat=91&lng=127.4", "mode=planning&lat=36.3&lng=181",
+        ]:
+            with self.subTest(query=query):
+                with self.assertRaises(HTTPError) as error_context:
+                    fetch_json(f"{api_url}/recommendations?{query}", access_token=self.access_token)
+                self.assertEqual(error_context.exception.code, 400)
+        for categories in ["science", ["unknown"], ["all"], ["default"], [None]]:
+            with self.subTest(categories=categories):
+                with self.assertRaises(HTTPError) as error_context:
+                    fetch_json(f"{api_url}/me/preferences", "PATCH", {"categories": categories}, self.access_token)
+                self.assertEqual(error_context.exception.code, 400)
+        with self.assertRaises(HTTPError) as error_context:
+            fetch_json(f"{api_url}/me/preferences", "PATCH", {"categories": ["science"]})
+        self.assertEqual(error_context.exception.code, 401)
+        with self.assertRaises(HTTPError) as error_context:
+            fetch_json(f"{api_url}/places/recommendations")
         self.assertEqual(error_context.exception.code, 401)
 
     def test_recommend_accept_and_complete_flow(self) -> None:

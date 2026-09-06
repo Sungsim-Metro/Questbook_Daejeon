@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
 import re
 from threading import Lock
 from typing import Any
@@ -10,7 +11,7 @@ from questbook_api.domain.models import QuestTemplate, TourPlaceCandidate
 from questbook_api.infrastructure.cache import TourPlaceRedisCache, utc_now
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.object_storage.client import sanitize_object_key_token
-from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters
+from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters, with_distances
 
 
 # 변수 의미: 영수증 시간 비교와 표시에서 사용할 한국 시간대다.
@@ -46,6 +47,9 @@ QUEST_TEMPLATES: dict[str, QuestTemplate] = {
     "mobility": QuestTemplate("mobility", "이동형", "gps_distance", 70, "{place_name} 이동 루트", "{place_name}을 출발점으로 가까운 관광지를 연결하는 이동형 퀘스트입니다."),
     "nightview": QuestTemplate("nightview", "활동형", "time_window_photo", 70, "{place_name} 야경 기록", "{place_name}에서 저녁 시간대 전망 기록을 남깁니다."),
 }
+
+# 변수 의미: 거리 없는 대전 관광지 탐색 화면에 반환할 최대 결과 수다.
+MAX_PLACE_RECOMMENDATIONS = 30
 
 
 def normalize_match_text(value: str) -> str:
@@ -246,6 +250,93 @@ class BaselineQuestbookService:
         """
         return self.repository.ensure_user(user_id)
 
+    def update_preferences(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        입력: 인증된 사용자 ID와 관심 카테고리 배열을 담은 요청 본문.
+        출력: 저장된 사용자 선호도.
+        역할: 실제 퀘스트를 지원하는 관심사만 허용하고 빈 선택도 명시적 설정으로 저장한다.
+        호출 예시: preference = service.update_preferences("demo-user", {"categories": ["nature"]})
+        """
+        # 변수 의미: 사용자가 저장하려는 관심 카테고리 목록이다.
+        categories = payload.get("categories")
+        if not isinstance(categories, list):
+            raise ValueError("categories must be an array.")
+        if len(categories) > len(QUEST_TEMPLATES):
+            raise ValueError("Too many interest categories.")
+        if any(not isinstance(category, str) or category not in QUEST_TEMPLATES for category in categories):
+            raise ValueError("categories contains an unsupported interest category.")
+        if len(set(categories)) != len(categories):
+            raise ValueError("categories must not contain duplicates.")
+        return self.repository.update_preferences(user_id, categories)
+
+    def get_place_recommendations(
+        self,
+        user_id: str,
+        category_key: str = "all",
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        """
+        입력: 사용자 ID, 선택적 카테고리 필터와 강제 새로고침 여부.
+        출력: 현재 좌표 없이 관심사에 맞춰 정렬한 대전 관광지와 캐시 정보.
+        역할: 지역 관광지 후보만 조회하고 퀘스트 생성 없이 선호 일치 이유를 제공한다.
+        호출 예시: response = service.get_place_recommendations("demo-user", "nature")
+        """
+        if category_key != "all" and category_key not in QUEST_TEMPLATES:
+            raise ValueError("Unsupported place category.")
+        self.repository.ensure_user(user_id)
+        # 변수 의미: 현재 요청에 반영할 최신 사용자 선호도다.
+        preference = self.repository.get_user(user_id)["preference"]
+        # 변수 의미: 대전 전체 후보 캐시에 사용하며 위치 기반 캐시와 겹치지 않는 권역 키다.
+        cache_region_key = "citywide:daejeon"
+        # 변수 의미: 카테고리 변경에도 재사용할 사용자별 전체 지역 후보 캐시다.
+        cache_entry = None if force_refresh else self.cache.get(user_id, cache_region_key, "all")
+        # 변수 의미: 이번 응답이 기존 장소 후보 캐시를 사용했는지 여부다.
+        cache_hit = cache_entry is not None
+        if cache_entry is None:
+            # 변수 의미: 모든 내부 카테고리의 대전 관광지와 라이브 또는 예시 원천 상태다.
+            places, source_status = self.tour_client.fetch_daejeon(category_key="all")
+            cache_entry = self.cache.set(user_id, cache_region_key, "all", places, source_status)
+
+        # 변수 의미: 관광지 순위에 사용할 관심 카테고리 집합이다.
+        preferred_categories = set(preference["categories"])
+        # 변수 의미: GPS와 완료 이력을 사용하지 않는 관광지 추천 항목이다.
+        recommendations: list[dict[str, Any]] = []
+        # 변수 의미: 지역 후보 캐시에서 현재 평가하는 관광지다.
+        for place in cache_entry.places:
+            if category_key != "all" and place.category_code != category_key:
+                continue
+            # 변수 의미: 관광지 테마가 사용자가 선택한 관심사에 포함되는지 여부다.
+            matches_preference = place.category_code in preferred_categories
+            # 변수 의미: 거리 기준이 없는 지역 탐색용 장소 응답이다.
+            public_place = place.to_public_dict()
+            public_place["distanceMeters"] = None
+            recommendations.append({
+                "place": public_place,
+                "score": 100 if matches_preference else 0,
+                "matchesPreference": matches_preference,
+                "reason": (
+                    "선택한 관심 카테고리와 일치해요." if matches_preference
+                    else "대전에서 둘러볼 수 있는 관광지예요."
+                ),
+            })
+        recommendations.sort(key=lambda item: (
+            -item["score"], item["place"]["title"], item["place"]["contentId"],
+        ))
+        return {
+            "scope": "daejeon",
+            "preference": preference,
+            "categoryKey": category_key,
+            "cache": {
+                "hit": cache_hit,
+                "sourceStatus": cache_entry.source_status,
+                "fetchedAt": cache_entry.fetched_at.isoformat(),
+                "expiresAt": cache_entry.expires_at.isoformat(),
+                "ttlSeconds": self.cache.default_ttl_seconds,
+            },
+            "recommendations": recommendations[:MAX_PLACE_RECOMMENDATIONS],
+            "attribution": "관광정보 제공: 한국관광공사(TourAPI)",
+        }
+
     def get_recommendations(
         self,
         user_id: str,
@@ -254,13 +345,20 @@ class BaselineQuestbookService:
         category_key: str,
         radius_meters: int,
         force_refresh: bool = False,
+        mode: str = "nearby",
     ) -> dict[str, Any]:
         """
-        입력: 사용자 ID, 현재 좌표, 카테고리, 반경, 강제 새로고침 여부.
+        입력: 사용자 ID, 추천 기준 좌표, 카테고리, 반경, 새로고침 여부와 nearby 또는 planning 모드.
         출력: 추천 관광지와 사용자별 퀘스트 후보 응답.
         역할: TourAPI 캐시 확인, 후보 조회, 점수 계산, ReusableQuest와 UserQuestInstance 생성을 수행한다.
         호출 예시: payload = service.get_recommendations(\"demo-user\", 36.327, 127.427, \"nature\", 5000, False)
         """
+        if mode not in {"nearby", "planning"}:
+            raise ValueError("mode must be nearby or planning.")
+        if not math.isfinite(latitude) or not -90 <= latitude <= 90:
+            raise ValueError("latitude must be a finite value between -90 and 90.")
+        if not math.isfinite(longitude) or not -180 <= longitude <= 180:
+            raise ValueError("longitude must be a finite value between -180 and 180.")
         self.repository.ensure_user(user_id)
         # 변수 의미: 허용되는 내부 카테고리 코드 목록이다.
         allowed_codes = self.repository.get_category_codes()
@@ -268,16 +366,18 @@ class BaselineQuestbookService:
         normalized_category = normalize_category(category_key, allowed_codes)
         # 변수 의미: 캐시 권역 키다.
         region_key = build_region_key(latitude, longitude)
+        # 변수 의미: 실제 외부 요청 정밀도와 모드 및 반경을 포함한 내부 캐시 권역 키다.
+        cache_region_key = f"{mode}:{latitude:.7f}:{longitude:.7f}:{radius_meters}"
         if force_refresh:
-            self.cache.invalidate_for_user(user_id)
-        self._invalidate_if_query_changed(user_id, region_key, normalized_category)
+            self.cache.invalidate_for_user(user_id, preserve_region_keys=("citywide:daejeon",))
+        self._invalidate_if_query_changed(user_id, cache_region_key, normalized_category)
         # 변수 의미: 캐시 조회 결과다.
-        cached_entry = self.cache.get(user_id, region_key, normalized_category)
+        cached_entry = self.cache.get(user_id, cache_region_key, normalized_category)
         if cached_entry is None:
             # 변수 의미: TourAPI 또는 fallback에서 조회한 장소 후보 목록과 원천 상태다.
             places, source_status = self.tour_client.fetch_nearby(latitude, longitude, normalized_category, radius_meters)
             # 변수 의미: 새로 저장한 캐시 엔트리다.
-            cache_entry = self.cache.set(user_id, region_key, normalized_category, places, source_status)
+            cache_entry = self.cache.set(user_id, cache_region_key, normalized_category, places, source_status)
             # 변수 의미: 캐시 적중 여부다.
             cache_hit = False
         else:
@@ -292,7 +392,16 @@ class BaselineQuestbookService:
         recommendation_profile = self.repository.get_recommendation_profile(user_id)
         # 변수 의미: 추천 결과 목록이다.
         recommendations: list[dict[str, Any]] = []
-        for place in cache_entry.places:
+        # 변수 의미: 계획 모드에서는 예시 데이터도 선택 지점으로부터 거리를 재계산한 후보 목록이다.
+        candidate_places = (
+            with_distances(cache_entry.places, latitude, longitude)
+            if mode == "planning" else cache_entry.places
+        )
+        for place in candidate_places:
+            if normalized_category != "all" and place.category_code != normalized_category:
+                continue
+            if mode == "planning" and place.distance_meters > radius_meters:
+                continue
             # 변수 의미: 해당 장소에 적용할 퀘스트 템플릿이다.
             template = QUEST_TEMPLATES.get(place.category_code, QUEST_TEMPLATES["downtown"])
             # 변수 의미: 공용 퀘스트 생성 또는 재사용에 필요한 데이터다.
@@ -317,6 +426,12 @@ class BaselineQuestbookService:
         return {
             "userId": user_id,
             "regionKey": region_key,
+            "mode": mode,
+            "referenceLocation": {
+                "latitude": latitude,
+                "longitude": longitude,
+                "radiusMeters": radius_meters,
+            },
             "categoryKey": normalized_category,
             "cache": {
                 "hit": cache_hit,
@@ -342,7 +457,7 @@ class BaselineQuestbookService:
             # 변수 의미: 같은 사용자의 직전 요청 키다.
             previous_key = self._last_query_keys.get(user_id)
             if previous_key is not None and previous_key != current_key:
-                self.cache.invalidate_for_user(user_id)
+                self.cache.invalidate_for_user(user_id, preserve_region_keys=("citywide:daejeon",))
             self._last_query_keys[user_id] = current_key
 
     def accept_quest(self, user_id: str, instance_id: str) -> dict[str, Any]:

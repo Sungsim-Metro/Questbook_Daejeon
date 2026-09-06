@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS preferences (
   categories_json JSONB NOT NULL,
   distance_range_meters INTEGER NOT NULL,
   pace TEXT NOT NULL,
+  categories_set_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL
 );
 

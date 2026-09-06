@@ -31,6 +31,20 @@ const CATEGORY_LABELS = {
   nightview: "야경",
 };
 
+// 변수 의미: 관심사 저장과 관광지 탐색에서 지원하는 카테고리입니다.
+const INTEREST_CATEGORIES = ["nature", "science", "downtown", "market", "mobility", "nightview"];
+
+// 변수 의미: 지도 연결이나 GPS 없이 선택할 수 있는 대전 여행 기준점입니다.
+const PLANNING_PRESETS = [
+  { lat: 36.3504, lng: 127.3845, label: "대전광역시청" },
+  { lat: 36.3325, lng: 127.4343, label: "대전역" },
+  { lat: 36.3742, lng: 127.3781, label: "국립중앙과학관" },
+  { lat: 36.3670, lng: 127.3888, label: "한밭수목원" },
+  { lat: 36.3274, lng: 127.4272, label: "은행동·성심당 거리" },
+  { lat: 36.3554, lng: 127.3449, label: "유성온천" },
+  { lat: 36.4746, lng: 127.4738, label: "대청호 오백리길" },
+];
+
 // 하단 탭과 헤더에서 사용하는 화면 메타데이터입니다.
 const VIEW_META = {
   home: { title: "모험가 홈", eyebrow: "QUESTBOOK", icon: "✦", label: "홈", navIcon: "⌂" },
@@ -202,6 +216,29 @@ const state = {
   },
   selectedCategory: "all",
   location: { ...FALLBACK_LOCATION },
+  recommendationMode: "nearby", // 변수 의미: 주변 또는 여행 계획 추천 모드입니다.
+  plannedLocation: { ...PLANNING_PRESETS[0] }, // 변수 의미: 실측 GPS와 독립적인 여행 계획 기준점입니다.
+  planningInputLocationKey: "", // 변수 의미: 좌표 입력에 마지막으로 반영한 기준점입니다.
+  preference: { categories: [], isConfigured: false }, // 변수 의미: 서버에 저장된 관심사입니다.
+  interestDraft: [], // 변수 의미: 아직 저장하지 않은 관심사 선택입니다.
+  interestDirty: false, // 변수 의미: 관심사를 편집하고 있는지 여부입니다.
+  preferencePending: false, // 변수 의미: 관심사를 저장하는 중인지 여부입니다.
+  preferenceMessage: "", // 변수 의미: 관심사 저장 결과 안내입니다.
+  sessionVersion: 0, // 변수 의미: 로그아웃 전 요청을 구분하는 세션 세대입니다.
+  preferenceRequestId: 0, // 변수 의미: 이전 선호도 응답을 무시하기 위한 요청 순번입니다.
+  userRequestId: 0, // 변수 의미: 이전 사용자 응답을 무시하기 위한 요청 순번입니다.
+  recommendationRequestId: 0, // 변수 의미: 추천 조회 순번입니다.
+  recommendationPending: false, // 변수 의미: 추천 조회 진행 여부입니다.
+  locationRequestId: 0, // 변수 의미: GPS와 계획점 변경 순서를 구분합니다.
+  planningMessage: "", // 변수 의미: 계획 위치 선택 결과입니다.
+  addressResults: [], // 변수 의미: 주소 검색 결과입니다.
+  addressRequestId: 0, // 변수 의미: 이전 주소 검색 응답을 무시하는 순번입니다.
+  addressPending: false, // 변수 의미: 주소 검색 진행 여부입니다.
+  attractions: [], // 변수 의미: 퀘스트를 생성하지 않은 대전 관광지 목록입니다.
+  attractionCategory: "all", // 변수 의미: 대전 관광지 목록의 단일 필터입니다.
+  attractionRequestId: 0, // 변수 의미: 대전 관광지 요청 순번입니다.
+  attractionPending: false, // 변수 의미: 대전 관광지 조회 진행 여부입니다.
+  attractionMessage: "", // 변수 의미: 대전 관광지 데이터 출처 또는 오류 안내입니다.
   user: { ...FALLBACK_USER },
   recommendations: [...FALLBACK_RECOMMENDATIONS],
   badges: [...FALLBACK_BADGES],
@@ -590,6 +627,25 @@ function isUnauthorizedError(error) {
  */
 function resetExpiredSession(message = "세션이 만료되었습니다. 다시 동의 후 시작하세요.") {
   state.accessToken = "";
+  state.sessionVersion += 1;
+  state.preferenceRequestId += 1;
+  state.locationRequestId += 1;
+  state.addressRequestId += 1;
+  state.preference = normalizePreference();
+  state.interestDraft = [];
+  state.interestDirty = false;
+  state.preferencePending = false;
+  state.preferenceMessage = "";
+  state.recommendations = [];
+  state.attractions = [];
+  state.plannedLocation = { ...PLANNING_PRESETS[0] };
+  state.planningInputLocationKey = "";
+  state.location = { ...FALLBACK_LOCATION };
+  state.recommendationMode = "nearby";
+  state.addressResults = [];
+  state.addressPending = false;
+  state.attractionPending = false;
+  state.recommendationPending = false;
   state.notes = [];
   state.notesSource = "api";
   state.notePhotos = {};
@@ -610,6 +666,9 @@ function resetExpiredSession(message = "세션이 만료되었습니다. 다시 
  * 호출 예시: fetchJson("/api/me")
  */
 async function fetchJson(path, options = {}) {
+  // 변수 의미: 요청을 보낸 세션이며 다른 계정으로 바뀐 뒤에는 만료시키지 않습니다.
+  const requestToken = state.accessToken;
+  const requestVersion = state.sessionVersion;
   // API 요청에 보낼 헤더입니다.
   const headers = { Accept: "application/json", ...(options.headers || {}) };
   if (state.accessToken) {
@@ -628,7 +687,7 @@ async function fetchJson(path, options = {}) {
   if (!response.ok) {
     // 호출부에서 상태별로 처리할 수 있는 API 오류입니다.
     const error = await createApiError(response);
-    if (isUnauthorizedError(error) && state.accessToken) {
+    if (isUnauthorizedError(error) && isCurrentSession(requestToken, requestVersion)) {
       resetExpiredSession();
     }
     throw error;
@@ -708,6 +767,8 @@ function startLocalDemoSession() {
   setConsentMessage("");
   updateSystemStatus(false, "체험 모드");
   renderAll();
+  loadRecommendations();
+  loadAttractions();
 }
 
 /**
@@ -995,6 +1056,9 @@ function getRecommendationDataLabel() {
   // 추천 API가 보고한 데이터 원천 상태입니다.
   const sourceStatus = state.recommendationMeta.sourceStatus;
 
+  if (state.dataSource === "error") {
+    return "연결 실패";
+  }
   if (state.dataSource !== "api") {
     return "목업";
   }
@@ -1016,6 +1080,14 @@ function getTourApiStatusText() {
 
   // 캐시 사용 여부 표시 문구입니다.
   const cacheText = meta.cacheHit ? "30분 캐시 사용" : "새 조회";
+
+  if (state.dataSource === "error") {
+    return "추천을 불러오지 못했습니다. 추천 설정을 확인하고 새로고침해 주세요.";
+  }
+
+  if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+    return "화면 체험용 예시 퀘스트입니다. 위치·관심사에 따른 실제 추천은 앱 서버 연결 후 제공됩니다.";
+  }
 
   if (state.dataSource !== "api") {
     return "앱 API 연결 실패로 브라우저 목업 데이터를 표시합니다.";
@@ -1066,8 +1138,8 @@ function normalizeRecommendation(rawItem) {
   return {
     instanceId: instanceId || createClientId("recommendation"),
     placeName: item.placeName || item.title || place.name || place.title || quest.placeReference?.placeName || "추천 장소",
-    placeLatitude: toNumber(item.latitude || place.latitude, state.location.lat),
-    placeLongitude: toNumber(item.longitude || place.longitude, state.location.lng),
+    placeLatitude: toNumber(item.latitude ?? place.latitude, getRecommendationLocation().lat),
+    placeLongitude: toNumber(item.longitude ?? place.longitude, getRecommendationLocation().lng),
     category: item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
     distanceMeters: toNumber(item.distanceMeters || item.distance || place.distanceMeters, 0),
     questTitle: item.questTitle || quest.title || item.title || "방문 퀘스트",
@@ -1329,7 +1401,7 @@ function buildNaverPlaceMarkerIcon(place, isSelected) {
  */
 function buildNaverPositionMarkerIcon() {
   return {
-    content: '<div class="naver-position-marker" aria-label="현재 위치"><span></span></div>',
+    content: `<div class="naver-position-marker" aria-label="${state.recommendationMode === "planning" ? "계획 위치" : "추천 기준 위치"}"><span></span></div>`,
     anchor: new window.naver.maps.Point(13, 13),
   };
 }
@@ -1346,7 +1418,7 @@ function registerServiceWorker() {
   }
 
   navigator.serviceWorker
-    .register("./service-worker.js?v=20260904-4", { updateViaCache: "none" })
+    .register("./service-worker.js?v=20260906-2", { updateViaCache: "none" })
     .then((registration) => registration.update())
     .catch(() => {
       updateSystemStatus(false, "서비스워커 등록 실패");
@@ -1627,9 +1699,9 @@ function renderHomeMetrics() {
 
   // 표시할 지표 목록입니다.
   const metrics = [
-    ["📍", state.location.label.replace(" 기준", ""), "현재 위치 후보"],
+    ["📍", getRecommendationLocation().label.replace(" 기준", ""), state.recommendationMode === "planning" ? "계획 기준점" : "추천 기준점"],
     ["🏷️", `${earnedBadges.length}개`, "획득 뱃지"],
-    ["🗺️", `${state.recommendations.length}개`, "주변 퀘스트"],
+    ["🗺️", `${state.recommendations.length}개`, "추천 퀘스트"],
     ["🎁", getRecommendationDataLabel(), "추천 데이터"],
   ];
 
@@ -1719,7 +1791,7 @@ function renderHomeRecommendations() {
   });
 
   if (state.recommendations.length === 0) {
-    list.append(createElement("p", "empty-message", "표시할 추천 퀘스트가 없습니다."));
+    list.append(createElement("p", "empty-message", state.recommendationPending ? "선택한 기준으로 퀘스트를 불러오고 있습니다." : "표시할 추천 퀘스트가 없습니다."));
   }
 }
 
@@ -1734,8 +1806,10 @@ function renderRecommendationMeta() {
   const mapCopy = select("#map-copy");
 
   if (mapCopy) {
+    // 변수 의미: 현재 모드에서 사용하는 추천 기준점입니다.
+    const location = getRecommendationLocation();
     const mapStatus = state.naverMapConfigured ? "NAVER Dynamic Map 연결 준비" : "목업 지도 표시";
-    mapCopy.textContent = `${state.location.label} · ${state.location.lat.toFixed(4)}, ${state.location.lng.toFixed(4)} · ${mapStatus}`;
+    mapCopy.textContent = `${state.recommendationMode === "planning" ? "계획 위치" : "추천 기준"}: ${location.label} · ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)} · ${mapStatus}`;
   }
 
   // 지도 제공자 상태 요소입니다.
@@ -1969,7 +2043,7 @@ function renderRecommendations() {
   list.replaceChildren();
 
   if (filteredRecommendations.length === 0) {
-    list.append(createElement("p", "empty-message", "이 카테고리의 추천 퀘스트가 아직 없습니다."));
+    list.append(createElement("p", "empty-message", state.recommendationPending ? "선택한 기준으로 퀘스트를 불러오고 있습니다." : "이 카테고리의 추천 퀘스트가 아직 없습니다."));
     return;
   }
 
@@ -2066,10 +2140,12 @@ function renderMapBackground(canvas) {
  * 호출 예시: renderMockMapView(canvas, places)
  */
 function renderMockMapView(canvas, places) {
+  // 변수 의미: 지도에 표시할 추천 기준 좌표입니다.
+  const location = getRecommendationLocation();
   // 위도 목록입니다.
-  const latitudes = places.map((item) => item.placeLatitude).concat(state.location.lat);
+  const latitudes = places.map((item) => item.placeLatitude).concat(location.lat);
   // 경도 목록입니다.
-  const longitudes = places.map((item) => item.placeLongitude).concat(state.location.lng);
+  const longitudes = places.map((item) => item.placeLongitude).concat(location.lng);
   // 지도 좌표 범위입니다.
   const minLatitude = Math.min(...latitudes);
   const maxLatitude = Math.max(...latitudes);
@@ -2086,9 +2162,9 @@ function renderMockMapView(canvas, places) {
 
   // 현재 위치 표시 요소입니다.
   const currentLocationMarker = createElement("span", "current-location-marker");
-  currentLocationMarker.title = state.location.label;
-  currentLocationMarker.style.left = `${toMapPercent(state.location.lng, minLongitude, maxLongitude)}%`;
-  currentLocationMarker.style.top = `${toMapPercent(state.location.lat, minLatitude, maxLatitude, true)}%`;
+  currentLocationMarker.title = location.label;
+  currentLocationMarker.style.left = `${toMapPercent(location.lng, minLongitude, maxLongitude)}%`;
+  currentLocationMarker.style.top = `${toMapPercent(location.lat, minLatitude, maxLatitude, true)}%`;
   canvas.append(currentLocationMarker);
 
   places.forEach((place) => {
@@ -2119,10 +2195,15 @@ async function renderNaverMapView(canvas, places) {
     throw new Error("NAVER Dynamic Map Key ID is missing.");
   }
 
+  // 변수 의미: 지도 SDK 대기 중 변경될 수 있는 추천 조회 및 세션입니다.
+  const requestId = state.recommendationRequestId;
+  const token = state.accessToken;
+  const version = state.sessionVersion;
   await loadNaverMapsSdk(state.naverMapConfig.keyId);
+  if (requestId !== state.recommendationRequestId || !isCurrentSession(token, version)) return;
 
   // 지도 중심 좌표입니다.
-  const center = new window.naver.maps.LatLng(state.location.lat, state.location.lng);
+  const center = new window.naver.maps.LatLng(getRecommendationLocation().lat, getRecommendationLocation().lng);
   canvas.classList.remove("is-mock");
   canvas.classList.add("is-naver");
 
@@ -2138,6 +2219,11 @@ async function renderNaverMapView(canvas, places) {
       zoomControlOptions: {
         position: window.naver.maps.Position.TOP_RIGHT,
       },
+    });
+    window.naver.maps.Event.addListener(state.naverMapInstance, "click", (event) => {
+      if (state.recommendationMode === "planning" && event.coord) {
+        setPlanningLocation({ lat: event.coord.lat(), lng: event.coord.lng(), label: "지도에서 선택한 위치" });
+      }
     });
   } else {
     state.naverMapInstance.setCenter(center);
@@ -2160,10 +2246,11 @@ function syncNaverPositionMarker() {
   }
 
   // 현재 위치 좌표입니다.
-  const position = new window.naver.maps.LatLng(state.location.lat, state.location.lng);
+  const position = new window.naver.maps.LatLng(getRecommendationLocation().lat, getRecommendationLocation().lng);
 
   if (state.naverPositionMarker) {
     state.naverPositionMarker.setPosition(position);
+    state.naverPositionMarker.setIcon(buildNaverPositionMarkerIcon());
     return;
   }
 
@@ -2261,7 +2348,7 @@ function renderMapView() {
   }
 
   // 지도에 표시할 추천 항목입니다.
-  const places = state.recommendations.length > 0 ? state.recommendations : [...FALLBACK_RECOMMENDATIONS];
+  const places = state.recommendations;
 
   if (!places.some((item) => item.instanceId === state.selectedMapInstanceId)) {
     state.selectedMapInstanceId = places[0]?.instanceId || "";
@@ -2269,6 +2356,9 @@ function renderMapView() {
 
   detail.replaceChildren();
   list.replaceChildren();
+  if (places.length === 0) {
+    list.append(createElement("p", "empty-message", state.recommendationPending ? "퀘스트를 불러오고 있습니다." : "이 기준점에서 표시할 퀘스트가 없습니다."));
+  }
 
   places.forEach((place) => {
     // 현재 추천 장소가 선택 상태인지 여부입니다.
@@ -3146,6 +3236,8 @@ function renderCustomizer() {
  * 호출 예시: renderAll()
  */
 function renderAll() {
+  renderPlanningSettings();
+  renderAttractions();
   renderAppHeader();
   renderBottomNavigation();
   renderProfile();
@@ -3161,6 +3253,332 @@ function renderAll() {
   renderGgumdori();
   renderCustomizer();
   renderActionDialog();
+}
+
+/**
+ * 입력: 없음. 출력: 추천 기준 좌표와 이름.
+ * 역할: 실측 위치와 계획 위치를 모드에 따라 구분합니다.
+ * 호출 예시: const location = getRecommendationLocation()
+ */
+function getRecommendationLocation() {
+  return state.recommendationMode === "planning" ? state.plannedLocation : state.location;
+}
+
+/**
+ * 입력: 요청 시작 시 토큰과 세션 세대. 출력: 현재 사용자와 같은지 여부.
+ * 역할: 로그아웃 또는 계정 전환 이전의 응답 반영을 막습니다.
+ * 호출 예시: if (!isCurrentSession(token, version)) return
+ */
+function isCurrentSession(token, version) {
+  return Boolean(token) && state.accessToken === token && state.sessionVersion === version;
+}
+
+/**
+ * 입력: 서버의 선호도 객체. 출력: 검증된 관심사와 저장 여부.
+ * 역할: 지원하지 않는 카테고리를 제외하고 서버 선호도를 정규화합니다.
+ * 호출 예시: state.preference = normalizePreference(payload.preference)
+ */
+function normalizePreference(preference = {}) {
+  return {
+    ...preference,
+    categories: Array.isArray(preference.categories)
+      ? [...new Set(preference.categories.filter((category) => INTEREST_CATEGORIES.includes(category)))]
+      : [],
+    isConfigured: Boolean(preference.isConfigured),
+  };
+}
+
+/**
+ * 입력: 없음. 출력: 관심사 저장 Promise.
+ * 역할: 선택을 서버에 저장한 후 추천을 갱신하며 실패한 선택을 저장 완료로 표시하지 않습니다.
+ * 호출 예시: await savePreferences()
+ */
+async function savePreferences() {
+  if (!ensureSessionReady() || state.preferencePending) return;
+  // 변수 의미: 이 저장 요청이 속한 사용자, 세션, 요청 순번입니다.
+  const token = state.accessToken;
+  const version = state.sessionVersion;
+  const requestId = ++state.preferenceRequestId;
+  // 변수 의미: 저장 버튼을 누른 순간의 관심사입니다.
+  const categories = [...state.interestDraft];
+  state.preferencePending = true;
+  state.preferenceMessage = "관심사를 저장하고 있습니다.";
+  renderPlanningSettings();
+  try {
+    // 변수 의미: 서버 저장 결과 또는 서버 저장이 없는 미리보기 값입니다.
+    const payload = IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW
+      ? { preference: { categories, isConfigured: true } }
+      : await fetchJson("/api/me/preferences", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categories }),
+      });
+    if (!isCurrentSession(token, version) || requestId !== state.preferenceRequestId) return;
+    state.preference = normalizePreference(payload.preference);
+    state.interestDraft = [...state.preference.categories];
+    state.interestDirty = false;
+    state.preferenceMessage = IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW
+      ? "미리보기에서만 적용했습니다. 계정에는 저장되지 않습니다."
+      : "관심사를 저장했습니다. 추천에 반영했어요.";
+    await Promise.allSettled([loadRecommendations(), loadAttractions()]);
+  } catch (error) {
+    if (!isCurrentSession(token, version) || requestId !== state.preferenceRequestId) return;
+    state.preferenceMessage = "관심사 저장에 실패했습니다. 선택을 확인한 뒤 다시 저장해 주세요.";
+  } finally {
+    if (isCurrentSession(token, version) && requestId === state.preferenceRequestId) {
+      state.preferencePending = false;
+      renderPlanningSettings();
+    }
+  }
+}
+
+/**
+ * 입력: nearby 또는 planning. 출력: 없음.
+ * 역할: GPS 권한을 자동 요청하지 않고 추천 기준을 전환합니다.
+ * 호출 예시: setRecommendationMode("planning")
+ */
+function setRecommendationMode(mode) {
+  if (!ensureSessionReady() || !["nearby", "planning"].includes(mode)) return;
+  state.locationRequestId += 1;
+  state.recommendationMode = mode;
+  state.planningMessage = mode === "planning" ? "계획할 지역을 고르면 주변 퀘스트를 볼 수 있어요." : "내 위치로 추천 버튼을 누르면 GPS 위치를 사용합니다.";
+  renderPlanningSettings();
+  loadRecommendations();
+}
+
+/**
+ * 입력: 위도·경도·이름을 가진 위치와 퀘스트 화면 이동 여부. 출력: 유효한 적용 여부.
+ * 역할: 지도, 주소, 거점, 좌표 입력을 같은 여행 계획 상태로 적용합니다.
+ * 호출 예시: setPlanningLocation({lat:36.35,lng:127.38,label:"여행 시작점"}, true)
+ */
+function setPlanningLocation(location, openQuests = false) {
+  // 변수 의미: 검증할 숫자 좌표입니다.
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  if (location.lat === "" || location.lng === "" || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    state.planningMessage = "위도는 -90~90, 경도는 -180~180 사이의 숫자로 입력해 주세요.";
+    renderPlanningSettings();
+    return false;
+  }
+  if (!ensureSessionReady()) return false;
+  state.locationRequestId += 1;
+  state.addressRequestId += 1;
+  state.addressPending = false;
+  state.recommendationMode = "planning";
+  state.plannedLocation = { lat, lng, label: String(location.label || "선택한 계획 위치") };
+  state.planningInputLocationKey = "";
+  state.planningMessage = `${state.plannedLocation.label} 주변 퀘스트를 조회합니다. 완료 인증은 현장 GPS가 필요합니다.`;
+  state.addressResults = [];
+  renderPlanningSettings();
+  loadRecommendations();
+  if (openQuests) setActiveView("quests");
+  return true;
+}
+
+/**
+ * 입력: 없음. 출력: 주소 검색 Promise.
+ * 역할: 기존 지도 서버 프록시로 주소를 검색하며 지도 장애에는 대체 입력을 안내합니다.
+ * 호출 예시: await searchPlanningAddress()
+ */
+async function searchPlanningAddress() {
+  if (!ensureSessionReady()) return;
+  // 변수 의미: 사용자가 입력한 검색어입니다.
+  const query = select("#planning-address")?.value.trim() || "";
+  if (!query) {
+    state.planningMessage = "도로명이나 지번 주소를 입력해 주세요.";
+    renderPlanningSettings();
+    return;
+  }
+  // 변수 의미: 현재 사용자와 주소 검색 순번입니다.
+  const token = state.accessToken;
+  const version = state.sessionVersion;
+  const requestId = ++state.addressRequestId;
+  state.addressPending = true;
+  state.addressResults = [];
+  state.planningMessage = "주소를 검색하고 있습니다.";
+  renderPlanningSettings();
+  try {
+    // 변수 의미: NAVER 주소 검색 프록시 응답입니다.
+    const payload = await fetchJson(`/api/naver-map/geocode?${new URLSearchParams({ query })}`);
+    if (!isCurrentSession(token, version) || requestId !== state.addressRequestId) return;
+    state.addressResults = (payload.addresses || []).map((address) => ({
+      lat: Number(address.y), lng: Number(address.x), label: address.roadAddress || address.jibunAddress || query,
+    })).filter((location) => Number.isFinite(location.lat) && Number.isFinite(location.lng));
+    state.planningMessage = state.addressResults.length ? "추천 기준으로 사용할 주소를 선택해 주세요." : "주소 검색 결과가 없습니다. 주요 지점이나 좌표 입력을 이용해 주세요.";
+  } catch (error) {
+    if (!isCurrentSession(token, version) || requestId !== state.addressRequestId) return;
+    state.planningMessage = "주소 검색에 연결할 수 없습니다. 주요 지점이나 좌표 입력으로 계속할 수 있어요.";
+  } finally {
+    if (isCurrentSession(token, version) && requestId === state.addressRequestId) {
+      state.addressPending = false;
+      renderPlanningSettings();
+    }
+  }
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 관심사, 모드, 기준점 요약을 모든 관련 화면에 동기화합니다.
+ * 호출 예시: renderPlanningSettings()
+ */
+function renderPlanningSettings() {
+  document.querySelectorAll("[data-interest-category]").forEach((input) => {
+    input.checked = state.interestDraft.includes(input.dataset.interestCategory);
+    input.disabled = state.preferencePending;
+  });
+  // 변수 의미: 관심사 안내와 저장 버튼입니다.
+  const guidance = select("#interest-guidance");
+  const message = select("#interest-message");
+  const saveButton = select("#save-interests-button");
+  if (guidance) guidance.textContent = state.preference.isConfigured
+    ? "관심사를 여러 개 고를 수 있어요. 선택 없이 저장하면 모든 주제를 탐색합니다."
+    : "첫 여행인가요? 좋아하는 주제를 골라 보세요. 선택 없이도 시작할 수 있어요.";
+  if (message) message.textContent = state.preferenceMessage;
+  if (saveButton) {
+    saveButton.disabled = state.preferencePending;
+    saveButton.textContent = state.preferencePending ? "저장 중…" : "관심사 저장";
+    saveButton.setAttribute("aria-busy", String(state.preferencePending));
+  }
+  document.querySelectorAll("[data-recommendation-mode]").forEach((button) => {
+    // 변수 의미: 현재 추천 모드와 버튼의 선택 상태입니다.
+    const selected = button.dataset.recommendationMode === state.recommendationMode;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  // 변수 의미: 모드별 입력 패널과 안내문입니다.
+  const planning = select("#planning-controls");
+  const nearby = select("#nearby-guidance");
+  const planningMessage = select("#planning-message");
+  const searchButton = select("#planning-search-button");
+  if (planning) planning.hidden = state.recommendationMode !== "planning";
+  if (nearby) nearby.hidden = state.recommendationMode === "planning";
+  if (planningMessage) planningMessage.textContent = state.planningMessage;
+  if (searchButton) {
+    searchButton.disabled = state.addressPending;
+    searchButton.textContent = state.addressPending ? "검색 중…" : "주소 검색";
+  }
+  // 변수 의미: 현재 추천 기준과 모드 요약입니다.
+  const location = getRecommendationLocation();
+  const summary = `${state.recommendationMode === "planning" ? "여행 계획" : "내 주변"} · ${location.label}`;
+  document.querySelectorAll("[data-recommendation-summary]").forEach((element) => { element.textContent = summary; });
+  // 변수 의미: 선택한 기준점에 맞게 동기화할 좌표 입력입니다.
+  const latitude = select("#planning-latitude");
+  const longitude = select("#planning-longitude");
+  // 변수 의미: 실제 기준점이 달라진 경우에만 입력을 갱신해 작성 중인 좌표를 보존합니다.
+  const locationKey = `${state.plannedLocation.lat}:${state.plannedLocation.lng}`;
+  if (state.planningInputLocationKey !== locationKey) {
+    if (latitude) latitude.value = String(state.plannedLocation.lat);
+    if (longitude) longitude.value = String(state.plannedLocation.lng);
+    state.planningInputLocationKey = locationKey;
+  }
+  // 변수 의미: 현재 기준점에 해당하는 주요 지점 선택입니다.
+  const preset = select("#planning-preset");
+  const presetIndex = PLANNING_PRESETS.findIndex((item) => item.lat === state.plannedLocation.lat && item.lng === state.plannedLocation.lng);
+  if (preset) preset.value = presetIndex < 0 ? "" : String(presetIndex);
+  // 변수 의미: 검색 결과를 선택 버튼으로 표시하는 컨테이너입니다.
+  const results = select("#planning-address-results");
+  if (results) {
+    results.replaceChildren();
+    state.addressResults.forEach((address) => {
+      // 변수 의미: 해당 주소를 추천 기준점으로 적용하는 버튼입니다.
+      const button = createElement("button", "map-secondary-button planning-address-result", address.label);
+      button.type = "button";
+      button.addEventListener("click", () => setPlanningLocation(address));
+      results.append(button);
+    });
+  }
+  // 변수 의미: 지도의 계획 선택 도움말과 화면 제목입니다.
+  const mapHint = select("#map-planning-hint");
+  const mapTitle = select("#map-title");
+  if (mapHint) mapHint.textContent = state.recommendationMode === "planning"
+    ? "NAVER 지도 빈 곳을 누르면 계획 위치가 바뀝니다. 지도 연결이 없으면 추천 설정의 주요 지점·좌표 입력을 사용하세요."
+    : "여행 전에 다른 지역을 살펴보려면 추천 설정에서 여행 계획 모드를 선택하세요.";
+  if (mapTitle) mapTitle.textContent = state.recommendationMode === "planning" ? "계획 위치 주변 퀘스트" : "내 주변 퀘스트";
+}
+
+/**
+ * 입력: 강제 새로고침 여부. 출력: 대전 관광지 조회 Promise.
+ * 역할: 좌표 없이 관심사 기반 관광지를 조회하고 이전 세션 응답은 무시합니다.
+ * 호출 예시: await loadAttractions(true)
+ */
+async function loadAttractions(forceRefresh = false) {
+  // 변수 의미: 조회가 속한 사용자와 요청 순번입니다.
+  const token = state.accessToken;
+  const version = state.sessionVersion;
+  const requestId = ++state.attractionRequestId;
+  // 변수 의미: GPS를 포함하지 않는 대전 전체 조회 조건입니다.
+  const query = new URLSearchParams({ category: state.attractionCategory });
+  if (forceRefresh) query.set("refresh", "1");
+  state.attractionPending = true;
+  state.attractionMessage = "대전 관광지를 불러오고 있습니다.";
+  renderAttractions();
+  try {
+    if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+      state.attractions = [];
+      state.attractionMessage = "미리보기에서는 대전 전체 관광지를 조회하지 않습니다. 앱 서버에 연결하면 관심사 추천을 볼 수 있어요.";
+      return;
+    }
+    // 변수 의미: 퀘스트 인스턴스를 만들지 않는 관광지 API 응답입니다.
+    const payload = await fetchJson(`/api/places/recommendations?${query}`);
+    if (!isCurrentSession(token, version) || requestId !== state.attractionRequestId) return;
+    state.attractions = Array.isArray(payload.recommendations) ? payload.recommendations : [];
+    // 변수 의미: 대전 관광지의 원천 상태와 부분 조회 안내입니다.
+    const sourceStatus = String(payload.cache?.sourceStatus || "");
+    const attribution = payload.attribution || "관광정보 제공: 한국관광공사(TourAPI)";
+    state.attractionMessage = sourceStatus.startsWith("fallback:")
+      ? `${attribution} · 관광정보 연결을 사용할 수 없어 예시 장소를 표시합니다.`
+      : `${attribution}${sourceStatus.includes("partial") ? " · 일부 관광지를 먼저 불러왔습니다." : ""} · 현재 위치와 관계없이 관심사를 기준으로 추천합니다.`;
+  } catch (error) {
+    if (!isCurrentSession(token, version) || requestId !== state.attractionRequestId) return;
+    state.attractions = [];
+    state.attractionMessage = "대전 관광지를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.";
+  } finally {
+    if (isCurrentSession(token, version) && requestId === state.attractionRequestId) {
+      state.attractionPending = false;
+      renderAttractions();
+    }
+  }
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 거리와 퀘스트 보상 없이 대전 전체 관광지와 관심사 추천 이유를 표시합니다.
+ * 호출 예시: renderAttractions()
+ */
+function renderAttractions() {
+  // 변수 의미: 관광지 카드 목록, 출처 안내, 새로고침 버튼입니다.
+  const list = select("#attraction-list");
+  const message = select("#attraction-message");
+  const refresh = select("#refresh-attractions-button");
+  if (message) message.textContent = state.attractionMessage;
+  if (refresh) refresh.disabled = state.attractionPending;
+  if (!list) return;
+  list.setAttribute("aria-busy", String(state.attractionPending));
+  list.replaceChildren();
+  if (state.attractionPending) {
+    list.append(createElement("p", "empty-message", "관심사에 맞는 대전 관광지를 찾고 있어요."));
+    return;
+  }
+  if (state.attractions.length === 0) {
+    list.append(createElement("p", "empty-message", "표시할 관광지가 없습니다. 다른 카테고리를 선택하거나 다시 불러와 주세요."));
+    return;
+  }
+  state.attractions.forEach((item) => {
+    // 변수 의미: 서버가 반환한 관광지와 표시할 카드입니다.
+    const place = item.place || {};
+    const card = createElement("article", "attraction-card");
+    const category = place.categoryCode || place.category || "all";
+    const title = createElement("h3", "card-title", place.name || place.title || "대전 관광지");
+    const reason = createElement("p", "attraction-reason", item.reason || "대전에서 둘러볼 수 있는 관광지예요.");
+    const button = createElement("button", "secondary-action", "이 장소 주변 퀘스트 보기");
+    const latitude = place.latitude ?? place.lat;
+    const longitude = place.longitude ?? place.lng;
+    button.type = "button";
+    button.disabled = latitude == null || longitude == null || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude));
+    button.addEventListener("click", () => setPlanningLocation({ lat: latitude, lng: longitude, label: title.textContent }, true));
+    card.append(createElement("span", "category-tag", `${getCategoryIcon(category)} ${CATEGORY_LABELS[category] || "관광"}`), title);
+    if (place.address) card.append(createElement("p", "card-place", place.address));
+    card.append(reason, button);
+    list.append(card);
+  });
 }
 
 /**
@@ -3613,72 +4031,83 @@ function renderActionDialog() {
  * 호출 예시: requestLocation()
  */
 function requestLocation() {
-  if (!ensureSessionReady()) {
-    return;
-  }
-
+  if (!ensureSessionReady()) return;
+  // 변수 의미: GPS 요청이 속한 세션과 위치 변경 순번입니다.
+  const token = state.accessToken;
+  const version = state.sessionVersion;
+  const requestId = ++state.locationRequestId;
+  state.planningMessage = "현재 위치를 확인하고 있습니다.";
+  renderPlanningSettings();
   readCurrentPosition({ enableHighAccuracy: true, timeout: 7000, maximumAge: 300000 })
     .then((position) => {
+      if (!isCurrentSession(token, version) || requestId !== state.locationRequestId) return;
       state.location = normalizeMeasuredLocation(position);
-      syncNaverPositionMarker();
-      renderRecommendationMeta();
+      state.recommendationMode = "nearby";
+      state.planningMessage = "현재 위치를 추천 기준으로 적용했습니다.";
+      renderPlanningSettings();
       loadRecommendations();
     })
     .catch(() => {
-      state.location = { ...FALLBACK_LOCATION, label: "위치 권한 거부, 대전광역시청 기준" };
-      renderRecommendationMeta();
-      loadRecommendations();
+      if (!isCurrentSession(token, version) || requestId !== state.locationRequestId) return;
+      state.planningMessage = "현재 위치를 확인하지 못했습니다. 기존 기준점을 유지합니다. 여행 계획 모드는 GPS 없이 사용할 수 있어요.";
+      renderPlanningSettings();
+      updateSystemStatus(state.apiHealthy, "위치 확인 실패 · 계획 모드 사용 가능");
     });
 }
 
 /**
  * 입력: 강제 새로고침 여부.
  * 출력: 추천 목록 로드 Promise.
- * 역할: 추천 API를 호출하고 실패 시 목업 데이터를 사용한다.
+ * 역할: 추천 API를 호출하며 정상 빈 결과와 연결 실패를 구분합니다.
  * 호출 예시: await loadRecommendations(true)
  */
 async function loadRecommendations(forceRefresh = false) {
-  // 추천 API에 보낼 쿼리 문자열입니다.
+  // 변수 의미: 응답이 현재 사용자와 추천 조건의 것인지 판별하는 정보입니다.
+  const token = state.accessToken;
+  const version = state.sessionVersion;
+  const requestId = ++state.recommendationRequestId;
+  // 변수 의미: 현재 추천 기준점과 API 쿼리입니다.
+  const location = getRecommendationLocation();
   const query = new URLSearchParams({
-    lat: String(state.location.lat),
-    lng: String(state.location.lng),
-    category: state.selectedCategory,
+    lat: String(location.lat), lng: String(location.lng), category: state.selectedCategory,
+    mode: state.recommendationMode,
   });
-  if (forceRefresh) {
-    query.set("refresh", "1");
-  }
-
+  if (forceRefresh) query.set("refresh", "1");
+  state.recommendationPending = true;
+  state.recommendations = [];
+  renderHomeRecommendations();
+  renderHomeMetrics();
+  renderQuestBoard();
+  renderRecommendations();
+  renderMapView();
   try {
-    // 추천 API의 JSON 응답입니다.
-    const payload = await fetchJson(`/api/recommendations?${query.toString()}`);
-    // 정규화한 추천 목록입니다.
-    const recommendations = unwrapList(payload).map(normalizeRecommendation);
-
-    if (recommendations.length === 0) {
-      throw new Error("추천 결과 없음");
+    if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+      state.recommendations = FALLBACK_RECOMMENDATIONS.map(normalizeRecommendation);
+      state.dataSource = "fallback";
+      return;
     }
-
-    state.recommendations = recommendations;
+    // 변수 의미: 추천 API의 JSON 응답이며 빈 배열도 정상 결과입니다.
+    const payload = await fetchJson(`/api/recommendations?${query}`);
+    if (!isCurrentSession(token, version) || requestId !== state.recommendationRequestId) return;
+    state.recommendations = unwrapList(payload).map(normalizeRecommendation);
     state.dataSource = "api";
     state.recommendationMeta = normalizeRecommendationMeta(payload);
   } catch (error) {
-    state.recommendations = [...FALLBACK_RECOMMENDATIONS];
-    state.dataSource = "fallback";
-    state.recommendationMeta = {
-      sourceStatus: "fallback:client_error",
-      cacheHit: false,
-      attribution: "관광정보 제공: 한국관광공사(TourAPI)",
-      fetchedAt: "",
-      expiresAt: "",
-    };
+    if (!isCurrentSession(token, version) || requestId !== state.recommendationRequestId) return;
+    state.recommendations = [];
+    state.dataSource = "error";
+  } finally {
+    if (isCurrentSession(token, version) && requestId === state.recommendationRequestId) {
+      state.recommendationPending = false;
+      renderPlanningSettings();
+      renderRecommendationMeta();
+      renderHomeMetrics();
+      renderHomeRecommendations();
+      renderRecommendations();
+      renderQuestBoard();
+      renderMapView();
+    }
   }
-
-  renderRecommendationMeta();
-  renderHomeMetrics();
-  renderHomeRecommendations();
-  renderRecommendations();
-  renderQuestBoard();
-  renderMapView();
 }
 
 /**
@@ -3764,11 +4193,21 @@ async function handleQuestAction(instanceId, action) {
  * 호출 예시: await loadUser()
  */
 async function loadUser() {
+  // 변수 의미: 사용자와 선호도 요청의 순서를 검증할 시작 상태입니다.
+  const token = state.accessToken;
+  const version = state.sessionVersion;
+  const requestId = ++state.userRequestId;
+  const preferenceId = state.preferenceRequestId;
   try {
     // 사용자 API 응답입니다.
     const payload = await fetchJson("/api/me");
     // 사용자 응답이 data로 래핑된 경우의 실제 본문입니다.
     const user = payload.data || payload.user || payload;
+    if (!isCurrentSession(token, version) || requestId !== state.userRequestId) return;
+    if (preferenceId === state.preferenceRequestId && !state.preferencePending) {
+      state.preference = normalizePreference(user.preference);
+      if (!state.interestDirty) state.interestDraft = [...state.preference.categories];
+    }
 
     // 레벨 진행도 응답 객체입니다.
     const level = user.level || user.levelProgress || {};
@@ -3792,6 +4231,7 @@ async function loadUser() {
       selectedGgumdoriName: user.selectedGgumdoriName || FALLBACK_USER.selectedGgumdoriName,
     };
   } catch (error) {
+    if (!isCurrentSession(token, version) || requestId !== state.userRequestId) return;
     state.user = { ...FALLBACK_USER };
   }
 }
@@ -3930,8 +4370,15 @@ async function loadHealth() {
  * 호출 예시: await loadInitialData(true)
  */
 async function loadInitialData(forceRefresh = false) {
+  if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+    await Promise.allSettled([loadRecommendations(forceRefresh), loadAttractions(forceRefresh)]);
+    updateSystemStatus(false, "화면 체험 모드");
+    renderAll();
+    return;
+  }
   await Promise.allSettled([loadHealth(), loadUser(), loadBadges(), loadNotes(), loadGgumdori(), loadMapConfig()]);
-  await loadRecommendations(forceRefresh);
+  if (!state.accessToken) return;
+  await Promise.allSettled([loadRecommendations(forceRefresh), loadAttractions(forceRefresh)]);
   renderAll();
 }
 
@@ -3942,6 +4389,7 @@ async function loadInitialData(forceRefresh = false) {
  * 호출 예시: bindEvents()
  */
 function bindEvents() {
+  bindPlanningEvents();
   // 위치 권한 요청 버튼입니다.
   const locationButton = select("#use-location-button");
 
@@ -4057,6 +4505,59 @@ function bindEvents() {
       closeActionDialog();
     }
   });
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 관심사, 여행 위치 선택, 대전 관광지 입력을 기존 화면 이벤트에 연결합니다.
+ * 호출 예시: bindPlanningEvents()
+ */
+function bindPlanningEvents() {
+  document.querySelectorAll("[data-interest-category]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.interestDraft = [...document.querySelectorAll("[data-interest-category]:checked")].map((item) => item.dataset.interestCategory);
+      state.interestDirty = true;
+      state.preferenceMessage = "선택한 관심사를 저장하면 추천에 반영됩니다.";
+      renderPlanningSettings();
+    });
+  });
+  select("#save-interests-button")?.addEventListener("click", savePreferences);
+  document.querySelectorAll("[data-recommendation-mode]").forEach((button) => {
+    button.addEventListener("click", () => setRecommendationMode(button.dataset.recommendationMode));
+  });
+  // 변수 의미: 주요 여행 지점을 고르는 셀렉트입니다.
+  const preset = select("#planning-preset");
+  if (preset) {
+    PLANNING_PRESETS.forEach((location, index) => {
+      // 변수 의미: GPS 없이 선택할 수 있는 여행 기준점 옵션입니다.
+      const option = createElement("option", "", location.label);
+      option.value = String(index);
+      preset.append(option);
+    });
+    preset.addEventListener("change", () => {
+      if (preset.value !== "" && PLANNING_PRESETS[Number(preset.value)]) setPlanningLocation(PLANNING_PRESETS[Number(preset.value)]);
+    });
+  }
+  select("#planning-address-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    searchPlanningAddress();
+  });
+  select("#planning-coordinate-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    setPlanningLocation({ lat: select("#planning-latitude").value, lng: select("#planning-longitude").value, label: "직접 지정한 위치" });
+  });
+  document.querySelectorAll("[data-open-planning-settings]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveView("home");
+      select("#recommendation-settings-title")?.focus({ preventScroll: true });
+      select("#recommendation-settings")?.scrollIntoView({ block: "start" });
+    });
+  });
+  select("#attraction-category")?.addEventListener("change", (event) => {
+    state.attractionCategory = event.target.value;
+    loadAttractions();
+  });
+  select("#refresh-attractions-button")?.addEventListener("click", () => loadAttractions(true));
 }
 
 /**

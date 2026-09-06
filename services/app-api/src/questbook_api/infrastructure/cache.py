@@ -127,16 +127,24 @@ class TourPlaceRedisCache:
             pass
         return entry
 
-    def invalidate_for_user(self, user_id: str) -> int:
+    def invalidate_for_user(self, user_id: str, preserve_region_keys: tuple[str, ...] = ()) -> int:
         """
-        입력: 사용자 ID.
+        입력: 사용자 ID와 삭제에서 제외할 권역 키 목록.
         출력: 제거한 캐시 엔트리 수.
-        역할: 지역 또는 카테고리 변경 시 사용자의 기존 캐시를 폐기한다.
+        역할: 사용자의 기존 캐시를 폐기하되 보존 권역의 값과 남은 TTL은 변경하지 않는다.
         호출 예시: removed_count = cache.invalidate_for_user("demo-user")
         """
         try:
+            # 변수 의미: 사용자와 권역을 정확히 인코딩한 삭제 제외 키 접두사다.
+            preserved_prefixes = tuple(
+                f"{KEY_PREFIX}:{key_part(user_id)}:{key_part(region_key)}:"
+                for region_key in preserve_region_keys
+            )
             # 변수 의미: 사용자 키 패턴에 매칭된 키 목록이다.
-            keys = list(self._client.scan_iter(match=self._user_pattern(user_id), count=SCAN_COUNT))
+            keys = [
+                key for key in self._client.scan_iter(match=self._user_pattern(user_id), count=SCAN_COUNT)
+                if not key.startswith(preserved_prefixes)
+            ]
             if not keys:
                 return 0
             return int(self._client.delete(*keys))

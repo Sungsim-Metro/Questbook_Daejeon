@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import math
+from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
-from threading import Lock
+from threading import Lock, Thread
+from time import monotonic
 from typing import Any
 from urllib.parse import unquote, urlencode
 from urllib.request import urlopen
@@ -15,6 +17,16 @@ from questbook_api.domain.models import TourPlaceCandidate
 
 # 변수 의미: TourAPI 위치 기반 목록 조회 엔드포인트다.
 TOURAPI_LOCATION_ENDPOINT = "https://apis.data.go.kr/B551011/KorService2/locationBasedList2"
+# 변수 의미: 대전 전체 관광지를 지역 코드로 조회하는 공식 엔드포인트다.
+TOURAPI_AREA_ENDPOINT = "https://apis.data.go.kr/B551011/KorService2/areaBasedList2"
+# 변수 의미: TourAPI 지역 코드 체계의 대전광역시 값이다.
+DAEJEON_AREA_CODE = "3"
+# 변수 의미: 대전 전체 조회에서 한 페이지에 요청하는 원천 항목 수다.
+DAEJEON_PAGE_SIZE = 100
+# 변수 의미: 한 번의 사용자 조회에서 허용하는 최대 원천 페이지 수다.
+DAEJEON_MAX_PAGES = 5
+# 변수 의미: 게이트웨이의 10초 제한 안에 응답하기 위한 원천 조회 총 시간 예산이다.
+DAEJEON_FETCH_BUDGET_SECONDS = 7.5
 # 변수 의미: 외부 API 응답 제한 시간 초 단위 값이다.
 UPSTREAM_TIMEOUT_SECONDS = 5
 # 변수 의미: TourAPI 정상 응답 코드다.
@@ -231,9 +243,82 @@ def extract_result_code(payload: dict[str, Any]) -> str:
     역할: HTTP 200이어도 인증키 오류나 서비스 오류이면 fallback으로 전환하게 한다.
     호출 예시: result_code = extract_result_code(payload)
     """
+    if not isinstance(payload, dict) or not isinstance(payload.get("response"), dict):
+        raise ValueError("Invalid TourAPI response envelope")
     # 변수 의미: TourAPI 응답 헤더 딕셔너리다.
-    response_header = payload.get("response", {}).get("header", {})
+    response_header = payload["response"].get("header", {})
+    if not isinstance(response_header, dict):
+        raise ValueError("Invalid TourAPI response header")
     return str(response_header.get("resultCode", "")).strip()
+
+
+def extract_response_body(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    입력: TourAPI JSON 페이로드.
+    출력: 구조를 검증한 응답 본문 딕셔너리.
+    역할: 잘못된 중첩 JSON이 속성 접근 오류로 서버까지 전파되지 않도록 한다.
+    호출 예시: body = extract_response_body(payload)
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("response"), dict):
+        raise ValueError("Invalid TourAPI response envelope")
+    # 변수 의미: 페이징 정보와 장소 목록을 포함하는 응답 본문이다.
+    response_body = payload["response"].get("body")
+    if not isinstance(response_body, dict):
+        raise ValueError("Invalid TourAPI response body")
+    return response_body
+
+
+def extract_response_items(response_body: dict[str, Any]) -> list[Any]:
+    """
+    입력: 구조를 검증한 TourAPI 응답 본문.
+    출력: 빈 값과 단일 항목을 정규화한 원본 항목 목록.
+    역할: 정상 빈 목록은 보존하고 파싱과 페이지 종료 판단에 같은 항목 수를 사용한다.
+    호출 예시: raw_items = extract_response_items(extract_response_body(payload))
+    """
+    # 변수 의미: 빈 문자열이나 null일 수도 있는 원본 items 컨테이너다.
+    items_container = response_body.get("items")
+    if items_container is None or items_container == "":
+        return []
+    if not isinstance(items_container, dict):
+        raise ValueError("Invalid TourAPI items container")
+    # 변수 의미: TourAPI item 목록 또는 단일 item 값이다.
+    raw_items = items_container.get("item")
+    if raw_items is None or raw_items == "":
+        return []
+    if isinstance(raw_items, dict):
+        return [raw_items]
+    if not isinstance(raw_items, list):
+        raise ValueError("Invalid TourAPI item list")
+    return raw_items
+
+
+def read_payload_with_deadline(request_url: str, timeout_seconds: float) -> Any:
+    """
+    입력: 요청 URL과 응답을 기다릴 수 있는 최대 시간.
+    출력: 외부 응답을 JSON으로 변환한 페이로드.
+    역할: 소켓 작업별 제한 외에도 연결과 본문 수신 전체의 대기 시간을 제한한다.
+    호출 예시: payload = read_payload_with_deadline(request_url, 3.5)
+    """
+    # 변수 의미: 네트워크 작업의 결과 또는 예외를 요청 처리 쪽에 전달하는 객체다.
+    result: Future[Any] = Future()
+
+    def read_response() -> None:
+        """
+        입력: 없음.
+        출력: 없음.
+        역할: 클라이언트 상태 변경 없이 원천 호출만 수행하고 결과와 예외를 전달한다.
+        호출 예시: Thread(target=read_response, daemon=True).start()
+        """
+        try:
+            with urlopen(request_url, timeout=timeout_seconds) as response:
+                result.set_result(json.loads(response.read().decode("utf-8")))
+        except Exception as error:
+            result.set_exception(error)
+
+    # 변수 의미: 제한 시간을 지난 소켓 정리가 사용자 응답을 막지 않도록 하는 작업 스레드다.
+    response_worker = Thread(target=read_response, daemon=True)
+    response_worker.start()
+    return result.result(timeout=timeout_seconds)
 
 
 class TourApiClient:
@@ -331,6 +416,102 @@ class TourApiClient:
             return self._fallback_places(latitude, longitude, category_key), "fallback:upstream_error"
         return self._fallback_places(latitude, longitude, category_key), "fallback:empty"
 
+    def fetch_daejeon(self, category_key: str = "all") -> tuple[list[TourPlaceCandidate], str]:
+        """
+        입력: 내부 카테고리 키이며 기본값은 전체를 의미하는 all.
+        출력: 거리 없는 대전 장소 후보 목록과 원천 상태.
+        역할: 대전 지역 목록을 제한된 페이지와 시간 안에 수집하고 일부 조회와 정상 빈 결과를 구별한다.
+        호출 예시: places, source_status = client.fetch_daejeon("science")
+        """
+        # 변수 의미: 외부 조회를 수행할 수 없을 때 사용할 거리 없는 대전 예시 장소다.
+        fallback_places = self._filter_places(list(FALLBACK_PLACES), category_key, strict=True)
+        if not self.service_key:
+            return fallback_places, "fallback:not_configured"
+        if self._is_circuit_open():
+            return fallback_places, "fallback:circuit_open"
+
+        # 변수 의미: 전체 원천 호출에 공유하는 단조 시계 기반 종료 시각이다.
+        deadline = monotonic() + DAEJEON_FETCH_BUDGET_SECONDS
+        # 변수 의미: 원천 식별자를 키로 사용해 페이지 간 중복을 제거한 최소 장소 후보다.
+        places_by_id: dict[str, TourPlaceCandidate] = {}
+        # 변수 의미: 중복 제거 전 실제 수신한 원천 항목 수다.
+        received_item_count = 0
+        # 변수 의미: 적어도 한 페이지의 정상 응답을 수신했는지 여부다.
+        has_successful_page = False
+        # 변수 의미: 정상 완료되기 전 기본으로 사용할 제한 조회 상태다.
+        source_status = "live:partial"
+        # 변수 의미: 1부터 시작하며 최대 호출 횟수를 넘지 않는 페이지 번호다.
+        for page_number in range(1, DAEJEON_MAX_PAGES + 1):
+            # 변수 의미: 이번 호출이 사용할 수 있는 남은 총 대기 시간이다.
+            remaining_seconds = deadline - monotonic()
+            if remaining_seconds <= 0:
+                if not has_successful_page:
+                    return fallback_places, "fallback:upstream_error"
+                break
+            # 내부 테마는 여러 공식 분류에 걸치므로 대전 전체를 조회한 후 기존 규칙으로 분류한다.
+            # 변수 의미: 위치나 분류 코드를 사용하지 않는 대전 지역 기반 요청 파라미터다.
+            query_params = {
+                "serviceKey": self.service_key,
+                "MobileOS": "ETC",
+                "MobileApp": "QuestbookDaejeon",
+                "_type": "json",
+                "areaCode": DAEJEON_AREA_CODE,
+                "numOfRows": str(DAEJEON_PAGE_SIZE),
+                "pageNo": str(page_number),
+                "arrange": "A",
+            }
+            # 변수 의미: 실제 호출할 TourAPI 지역 기반 조회 URL이다.
+            request_url = f"{TOURAPI_AREA_ENDPOINT}?{urlencode(query_params)}"
+            # 변수 의미: 유효한 첫 페이지를 받지 못했을 때 반환할 오류 원인이다.
+            failure_status = "fallback:upstream_error"
+            try:
+                self._record_quota_call()
+                # 변수 의미: 최소 필드로 변환하기 전에 메모리에서만 사용하는 원천 JSON 응답이다.
+                payload = read_payload_with_deadline(request_url, min(UPSTREAM_TIMEOUT_SECONDS, remaining_seconds))
+                # 변수 의미: HTTP 성공 여부와 별도로 검사하는 TourAPI 결과 코드다.
+                result_code = extract_result_code(payload)
+                if result_code != TOURAPI_SUCCESS_RESULT_CODE:
+                    if result_code:
+                        failure_status = f"fallback:result_code_{result_code}"
+                    raise ValueError("TourAPI did not report success")
+                # 변수 의미: 전체 건수와 원천 목록을 검증한 현재 페이지 본문이다.
+                response_body = extract_response_body(payload)
+                # 변수 의미: 잘못된 관광지 필드도 포함하는 원천 행 목록이다.
+                raw_items = extract_response_items(response_body)
+                # 변수 의미: 전체 건수가 제공될 때 사용하는 정수 값이며 없으면 None이다.
+                total_count = response_body.get("totalCount")
+                if total_count is not None:
+                    if isinstance(total_count, bool) or not isinstance(total_count, (int, str)):
+                        raise ValueError("Invalid TourAPI total count")
+                    total_count = int(total_count)
+                    if total_count < 0:
+                        raise ValueError("Invalid TourAPI total count")
+                # 변수 의미: 유효성 검사와 기존 분류 규칙을 통과한 현재 페이지 장소다.
+                for place in self._parse_tourapi_payload(payload):
+                    places_by_id.setdefault(place.content_id, place)
+                received_item_count += len(raw_items)
+                has_successful_page = True
+                self._record_success()
+                if (
+                    total_count is not None and received_item_count >= total_count
+                    or total_count is None and len(raw_items) < DAEJEON_PAGE_SIZE
+                ):
+                    source_status = "live"
+                    break
+                if not raw_items:
+                    break
+                continue
+            except HTTPError as error:
+                if 400 <= error.code < 500:
+                    failure_status = "fallback:upstream_4xx"
+            except (URLError, TimeoutError, ValueError, TypeError):
+                pass
+            self._record_failure()
+            if not has_successful_page:
+                return fallback_places, failure_status
+            break
+        return self._filter_places(list(places_by_id.values()), category_key, strict=True), source_status
+
     def status(self) -> dict[str, Any]:
         """
         입력: 없음.
@@ -418,9 +599,7 @@ class TourApiClient:
         호출 예시: places = self._parse_tourapi_payload(payload)
         """
         # 변수 의미: TourAPI item 목록 또는 단일 item 값이다.
-        raw_items = payload.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-        if isinstance(raw_items, dict):
-            raw_items = [raw_items]
+        raw_items = extract_response_items(extract_response_body(payload))
 
         # 변수 의미: 정규화된 장소 후보 목록이다.
         places: list[TourPlaceCandidate] = []
@@ -428,9 +607,9 @@ class TourApiClient:
             if not isinstance(raw_item, dict):
                 continue
             # 변수 의미: TourAPI contentId 값이다.
-            content_id = str(raw_item.get("contentid", "")).strip()
+            content_id = str(raw_item.get("contentid") or "").strip()
             # 변수 의미: 관광지 제목이다.
-            title = str(raw_item.get("title", "")).strip()
+            title = str(raw_item.get("title") or "").strip()
             try:
                 # 변수 의미: TourAPI 경도 값이다.
                 longitude = float(raw_item.get("mapx"))
@@ -438,7 +617,14 @@ class TourApiClient:
                 latitude = float(raw_item.get("mapy"))
             except (TypeError, ValueError):
                 continue
-            if not content_id or not title:
+            if (
+                not content_id
+                or not title
+                or not math.isfinite(latitude)
+                or not math.isfinite(longitude)
+                or not -90 <= latitude <= 90
+                or not -180 <= longitude <= 180
+            ):
                 continue
             # 변수 의미: 내부 카테고리 코드와 이름이다.
             category_code, category_name = map_tourapi_category(raw_item)
@@ -466,15 +652,21 @@ class TourApiClient:
         """
         return self._filter_places(with_distances(FALLBACK_PLACES, latitude, longitude), category_key)
 
-    def _filter_places(self, places: list[TourPlaceCandidate], category_key: str) -> list[TourPlaceCandidate]:
+    def _filter_places(
+        self,
+        places: list[TourPlaceCandidate],
+        category_key: str,
+        *,
+        strict: bool = False,
+    ) -> list[TourPlaceCandidate]:
         """
-        입력: 장소 후보 목록과 카테고리 키.
+        입력: 장소 후보 목록과 카테고리 키, 불일치 시 빈 목록을 보존할지 여부.
         출력: 카테고리 조건이 적용된 장소 후보 목록.
         역할: 사용자가 선택한 관광 카테고리를 추천 후보에 반영한다.
         호출 예시: filtered = self._filter_places(places, "science")
         """
-        if category_key in {"", "all", "recommended"}:
+        if category_key == "all" or not strict and category_key in {"", "recommended"}:
             return places
         # 변수 의미: 선택 카테고리와 일치하는 장소 목록이다.
         filtered_places = [place for place in places if place.category_code == category_key]
-        return filtered_places or places
+        return filtered_places if strict else filtered_places or places

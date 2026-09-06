@@ -82,8 +82,12 @@ CREATE TABLE IF NOT EXISTS preferences (
   categories_json JSONB NOT NULL,
   distance_range_meters INTEGER NOT NULL,
   pace TEXT NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL,
+  categories_set_at TIMESTAMPTZ
 );
+
+ALTER TABLE preferences
+  ADD COLUMN IF NOT EXISTS categories_set_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS level_progress (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -438,7 +442,7 @@ class QuestbookRepository:
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (user_id) DO NOTHING
                 """,
-                (user_id, Jsonb(["nature", "science", "downtown"]), 5000, "보통", current_time),
+                (user_id, Jsonb([]), 5000, "보통", current_time),
             )
             self._connection.execute(
                 """
@@ -673,7 +677,7 @@ class QuestbookRepository:
                 """
                 SELECT u.id, u.nickname, u.avatar, u.created_at, u.last_active_at,
                        lp.current_level, lp.current_xp, lp.total_xp, lp.next_level_required_xp,
-                       p.categories_json, p.distance_range_meters, p.pace
+                       p.categories_json, p.distance_range_meters, p.pace, p.categories_set_at
                 FROM users u
                 JOIN level_progress lp ON lp.user_id = u.id
                 JOIN preferences p ON p.user_id = u.id
@@ -711,6 +715,7 @@ class QuestbookRepository:
                     "categories": row["categories_json"],
                     "distanceRangeMeters": row["distance_range_meters"],
                     "pace": row["pace"],
+                    "isConfigured": row["categories_set_at"] is not None,
                 },
                 "stats": {
                     "completedQuestCount": completion_count,
@@ -718,6 +723,27 @@ class QuestbookRepository:
                 },
                 "consent": self.get_user_consent(user_id),
             }
+
+    def update_preferences(self, user_id: str, categories: list[str]) -> dict[str, Any]:
+        """
+        입력: 사용자 ID와 서비스에서 검증한 관심 카테고리 목록.
+        출력: 저장한 사용자 선호도.
+        역할: 기존 거리와 속도 설정을 유지하며 명시적 관심사 저장 시각을 기록한다.
+        호출 예시: preference = repository.update_preferences("demo-user", ["nature"])
+        """
+        with self._lock, self._connection.transaction():
+            self.ensure_user(user_id)
+            # 변수 의미: 관심사를 명시적으로 저장한 현재 시각이다.
+            current_time = now_iso()
+            self._connection.execute(
+                """
+                UPDATE preferences
+                SET categories_json = %s, categories_set_at = %s, updated_at = %s
+                WHERE user_id = %s
+                """,
+                (Jsonb(categories), current_time, current_time, user_id),
+            )
+            return self.get_user(user_id)["preference"]
 
     def get_category_codes(self) -> list[str]:
         """

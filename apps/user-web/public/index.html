@@ -15,8 +15,8 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='20' fill='%2303c75a'/%3E%3Cpath d='M25 22h38a8 8 0 0 1 8 8v44H28a8 8 0 0 1-8-8V27a5 5 0 0 1 5-5Z' fill='%23fffaf0'/%3E%3Cpath d='M34 36h26M34 48h19M34 60h23' stroke='%230a8f48' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="../src/styles.css?v=20260904-4" />
-    <link rel="stylesheet" href="../src/retro-theme.css?v=20260904-4" />
+    <link rel="stylesheet" href="../src/styles.css?v=20260906-2" />
+    <link rel="stylesheet" href="../src/retro-theme.css?v=20260906-2" />
   </head>
   <body data-active-view="home">
     <a class="skip-link" href="#main-content">본문으로 이동</a>
@@ -81,6 +81,73 @@
               </div>
             </section>
 
+            <section class="planning-settings" id="recommendation-settings" aria-labelledby="recommendation-settings-title">
+              <div class="planning-section-heading">
+                <div>
+                  <p class="page-kicker">나에게 맞는 대전 여행</p>
+                  <h2 class="section-title" id="recommendation-settings-title" tabindex="-1">추천 설정</h2>
+                </div>
+                <span class="planning-label">여행 전에도 OK</span>
+              </div>
+              <fieldset class="interest-fieldset">
+                <legend>좋아하는 여행 주제</legend>
+                <p class="planning-help" id="interest-guidance">좋아하는 주제를 여러 개 골라 보세요. 선택 없이도 시작할 수 있어요.</p>
+                <div class="interest-options">
+                  <label class="interest-option"><input type="checkbox" data-interest-category="nature" /><span>🌿 자연</span></label>
+                  <label class="interest-option"><input type="checkbox" data-interest-category="science" /><span>🔭 과학</span></label>
+                  <label class="interest-option"><input type="checkbox" data-interest-category="downtown" /><span>🏙️ 원도심</span></label>
+                  <label class="interest-option"><input type="checkbox" data-interest-category="market" /><span>🥐 상권·먹거리</span></label>
+                  <label class="interest-option"><input type="checkbox" data-interest-category="mobility" /><span>🚲 이동</span></label>
+                  <label class="interest-option"><input type="checkbox" data-interest-category="nightview" /><span>🌉 야경</span></label>
+                </div>
+                <button type="button" class="secondary-action" id="save-interests-button">관심사 저장</button>
+                <p class="planning-help" id="interest-message" aria-live="polite"></p>
+              </fieldset>
+              <div class="recommendation-mode-group" role="group" aria-label="퀘스트 추천 기준">
+                <button type="button" class="planning-mode-button is-active" data-recommendation-mode="nearby" aria-pressed="true"><strong>내 주변</strong><span>현재 위치에서 탐험</span></button>
+                <button type="button" class="planning-mode-button" data-recommendation-mode="planning" aria-pressed="false"><strong>여행 계획</strong><span>가고 싶은 곳 먼저 탐색</span></button>
+              </div>
+              <p class="planning-reference" data-recommendation-summary>내 주변 · 대전광역시청 기준</p>
+              <p class="planning-help" id="nearby-guidance">내 위치로 추천 버튼을 누르면 현재 GPS 위치를 사용합니다. 위치를 확인하기 전에는 대전광역시청 기준으로 추천합니다.</p>
+              <div class="planning-controls" id="planning-controls" hidden>
+                <label class="planning-field" for="planning-preset"><span>대전 주요 지점</span><select id="planning-preset"><option value="">주요 지점 선택</option></select></label>
+                <form id="planning-address-form" class="planning-form">
+                  <label class="planning-field" for="planning-address"><span>도로명·지번 주소로 찾기</span><input type="search" id="planning-address" placeholder="예: 대전 중구 대종로480번길 15" maxlength="200" /></label>
+                  <button type="submit" class="secondary-action" id="planning-search-button">주소 검색</button>
+                </form>
+                <div class="planning-address-results" id="planning-address-results" aria-live="polite"></div>
+                <details class="planning-coordinate-details">
+                  <summary>좌표로 직접 지정</summary>
+                  <form id="planning-coordinate-form" class="planning-form">
+                    <div class="planning-coordinate-fields">
+                      <label class="planning-field" for="planning-latitude"><span>위도</span><input type="number" id="planning-latitude" min="-90" max="90" step="any" required inputmode="decimal" /></label>
+                      <label class="planning-field" for="planning-longitude"><span>경도</span><input type="number" id="planning-longitude" min="-180" max="180" step="any" required inputmode="decimal" /></label>
+                    </div>
+                    <button type="submit" class="secondary-action">이 좌표로 추천</button>
+                  </form>
+                </details>
+                <button type="button" class="map-secondary-button" data-view-target="map">지도에서 계획 위치 고르기 →</button>
+                <p class="planning-help">GPS 권한 없이 계획할 수 있어요. 퀘스트 완료는 장소에 도착한 뒤 현장 GPS로 인증합니다.</p>
+              </div>
+              <p class="planning-help" id="planning-message" aria-live="polite"></p>
+            </section>
+
+            <section class="attractions-section" aria-labelledby="attractions-title">
+              <div class="planning-section-heading">
+                <div>
+                  <p class="page-kicker">관심사로 발견하는 여행지</p>
+                  <h2 class="section-title" id="attractions-title">대전 전체 관광지</h2>
+                </div>
+              </div>
+              <p class="planning-help">현재 위치와 관계없이 대전 곳곳을 살펴보세요. 관심사와 맞는 장소를 먼저 보여드려요.</p>
+              <div class="attraction-tools">
+                <label class="planning-field" for="attraction-category"><span>관광지 주제</span><select id="attraction-category"><option value="all">전체</option><option value="nature">자연</option><option value="science">과학</option><option value="downtown">원도심</option><option value="market">상권·먹거리</option><option value="mobility">이동</option><option value="nightview">야경</option></select></label>
+                <button type="button" class="secondary-action" id="refresh-attractions-button">다시 불러오기</button>
+              </div>
+              <div class="attraction-list" id="attraction-list" aria-live="polite"></div>
+              <p class="planning-help" id="attraction-message" aria-live="polite"></p>
+            </section>
+
             <section aria-label="탐험 상태 요약">
               <h2 class="section-title">탐험 상태</h2>
               <div class="metric-grid" id="home-metric-grid"></div>
@@ -128,7 +195,9 @@
             <section class="hero-panel">
               <p class="page-kicker">대전 관광 퀘스트</p>
               <h2 class="page-title" id="quests-title">오늘 수행할 퀘스트를 고르세요</h2>
-              <p class="page-copy">현재 위치와 뱃지 성향을 기준으로 추천 퀘스트를 정렬합니다.</p>
+              <p class="page-copy">선택한 위치와 관심사, 탐험 이력을 바탕으로 퀘스트를 추천합니다.</p>
+              <p class="planning-reference" data-recommendation-summary></p>
+              <button type="button" class="secondary-action" data-open-planning-settings>관심사·추천 위치 바꾸기</button>
             </section>
 
             <section aria-label="퀘스트 유형 필터">
@@ -165,6 +234,8 @@
                 <button class="map-secondary-button" type="button" id="map-location-button">현재 위치</button>
               </div>
               <p class="map-position-status" id="map-copy">대전광역시청 기준 좌표로 추천을 준비합니다.</p>
+              <button type="button" class="map-secondary-button" data-open-planning-settings>추천 설정에서 계획 위치 바꾸기</button>
+              <p class="planning-help" id="map-planning-hint"></p>
             </section>
 
             <section class="map-shell" aria-label="대전 퀘스트 지도">
@@ -263,7 +334,7 @@
       <nav class="bottom-nav" id="bottom-nav" aria-label="주요 화면 이동"></nav>
     </div>
 
-    <script type="module" src="../src/app.js?v=20260904-4"></script>
-    <script src="../src/scroll-fab.js?v=20260904-4"></script>
+    <script type="module" src="../src/app.js?v=20260906-2"></script>
+    <script src="../src/scroll-fab.js?v=20260906-2"></script>
   </body>
 </html>
