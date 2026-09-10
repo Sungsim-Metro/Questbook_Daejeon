@@ -58,12 +58,25 @@ export function playRewardFlash() {
 }
 
 /**
- * 입력: 뱃지 표시 정보.
+ * 입력: 보상 표시 정보.
  * 출력: 연출 노드.
- * 역할: 뱃지, 반짝임, 꿈돌이 cheer, 획득 문구를 한 덩어리로 만든다.
- * 호출 예시: createRewardFx({ name: "초록 탐험가", category: "nature", tier: 1 })
+ * 역할: 뱃지, 반짝임, 꿈돌이 cheer, 고유 꿈돌이, XP, 획득 문구를 한 덩어리로 만든다. (명세 §10 S08)
+ * 호출 예시: createRewardFx({ badgeName: "초록 탐험가", badgeImageRef: "/assets/badge/badge_nature_lv1_64.png" })
  */
-export function createRewardFx({ name = "탐험 뱃지", category = "default", tier = 1 } = {}) {
+export function createRewardFx({
+  name = "탐험 뱃지",
+  category = "default",
+  tier = 1,
+  // 서버가 준 명시적 뱃지 경로입니다. 클라이언트가 경로를 계산하지 않습니다. (명세 §5.1)
+  badgeImageRef = "",
+  // 이 퀘스트에 1:1:1 로 묶인 고유 꿈돌이입니다. (명세 §5.1)
+  ggumdoriName = "",
+  ggumdoriImageRef = "",
+  // 획득 XP와 전체 레벨 진행입니다. (명세 §10 S08)
+  rewardXp = 0,
+  level = 0,
+  levelProgressPercent = 0,
+} = {}) {
   // 연출 전체를 담는 요소입니다.
   const root = document.createElement("div");
   root.className = "reward-fx";
@@ -83,32 +96,80 @@ export function createRewardFx({ name = "탐험 뱃지", category = "default", t
   // 획득한 뱃지 이미지입니다.
   const badge = document.createElement("img");
   badge.className = "badge-reward";
-  badge.src = getBadgeImageSrc(category, tier);
+  // 명시 경로가 있으면 그대로 쓰고, 없을 때만 예전 방식으로 계산합니다.
+  badge.src = badgeImageRef || getBadgeImageSrc(category, tier);
   badge.alt = `${name} 뱃지`;
   // CSS 가 정수 2배(128px)로 키운다. 속성값도 맞춰 두면 CSS 로드 전 흔들림이 없다.
   badge.width = 128;
   badge.height = 128;
   stage.append(badge);
 
+  // 환호하는 꿈돌이와 새로 얻은 고유 꿈돌이를 한 줄에 세웁니다. 발바닥 y축을 맞춥니다.
+  const cast = document.createElement("div");
+  cast.className = "reward-cast";
+
   // 환호하는 꿈돌이 스프라이트입니다.
   const dumdori = document.createElement("div");
   dumdori.className = "dumdori-cheer";
   dumdori.setAttribute("role", "img");
   dumdori.setAttribute("aria-label", "꿈돌이가 환호합니다");
+  cast.append(dumdori);
 
-  // 획득 문구입니다.
+  // 이번에 얻은 고유 컬러 꿈돌이입니다. 완료 전까지 무채색이던 그림을 컬러로 보여 줍니다. (명세 §5.3)
+  if (ggumdoriImageRef) {
+    const ggumdori = document.createElement("img");
+    ggumdori.className = "reward-ggumdori";
+    ggumdori.src = ggumdoriImageRef;
+    ggumdori.alt = `${ggumdoriName || "새 꿈돌이"} 획득`;
+    ggumdori.width = 96;
+    ggumdori.height = 96;
+    cast.append(ggumdori);
+  }
+
+  root.append(stage, cast);
+
+  // 획득 XP와 전체 레벨 진행입니다. 450ms 에 반영합니다. (명세 §10 S08)
+  if (rewardXp > 0 || level > 0) {
+    const xp = document.createElement("div");
+    xp.className = "reward-xp";
+
+    const xpGain = document.createElement("span");
+    xpGain.className = "reward-xp__gain";
+    xpGain.textContent = `+${rewardXp} XP`;
+    xp.append(xpGain);
+
+    if (level > 0) {
+      const xpLevel = document.createElement("span");
+      xpLevel.className = "reward-xp__level";
+      xpLevel.textContent = `Lv.${level}`;
+      xp.append(xpLevel);
+
+      // 전체 레벨 진행 막대입니다.
+      const track = document.createElement("span");
+      track.className = "reward-xp__track";
+      const fill = document.createElement("span");
+      fill.className = "reward-xp__fill";
+      fill.style.setProperty("--p", `${Math.min(100, Math.max(0, levelProgressPercent))}%`);
+      track.append(fill);
+      xp.append(track);
+    }
+
+    root.append(xp);
+  }
+
+  // 획득 문구입니다. 새 꿈돌이와 뱃지를 함께 알립니다. 700ms 에 나옵니다. (명세 §10 S08)
   const label = document.createElement("p");
   label.className = "reward-label";
   // 뱃지 이름 요소입니다.
   const labelName = document.createElement("span");
   labelName.className = "reward-badge-name";
-  labelName.textContent = name;
-  // 뱃지 등급 요소입니다.
+  labelName.textContent = ggumdoriName ? `${ggumdoriName} · ${name}` : name;
+  // 획득 안내 요소입니다.
   const labelTier = document.createElement("span");
   labelTier.className = "reward-badge-tier";
-  labelTier.textContent = `새 뱃지 획득 · Lv.${Math.min(3, Math.max(1, Number(tier) || 1))}`;
+  labelTier.textContent = ggumdoriName ? "새 꿈돌이와 뱃지를 얻었어요" : "새 뱃지 획득";
   label.append(labelName, labelTier);
 
-  root.append(stage, dumdori, label);
+  root.append(label);
   return root;
 }

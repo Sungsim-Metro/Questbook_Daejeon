@@ -53,24 +53,44 @@
           <p class="page-copy">
             추천과 퀘스트 인증을 위해 닉네임, 활동 기록, 현재 위치를 필요한 순간에만 사용합니다.
           </p>
-          <div class="consent-check-list">
-            <label class="consent-check">
-              <input type="checkbox" id="age-confirmed" />
-              <span>만 14세 이상입니다.</span>
-            </label>
-            <label class="consent-check">
-              <input type="checkbox" id="privacy-consent" />
-              <span>개인정보 수집·이용에 동의합니다.</span>
-            </label>
-            <label class="consent-check">
-              <input type="checkbox" id="location-consent" />
-              <span>위치정보 수집·이용에 동의합니다.</span>
-            </label>
+          <!-- 1단계 필수 동의 + 2단계 계정 선택 (명세 §10 S02, §9.5) -->
+          <div id="consent-step">
+            <div class="consent-check-list">
+              <label class="consent-check">
+                <input type="checkbox" id="age-confirmed" />
+                <span>만 14세 이상입니다. (필수)</span>
+              </label>
+              <label class="consent-check">
+                <input type="checkbox" id="terms-consent" />
+                <span>서비스 이용약관에 동의합니다. (필수)</span>
+              </label>
+              <label class="consent-check">
+                <input type="checkbox" id="privacy-consent" />
+                <span>개인정보 수집·이용에 동의합니다. (필수)</span>
+              </label>
+              <label class="consent-check">
+                <input type="checkbox" id="location-consent" />
+                <span>위치기반서비스 이용약관에 동의합니다. (필수)</span>
+              </label>
+            </div>
+            <button class="primary-action" type="button" id="demo-login-button">비회원으로 시작</button>
+            <div class="oauth-login-list">
+              <button class="social-login-button" type="button" id="naver-login-button">네이버로 시작</button>
+              <button class="social-login-button" type="button" id="google-login-button">구글로 시작</button>
+            </div>
+            <p class="data-note">비회원도 퀘스트·도감·촬영을 모두 쓸 수 있고, 나중에 계정을 연결하면 기록을 그대로 가져갑니다.</p>
           </div>
-          <button class="primary-action" type="button" id="demo-login-button">비회원으로 시작</button>
-          <div class="oauth-login-list">
-            <button class="social-login-button" type="button" id="naver-login-button">네이버로 시작</button>
-            <button class="social-login-button" type="button" id="google-login-button">구글로 시작</button>
+
+          <!-- 3단계 공통 닉네임 설정 (명세 §9.4, §10 S02) -->
+          <div id="nickname-step" hidden>
+            <h3 class="section-title">닉네임을 정해주세요</h3>
+            <label class="px-sr-only" for="nickname-input">닉네임</label>
+            <input type="text" id="nickname-input" maxlength="20" placeholder="닉네임" />
+            <p class="data-note">같은 닉네임을 여러 명이 써도 괜찮아요. 홈에는 닉네임만 표시됩니다.</p>
+            <div class="context-row">
+              <button class="px-button px-button--ghost" type="button" id="nickname-suggest">다시 추천</button>
+              <button class="primary-action" type="button" id="nickname-confirm">이 이름으로 시작</button>
+            </div>
           </div>
           <p class="data-note" id="consent-message" aria-live="polite"></p>
         </section>
@@ -100,6 +120,11 @@
                     계획 모드
                   </button>
                 </div>
+                <!-- 계획 모드일 때만 보이는 지속 라벨입니다. (명세 §6.3) -->
+                <span class="plan-flag" id="home-plan-flag">
+                  <span class="px-icon px-icon--sm" aria-hidden="true">event</span>
+                  계획 중
+                </span>
                 <span class="context-pill" id="home-weather-pill">
                   <span class="px-icon px-icon--sm" aria-hidden="true">wb_sunny</span>
                   <span class="px-counter" id="home-weather-text">날씨 확인 중</span>
@@ -209,7 +234,28 @@
             <section class="hero-panel">
               <p class="page-kicker">QUEST</p>
               <h2 class="page-title" id="quests-title">퀘스트 탐색</h2>
-              <p class="page-copy">현재 탐색 위치를 기준으로 퀘스트를 정렬합니다.</p>
+              <!-- 현위치 또는 계획 위치·날짜 컨텍스트를 목록과 공유합니다. (명세 §10 S05, §6.1) -->
+              <p class="page-copy" id="quests-context-text">현위치 · 대전광역시청 · 오늘 기준</p>
+              <p class="data-note" id="quests-distance-note" hidden>거리는 계획 위치 기준입니다.</p>
+            </section>
+
+            <section aria-label="퀘스트 보기 방식과 정렬">
+              <div class="quests-toolbar">
+                <div class="chip-row" role="group" aria-label="보기 방식">
+                  <button class="chip-button is-active" type="button" data-quests-view="card" aria-pressed="true">
+                    카드형
+                  </button>
+                  <button class="chip-button" type="button" data-quests-view="list" aria-pressed="false">
+                    목록형
+                  </button>
+                </div>
+                <label class="px-sr-only" for="quests-sort">정렬 기준</label>
+                <select class="px-select" id="quests-sort">
+                  <option value="distance">가까운 순</option>
+                  <option value="duration">짧은 순</option>
+                  <option value="reward">보상 높은 순</option>
+                </select>
+              </div>
             </section>
 
             <section aria-label="퀘스트 카테고리 필터">
@@ -227,6 +273,25 @@
               </div>
             </section>
 
+            <!-- 난이도는 보상 단계가 아니라 예상 복잡도입니다. (명세 §4.2) -->
+            <section aria-label="퀘스트 난이도 필터">
+              <h3 class="section-title">난이도</h3>
+              <div class="chip-row" role="group" aria-label="난이도 선택">
+                <button type="button" class="chip-button is-active" data-quests-difficulty="all" aria-pressed="true">
+                  전체
+                </button>
+                <button type="button" class="chip-button" data-quests-difficulty="discover" aria-pressed="false">
+                  발견
+                </button>
+                <button type="button" class="chip-button" data-quests-difficulty="explore" aria-pressed="false">
+                  탐험
+                </button>
+                <button type="button" class="chip-button" data-quests-difficulty="conquer" aria-pressed="false">
+                  정복
+                </button>
+              </div>
+            </section>
+
             <section aria-label="퀘스트 목록">
               <h3 class="section-title">퀘스트</h3>
               <div class="card-list" id="recommendation-list" aria-live="polite"></div>
@@ -238,10 +303,11 @@
             <section class="hero-panel">
               <p class="page-kicker">COLLECTION</p>
               <h2 class="page-title" id="collection-title">꿈돌이 도감</h2>
-              <p class="page-copy" id="featured-badge-copy">퀘스트를 완료하면 고유 꿈돌이와 뱃지를 함께 얻습니다.</p>
+              <p class="page-copy">퀘스트를 완료하면 고유 꿈돌이와 미니 뱃지를 함께 얻습니다.</p>
               <div class="context-row">
+                <!-- 획득 수 · 전체 수는 서버값을 그대로 씁니다. (명세 §5.2) -->
                 <span class="collection-count" id="collection-count">0 / 0</span>
-                <span class="featured-badge" id="featured-badge-icon" aria-hidden="true"></span>
+                <span class="px-counter" id="collection-featured">대표 미설정</span>
               </div>
             </section>
 
@@ -249,9 +315,20 @@
               <label class="px-sr-only" for="collection-search">도감 검색</label>
               <input type="search" id="collection-search" placeholder="꿈돌이 또는 퀘스트 이름" />
               <div class="chip-row" role="group" aria-label="획득 상태 필터">
-                <button class="chip-button is-active" type="button" data-collection-filter="all">전체</button>
-                <button class="chip-button" type="button" data-collection-filter="earned">획득</button>
-                <button class="chip-button" type="button" data-collection-filter="locked">미획득</button>
+                <button class="chip-button is-active" type="button" data-collection-filter="all" aria-pressed="true">전체</button>
+                <button class="chip-button" type="button" data-collection-filter="earned" aria-pressed="false">획득</button>
+                <button class="chip-button" type="button" data-collection-filter="locked" aria-pressed="false">미획득</button>
+              </div>
+              <div class="chip-row" role="group" aria-label="도감 카테고리 필터">
+                <button class="chip-button is-active" type="button" data-collection-category="all" aria-pressed="true">전체</button>
+                <button class="chip-button" type="button" data-collection-category="science" aria-pressed="false">과학·우주</button>
+                <button class="chip-button" type="button" data-collection-category="bread" aria-pressed="false">빵·미식</button>
+                <button class="chip-button" type="button" data-collection-category="nature" aria-pressed="false">자연·산책</button>
+                <button class="chip-button" type="button" data-collection-category="heritage" aria-pressed="false">원도심·역사</button>
+                <button class="chip-button" type="button" data-collection-category="culture" aria-pressed="false">문화·예술</button>
+                <button class="chip-button" type="button" data-collection-category="market" aria-pressed="false">시장·상권</button>
+                <button class="chip-button" type="button" data-collection-category="tashu" aria-pressed="false">이동·타슈</button>
+                <button class="chip-button" type="button" data-collection-category="festival" aria-pressed="false">축제·이벤트</button>
               </div>
             </section>
 
@@ -259,10 +336,6 @@
               <div class="ggumdori-grid" id="ggumdori-grid" aria-live="polite"></div>
             </section>
 
-            <section aria-label="획득 뱃지">
-              <h3 class="section-title">획득 뱃지</h3>
-              <div class="badge-grid" id="badge-grid" aria-live="polite"></div>
-            </section>
           </section>
 
           <!-- ── S12 마이페이지 (명세 §10 S12·S13) ── -->
@@ -273,30 +346,77 @@
               <div class="drawer-profile" id="me-account-panel"></div>
             </section>
 
+            <section aria-label="계정">
+              <h3 class="section-title">계정</h3>
+              <div class="px-panel" id="me-account-details"></div>
+            </section>
+
+            <!-- 모험 기록은 마이페이지에서만 들어갑니다. (명세 §10 S13) -->
             <section aria-label="나의 모험 기록">
               <h3 class="section-title">나의 모험 기록</h3>
-              <div class="note-list" id="note-list" aria-live="polite"></div>
+              <div class="px-panel">
+                <p class="px-body">완료한 퀘스트를 월별로 모아 봅니다.</p>
+                <button class="px-button px-button--primary" type="button" id="me-record-open">
+                  <span class="px-icon px-icon--sm" aria-hidden="true">history</span>
+                  기록 보기
+                </button>
+              </div>
+              <div class="note-list px-sr-only" id="note-list" aria-live="polite"></div>
             </section>
 
             <section aria-label="설정">
               <h3 class="section-title">설정</h3>
+              <div class="px-panel" id="me-settings"></div>
+            </section>
+
+            <section aria-label="권한">
+              <h3 class="section-title">권한</h3>
+              <div class="px-panel" id="me-permissions"></div>
+            </section>
+
+            <section aria-label="약관과 정책">
+              <h3 class="section-title">약관과 정책</h3>
               <div class="px-panel">
-                <label class="consent-check">
-                  <input type="checkbox" id="setting-reduced-motion" />
-                  <span>모션 줄이기</span>
-                </label>
+                <ul class="policy-list">
+                  <li><a href="/policy/terms.html">서비스 이용약관</a></li>
+                  <li><a href="/policy/privacy.html">개인정보 처리방침</a></li>
+                  <li><a href="/policy/location.html">위치기반서비스 이용약관</a></li>
+                  <li><a href="/policy/oss.html">오픈소스 라이선스</a></li>
+                </ul>
               </div>
             </section>
 
             <section aria-label="정보와 출처">
               <h3 class="section-title">정보</h3>
-              <p class="data-note">관광정보 제공: 한국관광공사(TourAPI)</p>
-              <p class="data-note">영수증 사진은 상호명 확인에만 사용하고 인증 후 원본을 보관하지 않습니다.</p>
+              <div class="px-panel">
+                <p class="data-note">관광정보 제공: 한국관광공사(TourAPI)</p>
+                <p class="data-note">지도: NAVER Maps · 날씨·행사 정보는 각 제공처 표기를 따릅니다.</p>
+                <p class="data-note">영수증 사진은 상호명 확인에만 사용하고 인증 후 원본을 보관하지 않습니다.</p>
+                <p class="data-note">모험가의 수첩 v2.0.0</p>
+              </div>
             </section>
           </section>
         </div>
       </main>
     </div>
+
+    <!-- ── S06 공용 퀘스트 상세 시트. 홈·모험 중·퀘스트가 같은 컴포넌트를 쓴다. ── -->
+    <div class="quest-sheet" id="quest-sheet" hidden></div>
+
+    <!-- ── S10 도감 상세 시트 (명세 §10 S10) ── -->
+    <div class="quest-sheet" id="catalog-sheet" hidden></div>
+
+    <!-- ── S14 날씨 상세 시트 (명세 §10 S14) ── -->
+    <div class="quest-sheet" id="weather-sheet" hidden></div>
+
+    <!-- ── S15 계획 위치·날짜 설정 시트 (명세 §10 S15) ── -->
+    <div class="quest-sheet" id="plan-sheet" hidden></div>
+
+    <!-- ── S11 꿈돌이 2D 촬영 시트 (명세 §10 S11) ── -->
+    <div class="quest-sheet" id="photo-sheet" hidden></div>
+
+    <!-- ── S13 나의 모험 기록 시트 (명세 §10 S13) ── -->
+    <div class="quest-sheet" id="record-sheet" hidden></div>
 
     <!-- ── 우측 상시 책갈피 손잡이와 드로어 (명세 §7.2) ── -->
     <button class="bookmark-handle" type="button" id="bookmark-handle" aria-expanded="false" aria-controls="app-drawer">

@@ -20,6 +20,9 @@
   --px-shadow: 3px 3px 0 #2c1d16;
 
   --px-gold: #fdbc29;
+  /* 계획 모드 강조색입니다. 현위치(금색)와 한눈에 구분되도록 한색을 씁니다. (명세 §6.3) */
+  --px-plan: #2e7d8f;
+  --px-plan-soft: #d7e9ec;
   --px-blue: #2c7be0;
   --px-danger: #d8402a;
   --px-success: #3e9b62;
@@ -51,6 +54,8 @@
   --drawer-width: 288px;
 
   /* 간격은 4px 배수만 사용합니다. */
+  /* 우측 상시 책갈피 손잡이가 차지하는 폭입니다. 본문 여백이 이 값을 씁니다. (명세 §7.2) */
+  --bookmark-handle-width: 34px;
   --u1: 4px;
   --u2: 8px;
   --u3: 12px;
@@ -312,6 +317,9 @@ video,
 .primary-action,
 .secondary-action {
   min-height: var(--touch-min);
+  /* 좁은 칸에서 글자가 접혀 버튼 높이만 커지는 것을 막습니다. */
+  white-space: nowrap;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -807,6 +815,8 @@ html:not(.fonts-icons-ready) .px-icon {
   flex: 1 1 auto;
   inline-size: 100%;
   padding: var(--u3) var(--gutter-page) calc(var(--u12) + var(--safe-bottom));
+  /* 상시 노출되는 책갈피 손잡이가 본문을 덮지 않도록 오른쪽에 자리를 비웁니다. (명세 §7.2) */
+  padding-inline-end: calc(var(--gutter-page) + var(--bookmark-handle-width));
   background: var(--px-paper);
 }
 
@@ -909,6 +919,34 @@ html:not(.fonts-icons-ready) .px-icon {
   gap: var(--u2);
 }
 
+/* 탐색 컨텍스트 줄은 계획 중 라벨이 늘어나도 글자가 접히지 않게 줄을 넘깁니다. */
+.context-bar .context-row {
+  flex-wrap: wrap;
+}
+
+.context-bar .mode-toggle {
+  flex: 0 0 auto;
+}
+
+.context-bar .plan-flag,
+.context-bar .context-pill {
+  flex: 0 1 auto;
+  white-space: nowrap;
+}
+
+/* 계획 날짜와 위치 검색 줄. 입력이 늘어나고 버튼은 제 크기를 지킵니다. */
+#home-plan-controls {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+#home-plan-controls > input[type="date"] {
+  flex: 1 1 150px;
+  inline-size: auto;
+  min-inline-size: 0;
+  min-block-size: var(--touch-min);
+}
+
 /* 현위치 / 계획 모드 토글. */
 .mode-toggle {
   display: inline-flex;
@@ -920,6 +958,7 @@ html:not(.fonts-icons-ready) .px-icon {
 
 .mode-toggle__button {
   min-block-size: 28px;
+  white-space: nowrap;
   padding: var(--u1) var(--u2);
   font-family: var(--font-display);
   font-size: 12px;
@@ -931,7 +970,43 @@ html:not(.fonts-icons-ready) .px-icon {
 
 .mode-toggle__button[aria-pressed="true"] {
   color: var(--px-ink);
-  background: var(--cat-festival);
+  background: var(--px-gold);
+}
+
+/* 계획 모드는 현위치와 다른 색으로 표시합니다. (명세 §6.3) */
+.mode-toggle__button[data-context-mode="planned"][aria-pressed="true"] {
+  color: var(--px-panel);
+  background: var(--px-plan);
+}
+
+/* 계획 모드일 때는 탐색 컨텍스트 전체를 한색으로 물들여 모드를 분명히 합니다. */
+body[data-exploration-mode="planned"] .context-bar {
+  padding: var(--u2);
+  background: var(--px-plan-soft);
+  border: 2px solid var(--px-plan);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+body[data-exploration-mode="planned"] .context-place {
+  border-inline-start: 6px solid var(--px-plan);
+}
+
+/* 계획 중임을 지속 표시하는 라벨입니다. 색 외에 글자로도 알립니다. (명세 §6.3, §3.2) */
+.plan-flag {
+  display: none;
+  align-items: center;
+  gap: var(--u1);
+  padding: var(--u1) var(--u2);
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--px-panel);
+  background: var(--px-plan);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+body[data-exploration-mode="planned"] .plan-flag {
+  display: inline-flex;
 }
 
 .context-pill {
@@ -1023,10 +1098,19 @@ html:not(.fonts-icons-ready) .px-icon {
    11. 대표 꿈돌이와 도감 (§5, §10 S09)
    ──────────────────────────────────────────────── */
 
+/* 프로필 카드는 [그림+글] 행, 진행률 설명, 진행 막대를 세로로 쌓습니다.
+   가로 배치로 두면 .profile-main 격자의 글 칸이 0px 로 눌려 한 글자씩 줄바꿈됩니다. */
 .profile-panel {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--u3);
+}
+
+/* 그림 칸은 실제 그림 크기(96px)에 맞추고 글 칸이 남은 폭을 씁니다. */
+.profile-panel .profile-main {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
 }
 
 /* 대표 꿈돌이는 약 96px. 지면에서 뜨지 않도록 바닥 그림자를 붙입니다. (§3.2) */
@@ -1210,6 +1294,389 @@ html:not(.fonts-icons-ready) .px-icon {
   flex: 1;
 }
 
+.quest-sheet__head {
+  gap: var(--u2);
+}
+
+.quest-sheet__title-group {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.quest-sheet__title-group .px-label {
+  display: block;
+  margin: 0;
+  font-size: 14px;
+  color: var(--px-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quest-sheet__tags {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--u1);
+}
+
+.quest-sheet__close {
+  flex: 0 0 auto;
+  min-inline-size: 36px;
+  min-block-size: 28px;
+  padding: 0 var(--u2);
+  box-shadow: none;
+}
+
+.quest-sheet__eyebrow {
+  display: block;
+  font-size: 10px;
+  color: var(--px-ink-sub);
+}
+
+.quest-sheet__address {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+  padding: var(--u2);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.quest-sheet__address p {
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+/* Clipboard API 가 막힌 환경의 대체 표시. 사용자가 직접 선택해 복사합니다. */
+.quest-sheet__fallback {
+  margin: var(--u2) 0 0;
+  padding: var(--u2);
+  font-family: var(--font-body);
+  font-size: 13px;
+  white-space: pre-wrap;
+  background: var(--px-panel-muted);
+  border: 2px dashed var(--px-outline);
+  user-select: all;
+}
+
+.quest-sheet__message:empty {
+  display: none;
+}
+
+/* 보상 쌍: 미니 뱃지와 꿈돌이를 같은 규격으로 나란히 둡니다. */
+.reward-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--u2);
+}
+
+.reward-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u1);
+  padding: var(--u2);
+  text-align: center;
+  background: var(--px-paper);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+.reward-slot__art {
+  position: relative;
+  inline-size: 56px;
+  block-size: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+}
+
+.reward-slot__art img {
+  inline-size: 48px;
+  block-size: 48px;
+  object-fit: contain;
+}
+
+/* 미획득 보상은 무채색 + 어두운 덮개 + 자물쇠 + 텍스트를 함께 씁니다. (§5.3) */
+.reward-slot.is-locked .reward-slot__art img {
+  filter: grayscale(1) brightness(0.75);
+}
+
+.reward-slot__lock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--px-panel);
+  background: rgba(44, 29, 22, 0.5);
+}
+
+.reward-slot__meta {
+  min-width: 0;
+  inline-size: 100%;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.reward-slot__meta .px-label {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reward-slot__meta .px-body {
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+/* 목록 카드의 요약 행과 미니 뱃지. */
+.card-topline {
+  display: flex;
+  align-items: center;
+  gap: var(--u1);
+  margin-bottom: var(--u1);
+}
+
+.card-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.card-place {
+  margin: 2px 0 var(--u2);
+  font-size: 13px;
+  color: var(--px-ink-sub);
+}
+
+.card-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  font-size: 12px;
+}
+
+.mini-badge {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  padding: 1px var(--u1);
+  background: var(--px-panel-muted);
+  border: 1px solid var(--px-outline);
+}
+
+.mini-badge img {
+  inline-size: 16px;
+  block-size: 16px;
+  object-fit: contain;
+}
+
+.mini-badge__name {
+  font-family: var(--font-display);
+  font-size: 11px;
+  max-inline-size: 9ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 시트가 열린 동안 뒤 본문이 스크롤되지 않게 합니다. */
+body[data-quest-sheet-open="true"] {
+  overflow: hidden;
+}
+
+/* 모험 중 카드. 본문 버튼과 행동 버튼을 세로로 쌓습니다. (명세 §10 S04) */
+.recommendation-card--adventure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+/* 카드 본문 전체가 상세 시트를 여는 버튼입니다. 테두리는 바깥 카드가 갖습니다. */
+.recommendation-card__body {
+  display: block;
+  inline-size: 100%;
+  padding: 0;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.recommendation-card__body:focus-visible {
+  outline: 2px solid var(--px-outline);
+  outline-offset: 2px;
+}
+
+/* 퀘스트를 언제 시작했는지 보여 주는 줄입니다. */
+.card-started {
+  margin: var(--u1) 0 0;
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+/* 모험 중 카드의 주소 복사와 완료 인증 버튼 줄입니다. */
+.recommendation-card--adventure .card-actions {
+  display: flex;
+  gap: var(--u2);
+  padding-block-start: var(--u2);
+  border-block-start: 2px dashed var(--px-outline);
+}
+
+.recommendation-card--adventure .card-actions > .px-button {
+  flex: 1 1 0;
+}
+
+/* 진행 중 퀘스트가 없을 때의 빈 상태입니다. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u2);
+  padding: var(--u4) var(--u3);
+  text-align: center;
+  background: var(--px-panel-muted);
+  border: 2px dashed var(--px-outline);
+}
+
+/* ── S05 퀘스트 탐색: 보기 전환 · 정렬 · 목록형 (명세 §10 S05) ── */
+
+/* 보기 전환 칩과 정렬 선택을 한 줄에 둡니다. 좁으면 접힙니다. */
+.quests-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--u2);
+}
+
+.quests-toolbar .chip-row {
+  flex: 1 1 auto;
+}
+
+/* 정렬 선택은 줄 전체를 차지하지 않게 폭을 줄입니다. */
+.quests-toolbar .px-select {
+  flex: 0 1 auto;
+  inline-size: auto;
+  min-inline-size: 8.5rem;
+}
+
+/* 목록형은 카드형보다 촘촘한 한 줄 목록입니다. */
+.quest-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u1);
+}
+
+.quest-line {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  inline-size: 100%;
+  padding: var(--u2);
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-inline-start: 6px solid var(--cat-color, var(--px-panel-muted));
+  box-shadow: 2px 2px 0 var(--px-outline);
+  cursor: pointer;
+}
+
+.quest-line:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.quest-line:focus-visible {
+  outline: 2px solid var(--px-outline);
+  outline-offset: 2px;
+}
+
+/* 가운데 글 영역입니다. 긴 이름은 잘라 냅니다. */
+.quest-line__main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quest-line__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quest-line__place {
+  font-size: 12px;
+  color: var(--px-ink-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quest-line__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--u1);
+  font-size: 11px;
+}
+
+.quest-line__note {
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+/* 상태 표시는 줄 끝에 고정하고 줄바꿈하지 않습니다. */
+.quest-line > .status-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 목록형 미니 뱃지는 그림만 남기고 이름은 접근성 텍스트로 둡니다. */
+.mini-badge--compact {
+  flex: 0 0 auto;
+  margin-inline-start: 0;
+  padding: 2px;
+}
+
+.mini-badge--compact img {
+  inline-size: 24px;
+  block-size: 24px;
+}
+
+/* 공통 축제 퀘스트의 참여 가능 행사 수 보조 문구입니다. (명세 §11.1) */
+.card-festival-note {
+  margin: var(--u1) 0 0;
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+/* 오프라인 안내는 목록 맨 위에 한 줄로 둡니다. (명세 §13.2) */
+.quest-offline-note {
+  margin: 0 0 var(--u2);
+  padding: var(--u2);
+  background: var(--px-panel-muted);
+  border: 2px dashed var(--px-outline);
+}
+
 /* 수치 3분할 HUD. 거리 / 시간 / 난이도. */
 .stat-row {
   display: grid;
@@ -1382,4 +1849,673 @@ body[data-reduced-motion="true"] .view-panel.is-turning {
 
 body[data-reduced-motion="true"] .app-drawer {
   transition: none;
+}
+
+/* ── S09 꿈돌이 도감 · S10 도감 상세 (명세 §5.3, §5.4, §10 S09·S10) ── */
+
+/* 3열 그리드는 위쪽 .ggumdori-grid 정의를 그대로 씁니다. (명세 §10 S09) */
+
+/* 더 보기 버튼과 빈 문구는 그리드 폭 전체를 씁니다. */
+.ggumdori-grid > .catalog-more,
+.ggumdori-grid > .empty-message {
+  grid-column: 1 / -1;
+}
+
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u1);
+  padding: var(--u2);
+  text-align: center;
+  font: inherit;
+  color: inherit;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-block-start: 6px solid var(--cat-color, var(--px-panel-muted));
+  box-shadow: 2px 2px 0 var(--px-outline);
+  cursor: pointer;
+}
+
+.catalog-card:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.catalog-card:focus-visible {
+  outline: 2px solid var(--px-outline);
+  outline-offset: 2px;
+}
+
+/* 꿈돌이 그림 자리입니다. 정사각형을 유지합니다. */
+.catalog-card__art {
+  position: relative;
+  inline-size: 100%;
+  aspect-ratio: 1 / 1;
+  max-inline-size: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+.catalog-card__art img {
+  inline-size: 84%;
+  block-size: 84%;
+  object-fit: contain;
+}
+
+.catalog-card__placeholder {
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--px-ink-sub);
+}
+
+/* 잠금 카드는 무채색 + 딤 + 자물쇠 + 물음표 + 미획득을 함께 씁니다. (명세 §5.3) */
+.catalog-card.is-locked .catalog-card__art img {
+  filter: grayscale(1) brightness(0.72);
+}
+
+.catalog-card__lock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--px-panel);
+  background: rgba(44, 29, 22, 0.55);
+}
+
+.catalog-card__question {
+  font-family: var(--font-display);
+  font-size: 16px;
+}
+
+/* 대표 꿈돌이는 별표와 대표 텍스트를 함께 표시합니다. (명세 §10 S09) */
+.catalog-card__featured {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 3px;
+  font-size: 10px;
+  color: var(--px-ink);
+  background: var(--px-gold);
+  border: 2px solid var(--px-outline);
+}
+
+.catalog-card__meta {
+  inline-size: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--u1);
+}
+
+.catalog-card__badge {
+  flex: 0 0 auto;
+  inline-size: 16px;
+  block-size: 16px;
+  object-fit: contain;
+}
+
+.catalog-card__name {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-card__state {
+  font-size: 10px;
+  color: var(--px-ink-sub);
+}
+
+.catalog-card.is-locked .catalog-card__state {
+  font-weight: 700;
+}
+
+/* ── S10 도감 상세 ── */
+
+/* 큰 꿈돌이 그림입니다. */
+.catalog-detail__art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 180px;
+  padding: var(--u3);
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+  box-shadow: inset 2px 2px 0 rgba(44, 29, 22, 0.12);
+}
+
+.catalog-detail__art img {
+  max-inline-size: 100%;
+  max-block-size: 200px;
+  object-fit: contain;
+}
+
+/* 미획득은 큰 그림도 무채색으로 보여 줍니다. (명세 §10 S10) */
+.catalog-detail__art.is-locked img {
+  filter: grayscale(1) brightness(0.72);
+}
+
+.catalog-detail__lock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--px-panel);
+  background: rgba(44, 29, 22, 0.45);
+}
+
+.catalog-detail__badge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+}
+
+.catalog-detail__badge {
+  flex: 0 0 auto;
+  inline-size: 48px;
+  block-size: 48px;
+  object-fit: contain;
+}
+
+.catalog-detail__badge-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.catalog-detail__cta > .px-button {
+  inline-size: 100%;
+}
+
+/* 시트가 열린 동안 뒤 본문이 스크롤되지 않게 합니다. */
+body[data-catalog-sheet-open="true"] {
+  overflow: hidden;
+}
+
+/* ── 마이페이지 계정 영역 (명세 §10 S12 계정) ── */
+
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u1);
+  padding-block: var(--u2);
+}
+
+.account-field + .account-field {
+  border-block-start: 2px dashed var(--px-outline);
+}
+
+.account-field__label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+/* 입력과 버튼이 한 줄에 서고, 좁으면 접힙니다. */
+.account-field__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--u2);
+  margin-block-start: var(--u1);
+}
+
+.account-field__controls > input[type="text"] {
+  flex: 1 1 140px;
+  inline-size: auto;
+  min-inline-size: 0;
+  min-block-size: var(--touch-min);
+}
+
+/* 브라우저 데이터 삭제 경고는 눈에 띄게 둡니다. (명세 §9.3) */
+.account-warning {
+  padding: var(--u2);
+  color: var(--px-ink);
+  background: var(--px-panel-muted);
+  border-inline-start: 6px solid var(--px-danger);
+}
+
+.account-message:empty {
+  display: none;
+}
+
+/* 닉네임 단계 입력칸. (명세 §10 S02) */
+#nickname-step .context-row {
+  margin-block-start: var(--u3);
+}
+
+/* ── 날씨 상세 (명세 §10 S14) · 계획 설정 (명세 §10 S15) ── */
+
+/* 시간대별 예보는 가로로 훑어봅니다. */
+.weather-hourly {
+  display: flex;
+  gap: var(--u2);
+  overflow-x: auto;
+  padding-block-end: var(--u1);
+  scrollbar-width: none;
+}
+
+.weather-hourly::-webkit-scrollbar {
+  display: none;
+}
+
+.weather-hourly__cell {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-inline-size: 56px;
+  padding: var(--u2) var(--u1);
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+.weather-hourly__time {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+.weather-hourly__temp {
+  font-family: var(--font-display);
+  font-size: 14px;
+}
+
+.weather-hourly__pop {
+  font-size: 11px;
+  color: var(--px-blue);
+}
+
+/* 날씨 칩은 눌러서 상세를 여는 버튼입니다. */
+#home-weather-pill {
+  cursor: pointer;
+}
+
+#home-weather-pill:focus-visible {
+  outline: 2px solid var(--px-outline);
+  outline-offset: 2px;
+}
+
+/* 계획 위치 검색 결과 목록입니다. */
+.plan-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u1);
+  margin-block-start: var(--u2);
+}
+
+/* 행사 개최 상태 문구는 본문 각주보다 눈에 띄게 둡니다. (명세 §6.5) */
+.event-note {
+  color: var(--px-ink);
+  font-weight: 700;
+}
+
+/* ── 공통 축제 행사 타깃 선택 (명세 §11.1, §10 S06) ── */
+
+.festival-target-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u1);
+  margin-block-start: var(--u2);
+}
+
+.festival-target {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  inline-size: 100%;
+  padding: var(--u2);
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+  cursor: pointer;
+}
+
+/* 선택된 행사는 테두리와 색을 함께 바꿔 색만으로 구분하지 않습니다. (명세 §3.2) */
+.festival-target.is-selected {
+  background: var(--px-gold);
+  border-inline-start: 6px solid var(--px-outline);
+}
+
+.festival-target[disabled] {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.festival-target:focus-visible {
+  outline: 2px solid var(--px-outline);
+  outline-offset: 2px;
+}
+
+.festival-target__main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.festival-target__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.festival-target__venue {
+  font-size: 12px;
+  color: var(--px-ink-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.festival-target__when {
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+.festival-target > .status-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ── S11 꿈돌이 2D 촬영 (명세 §10 S11) ── */
+
+/* 배경 사진과 꿈돌이를 겹치는 무대입니다. */
+.photo-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+.photo-source,
+.photo-result {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.photo-result {
+  object-fit: contain;
+}
+
+.photo-placeholder {
+  padding: var(--u3);
+  text-align: center;
+  color: var(--px-ink-sub);
+}
+
+/* 합성 미리보기의 꿈돌이입니다. 발이 바닥에 닿게 아래에 붙입니다. */
+.photo-overlay {
+  position: absolute;
+  inset-block-end: 4%;
+  translate: -50% 0;
+  inline-size: auto;
+  object-fit: contain;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.photo-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  margin-block-start: var(--u2);
+}
+
+.photo-slider__label {
+  flex: 0 0 4.5rem;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+.photo-slider input[type="range"] {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+/* 결과 화면은 버튼이 셋이라 균등 분할합니다. */
+.photo-cta {
+  display: flex;
+  gap: var(--u2);
+}
+
+.photo-cta > .px-button {
+  flex: 1 1 0;
+  padding-inline: var(--u2);
+}
+
+/* 시트가 열린 동안 뒤 본문이 스크롤되지 않게 합니다. */
+body[data-photo-sheet-open="true"] {
+  overflow: hidden;
+}
+
+/* ── S12 설정·권한 · S13 모험 기록 (명세 §10 S12·S13) ── */
+
+.setting-group + .setting-group {
+  margin-block-start: var(--u3);
+  padding-block-start: var(--u3);
+  border-block-start: 2px dashed var(--px-outline);
+}
+
+.setting-group__title {
+  margin: 0 0 var(--u2);
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--px-ink-sub);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  min-block-size: var(--touch-min);
+}
+
+/* 라벨이 남는 폭을 차지하고 조절 요소는 오른쪽에 붙습니다. */
+.setting-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.setting-row input[type="range"] {
+  flex: 0 1 40%;
+  min-inline-size: 0;
+}
+
+/* 음량 숫자는 자리를 고정해 슬라이더가 흔들리지 않게 합니다. */
+.setting-row__value {
+  flex: 0 0 2.5ch;
+  font-family: var(--font-display);
+  font-size: 12px;
+  text-align: end;
+  color: var(--px-ink-sub);
+}
+
+.setting-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  inline-size: 22px;
+  block-size: 22px;
+}
+
+/* 권한 상태 줄입니다. */
+.permission-row {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  padding-block: var(--u2);
+}
+
+.permission-row + .permission-row {
+  border-block-start: 2px dashed var(--px-outline);
+}
+
+.permission-row__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.permission-row__name {
+  font-family: var(--font-display);
+  font-size: 14px;
+}
+
+.permission-row__purpose {
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+.permission-row > .status-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 약관 목록입니다. */
+.policy-list {
+  margin: 0;
+  padding-inline-start: var(--u4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+.policy-list a {
+  color: var(--px-ink);
+}
+
+/* 월별 기록 묶음입니다. */
+.record-month + .record-month {
+  margin-block-start: var(--u4);
+}
+
+.record-month .quest-line + .quest-line {
+  margin-block-start: var(--u1);
+}
+
+/* 공유 카드. 닉네임·장소·뱃지·꿈돌이만 담습니다. (명세 §10 S13) */
+.share-card {
+  display: flex;
+  align-items: center;
+  gap: var(--u3);
+  margin-block-start: var(--u2);
+  padding: var(--u3);
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+.share-card__art {
+  flex: 0 0 auto;
+  inline-size: 64px;
+  block-size: 64px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.share-card__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-card__name {
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
+.share-card__place {
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+.share-card__badge {
+  align-self: flex-start;
+  margin-block-start: var(--u1);
+  padding: 1px var(--u1);
+  font-size: 11px;
+  background: var(--px-gold);
+  border: 2px solid var(--px-outline);
+}
+
+#record-entry-input {
+  margin-block-start: var(--u2);
+  font-family: var(--font-body);
+}
+
+body[data-record-sheet-open="true"] {
+  overflow: hidden;
+}
+
+/* ── 접근성 보정 (명세 §13.3) ── */
+
+/* 1. 모든 조작은 최소 44x44 입니다. 시각 크기는 그대로 두고 눌리는 범위만 넓힙니다. */
+.mode-toggle__button,
+.profile-customize-link,
+#home-weather-pill,
+.home-sheet__grip {
+  position: relative;
+}
+
+/* 보이는 모양을 키우지 않고 히트 영역만 44px 로 넓힙니다. */
+.mode-toggle__button::after,
+.profile-customize-link::after,
+#home-weather-pill::after,
+.home-sheet__grip::after,
+.scroll-fab::after {
+  content: "";
+  position: absolute;
+  inset-block: 50%;
+  inset-inline: 0;
+  block-size: var(--touch-min);
+  translate: 0 -50%;
+}
+
+/* 시트 손잡이는 얇은 선이라 위아래로 더 넓혀 줍니다. */
+.home-sheet__grip::after {
+  inset-inline: -20%;
+}
+
+/* 2. 본문 성격의 안내 문구는 최소 14px 입니다. 라벨·카운터 같은 보조 표기는 예외입니다. */
+.data-note {
+  font-size: 14px;
+}
+
+.px-body {
+  font-size: 15px;
+}
+
+/* 10. 진행 바는 실제 progressbar 의미를 가집니다. 값은 app.js 가 넣습니다. */
+.progress-bar[role="progressbar"] {
+  display: block;
 }
