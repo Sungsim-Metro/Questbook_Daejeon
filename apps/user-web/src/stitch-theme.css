@@ -1,0 +1,1385 @@
+/* 모험가의 수첩 v2 디자인 시스템.
+   기준: FRONTEND_SPEC.md §3 시각 방향, §12 공통 컴포넌트.
+   Stitch 화면(.questbook/stitch)의 페이퍼 + 픽셀 HUD 룩을 토큰화한 파일입니다.
+   styles.css 뒤에 로드하며 retro-theme.legacy.css 를 대체합니다. */
+
+@import url("https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.css");
+@import url("https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable.css");
+
+/* ────────────────────────────────────────────────
+   1. 토큰 (§3.3)
+   ──────────────────────────────────────────────── */
+
+:root {
+  --px-outline: #2c1d16;
+  --px-ink: #2c1d16;
+  --px-ink-sub: #6f5748;
+  --px-paper: #fdf6e3;
+  --px-panel: #fffdf7;
+  --px-panel-muted: #eee6d2;
+  --px-shadow: 3px 3px 0 #2c1d16;
+
+  --px-gold: #fdbc29;
+  --px-blue: #2c7be0;
+  --px-danger: #d8402a;
+  --px-success: #3e9b62;
+
+  --cat-science: #3b7dd8;
+  --cat-bread: #d97b3c;
+  --cat-nature: #3e9b62;
+  --cat-heritage: #8a6ba8;
+  --cat-culture: #c2508a;
+  --cat-market: #c9452f;
+  --cat-tashu: #2e7d8f;
+  --cat-festival: #e0a72b;
+
+  --font-display: "Galmuri11", "Noto Sans KR", sans-serif;
+  --font-body: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;
+
+  /* 픽셀 패널의 안쪽 베벨. Stitch 의 inset 이중 그림자를 토큰으로 고정합니다. */
+  --px-bevel-light: #ffffff;
+  --px-bevel-dark: #c9bfa6;
+  --px-bevel: inset 2px 2px 0 var(--px-bevel-light), inset -2px -2px 0 var(--px-bevel-dark);
+
+  /* 레이아웃. 디자인 기준 390×844, 지원 폭 360~430, 넓은 화면은 520 셸. */
+  --shell-max-width: 520px;
+  --gutter-page: 16px;
+  --touch-min: 44px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --header-height: 56px;
+  --drawer-width: 288px;
+
+  /* 간격은 4px 배수만 사용합니다. */
+  --u1: 4px;
+  --u2: 8px;
+  --u3: 12px;
+  --u4: 16px;
+  --u5: 20px;
+  --u6: 24px;
+  --u8: 32px;
+  --u10: 40px;
+  --u12: 48px;
+
+  /* styles.css 가 쓰는 이름들을 v2 값으로 재지정해 구형 규칙도 같은 팔레트를 따르게 합니다. */
+  --ink: var(--px-ink);
+  --sub: var(--px-ink-sub);
+  --paper: var(--px-paper);
+  --paper-2: var(--px-panel);
+  --paper-line: var(--px-panel-muted);
+  --line: var(--px-outline);
+  --shadow-soft: var(--px-shadow);
+
+  color: var(--px-ink);
+  font-family: var(--font-body);
+
+  /* 픽셀 미학보다 접근성이 우선이므로 사용자 확대를 막지 않습니다. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* 카테고리 8종의 대표색을 data 속성 하나로 꺼내 쓰기 위한 매핑입니다. (§4.1) */
+[data-category="science"] { --cat-color: var(--cat-science); }
+[data-category="bread"] { --cat-color: var(--cat-bread); }
+[data-category="nature"] { --cat-color: var(--cat-nature); }
+[data-category="heritage"] { --cat-color: var(--cat-heritage); }
+[data-category="culture"] { --cat-color: var(--cat-culture); }
+[data-category="market"] { --cat-color: var(--cat-market); }
+[data-category="tashu"] { --cat-color: var(--cat-tashu); }
+[data-category="festival"] { --cat-color: var(--cat-festival); }
+
+/* ────────────────────────────────────────────────
+   2. 기본 타이포와 셸
+   ──────────────────────────────────────────────── */
+
+/* display 를 지정한 컴포넌트가 많아 hidden 속성이 무시되는 일을 막습니다.
+   app.js 는 화면 전환과 조건부 표시를 전부 element.hidden 으로 처리합니다. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  min-height: 100dvh;
+  margin: 0;
+  color: var(--px-ink);
+  font-family: var(--font-body);
+  /* 본문 최소 14px, 권장 15~16px. (§3.3) */
+  font-size: 15px;
+  line-height: 1.55;
+  word-break: keep-all;
+  background: #e6dcc2;
+  /* 드로어가 열렸을 때만 본문 스크롤을 잠급니다. */
+  overscroll-behavior-y: none;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* 픽셀 서체는 제목·숫자·짧은 라벨·게임 상태에만 씁니다. (§3.1) */
+.px-display,
+.px-counter,
+.px-label,
+.section-title,
+.page-title,
+.app-title,
+.app-eyebrow {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.px-counter {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 긴 설명·약관·설정 문구는 일반 본문 서체를 유지합니다. */
+.page-copy,
+.data-note,
+.px-body,
+p {
+  font-family: var(--font-body);
+}
+
+.app-shell {
+  width: 100%;
+  max-width: var(--shell-max-width);
+  min-height: 100dvh;
+  margin: 0 auto;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--px-paper);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-shell::before,
+.app-shell::after {
+  display: none;
+}
+
+@media (min-width: 560px) {
+  .app-shell {
+    border-inline: 2px solid var(--px-outline);
+  }
+}
+
+/* ── styles.css 정규화 ──
+   styles.css 는 v1 의 둥근 카드·초록 팔레트를 전제로 작성돼 있습니다.
+   v2 는 0~4px 모서리와 하드 오프셋 그림자만 쓰므로 여기서 한 번에 눌러 둡니다. (§3.2, §3.3) */
+
+.app-shell *,
+.app-shell *::before,
+.app-shell *::after,
+.app-drawer *,
+.bookmark-handle {
+  border-radius: 0;
+}
+
+/* 지도 높이는 홈 시트와 함께 보이도록 v2 값으로 다시 잡습니다. */
+.map-shell {
+  min-height: 0;
+  border: 2px solid var(--px-outline);
+  background: none;
+}
+
+.map-canvas {
+  height: clamp(220px, 38dvh, 340px);
+}
+
+/* 안내 문구는 초록 점선 알약이 아니라 본문 각주로 표시합니다. */
+.data-note {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--px-ink-sub);
+  font-size: 12px;
+}
+
+/* 픽셀 에셋은 정수배 확대와 nearest-neighbor 로만 키웁니다. (§3.3) */
+.px-art,
+img[data-pixel-art="true"] {
+  image-rendering: pixelated;
+}
+
+/* 지도 타일·카메라 영상·사진은 픽셀화하지 않습니다. (§3.1) */
+.map-canvas,
+.map-canvas img,
+video,
+.photo-surface img {
+  image-rendering: auto;
+}
+
+/* ────────────────────────────────────────────────
+   3. 픽셀 패널·카드 (§12)
+   ──────────────────────────────────────────────── */
+
+.px-panel {
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: var(--px-shadow);
+  padding: var(--u3);
+}
+
+.px-panel--paper {
+  background: var(--px-paper);
+}
+
+.px-panel--muted {
+  background: var(--px-panel-muted);
+}
+
+/* 안쪽이 파인 HUD 상자. 수치·요약을 담습니다. */
+.px-panel--inset {
+  background: var(--px-paper);
+  box-shadow: var(--px-bevel);
+}
+
+/* 제목 줄이 잉크색으로 반전된 대화창형 패널. */
+.px-dialog {
+  background: var(--px-panel);
+  border: 3px solid var(--px-outline);
+  box-shadow: 4px 4px 0 var(--px-outline);
+}
+
+.px-dialog__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+  padding: var(--u1) var(--u3);
+  background: var(--px-outline);
+  color: var(--px-panel);
+  border-bottom: 2px solid var(--px-outline);
+}
+
+.px-dialog__bar .px-label {
+  color: var(--px-panel);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.px-dialog__body {
+  padding: var(--u3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+}
+
+/* 카테고리 색을 왼쪽 띠로만 쓰는 목록 카드. */
+.px-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: start;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: var(--px-shadow);
+  padding: var(--u3) var(--u3) var(--u3) var(--u4);
+  color: inherit;
+}
+
+.px-card::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 6px;
+  background: var(--cat-color, var(--px-panel-muted));
+  border-inline-end: 2px solid var(--px-outline);
+}
+
+.px-card:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+/* ────────────────────────────────────────────────
+   4. 버튼·칩·태그
+   ──────────────────────────────────────────────── */
+
+.px-button,
+.primary-action,
+.secondary-action {
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--u2);
+  padding: var(--u2) var(--u4);
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--px-ink);
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: var(--px-shadow);
+  cursor: pointer;
+}
+
+.px-button:active,
+.primary-action:active,
+.secondary-action:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.px-button--primary,
+.primary-action {
+  background: var(--px-gold);
+}
+
+.px-button--danger {
+  background: var(--px-danger);
+  color: var(--px-panel);
+}
+
+.px-button--ghost {
+  background: var(--px-panel);
+}
+
+.px-button[disabled],
+.primary-action[disabled],
+.secondary-action[disabled] {
+  cursor: not-allowed;
+  /* 색만으로 구분하지 않도록 패턴을 함께 씁니다. (§3.2) */
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(44, 29, 22, 0.14) 0 4px,
+    transparent 4px 8px
+  );
+  color: var(--px-ink-sub);
+  box-shadow: 1px 1px 0 var(--px-outline);
+  translate: 2px 2px;
+}
+
+.px-chip,
+.chip-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  padding: var(--u1) var(--u2);
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--px-outline);
+  cursor: pointer;
+}
+
+.px-chip.is-active,
+.chip-button.is-active {
+  background: var(--cat-color, var(--px-gold));
+  box-shadow: inset 0 0 0 2px var(--px-panel), 2px 2px 0 var(--px-outline);
+}
+
+/* 카테고리 태그는 색 + 텍스트를 함께 보여 색맹 사용자도 구분할 수 있게 합니다. */
+.px-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  padding: 1px var(--u1);
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--px-panel);
+  background: var(--cat-color, var(--px-ink-sub));
+  border: 1px solid var(--px-outline);
+}
+
+.px-tag--ink {
+  color: var(--px-ink);
+  background: var(--px-gold);
+}
+
+/* ────────────────────────────────────────────────
+   5. 아이콘 (§3.2 이모지 금지)
+   ──────────────────────────────────────────────── */
+
+/* Material Symbols 를 기능 아이콘으로 사용합니다. 폰트가 늦게 오면
+   리거처 이름이 그대로 보이므로 로드 전에는 감춥니다. */
+.px-icon {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
+  -webkit-font-feature-settings: "liga";
+  font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+  /* 아이콘은 보조 표시이므로 스크린리더가 읽지 않습니다. */
+  user-select: none;
+}
+
+html:not(.fonts-icons-ready) .px-icon {
+  visibility: hidden;
+}
+
+.px-icon--sm { font-size: 16px; }
+.px-icon--lg { font-size: 24px; }
+
+/* 잉크색 사각 아이콘 배지. 드로어와 목록에서 씁니다. */
+.px-icon-box {
+  inline-size: 24px;
+  block-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--px-panel);
+  background: var(--cat-color, var(--px-ink));
+  border: 1px solid var(--px-outline);
+}
+
+/* ────────────────────────────────────────────────
+   6. 헤더 HUD
+   ──────────────────────────────────────────────── */
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  min-height: var(--header-height);
+  padding: calc(var(--safe-top) + var(--u2)) var(--gutter-page) var(--u2);
+  background: var(--px-panel);
+  border: 0;
+  border-bottom: 2px solid var(--px-outline);
+  box-shadow: 0 2px 0 var(--px-outline);
+}
+
+.app-mark {
+  inline-size: 28px;
+  block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--px-panel);
+  background: var(--cat-bread);
+  border: 2px solid var(--px-outline);
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.app-title-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.app-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--px-ink-sub);
+}
+
+.app-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-status {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+}
+
+.level-pill {
+  font-family: var(--font-display);
+  font-size: 11px;
+  padding: 1px var(--u1);
+  color: var(--px-ink);
+  background: var(--px-gold);
+  border: 1px solid var(--px-outline);
+}
+
+.system-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+.status-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border: 1px solid var(--px-outline);
+  background: var(--px-panel-muted);
+}
+
+.status-dot--ok { background: var(--px-success); }
+.status-dot--pending { background: var(--px-gold); }
+.status-dot--error { background: var(--px-danger); }
+
+/* EXP 바는 칸이 보이는 픽셀 게이지로 표현합니다. */
+.px-exp {
+  display: flex;
+  align-items: center;
+  gap: var(--u1);
+}
+
+.px-exp__track {
+  inline-size: 64px;
+  block-size: 8px;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  background: var(--px-panel-muted);
+  border: 1px solid var(--px-outline);
+}
+
+.px-exp__cell {
+  flex: 1;
+  background: var(--px-panel);
+}
+
+.px-exp__cell.is-filled {
+  background: var(--cat-festival);
+}
+
+/* ────────────────────────────────────────────────
+   7. 우측 책갈피 손잡이와 드로어 (§7.2)
+   ──────────────────────────────────────────────── */
+
+.bookmark-handle {
+  position: fixed;
+  inset-inline-end: 0;
+  top: 168px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-block-size: var(--touch-min);
+  padding: var(--u2) var(--u1);
+  color: var(--px-ink);
+  background: var(--cat-festival);
+  border: 2px solid var(--px-outline);
+  border-inline-end: 0;
+  box-shadow: -3px 3px 0 rgba(44, 29, 22, 0.35);
+  cursor: pointer;
+}
+
+/* 셸이 중앙 정렬된 넓은 화면에서도 손잡이가 셸 가장자리에 붙게 합니다. */
+@media (min-width: 560px) {
+  .bookmark-handle {
+    inset-inline-end: max(0px, calc(50vw - var(--shell-max-width) / 2));
+  }
+}
+
+.bookmark-handle__letter {
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.bookmark-handle[aria-expanded="true"] {
+  visibility: hidden;
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(44, 29, 22, 0.75);
+  /* 흐릿한 블러 대신 픽셀 디더 패턴으로 어둡게 덮습니다. (§3.2) */
+  background-image: repeating-conic-gradient(
+    rgba(44, 29, 22, 0.35) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 4px 4px;
+  border: 0;
+}
+
+.drawer-scrim[hidden] {
+  display: none;
+}
+
+.app-drawer {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 60;
+  inline-size: min(var(--drawer-width), 82vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--px-panel);
+  border-inline-start: 2px solid var(--px-outline);
+  box-shadow: -4px 0 0 rgba(44, 29, 22, 0.35);
+  translate: 100% 0;
+  transition: translate 180ms steps(6, end);
+}
+
+@media (min-width: 560px) {
+  .app-drawer {
+    inset-inline-end: max(0px, calc(50vw - var(--shell-max-width) / 2));
+  }
+}
+
+.app-drawer.is-open {
+  translate: 0 0;
+}
+
+.app-drawer[hidden] {
+  display: none;
+}
+
+.drawer-header {
+  flex: 0 0 auto;
+  padding: var(--u3) var(--u3) var(--u3) var(--u4);
+  background: var(--px-paper);
+  border-bottom: 2px solid var(--px-outline);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+.drawer-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+}
+
+.drawer-close {
+  min-inline-size: var(--touch-min);
+  min-block-size: 36px;
+}
+
+.drawer-profile {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  padding: var(--u2);
+  background: #ffffff;
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-bevel-dark);
+}
+
+.drawer-profile__art {
+  inline-size: 36px;
+  block-size: 36px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--px-paper);
+  border: 1px solid var(--px-outline);
+}
+
+.drawer-profile__art img {
+  inline-size: 32px;
+  block-size: 32px;
+  object-fit: contain;
+}
+
+.drawer-profile__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.drawer-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--u2) var(--u3) var(--u4) var(--u4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+}
+
+.drawer-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #8a5e28;
+}
+
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 카트리지형 메뉴 항목. */
+.nav-link {
+  inline-size: 100%;
+  min-block-size: var(--touch-min);
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  padding: var(--u2);
+  text-align: start;
+  color: var(--px-ink);
+  background: #ffffff;
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--px-bevel-dark);
+  cursor: pointer;
+}
+
+.nav-link:active {
+  translate: 1px 1px;
+  box-shadow: 1px 1px 0 var(--px-bevel-dark);
+}
+
+.nav-link.is-active {
+  background: var(--px-gold);
+  box-shadow: inset 0 0 0 2px var(--px-panel), 2px 2px 0 var(--px-outline);
+}
+
+.nav-link__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.nav-link__label {
+  font-family: var(--font-display);
+  font-size: 13px;
+}
+
+.nav-link__desc {
+  font-size: 11px;
+  color: var(--px-ink-sub);
+}
+
+.nav-link.is-active .nav-link__desc {
+  color: var(--px-ink);
+}
+
+.nav-link__index {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: 11px;
+  padding: 0 var(--u1);
+  background: var(--px-paper);
+  border: 1px solid var(--px-outline);
+}
+
+/* 하단 고정 탭은 v2 에서 폐기합니다. (§0.1) */
+.bottom-nav {
+  display: none;
+}
+
+/* ────────────────────────────────────────────────
+   8. 본문과 책장 넘김 (§7.3)
+   ──────────────────────────────────────────────── */
+
+.app-main {
+  flex: 1 1 auto;
+  inline-size: 100%;
+  padding: var(--u3) var(--gutter-page) calc(var(--u12) + var(--safe-bottom));
+  background: var(--px-paper);
+}
+
+.view-stack {
+  display: block;
+}
+
+.view-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u4);
+}
+
+.view-panel[hidden] {
+  display: none;
+}
+
+/* 다섯 최상위 메뉴 이동에만 짧은 책장 넘김을 적용합니다. */
+@keyframes px-page-turn {
+  from {
+    opacity: 0.35;
+    transform: perspective(900px) rotateY(-8deg) translateX(10px);
+    transform-origin: right center;
+  }
+  to {
+    opacity: 1;
+    transform: perspective(900px) rotateY(0deg) translateX(0);
+    transform-origin: right center;
+  }
+}
+
+.view-panel.is-turning {
+  animation: px-page-turn 220ms ease-out;
+}
+
+.section-title {
+  margin: 0 0 var(--u2);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.page-kicker {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--px-ink-sub);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.page-copy {
+  margin: 0;
+  font-size: 14px;
+  color: var(--px-ink-sub);
+}
+
+.hero-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+  padding: var(--u3);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: var(--px-shadow);
+}
+
+.data-note {
+  margin: var(--u2) 0 0;
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+}
+
+/* ────────────────────────────────────────────────
+   9. 탐색 컨텍스트 바 (§6)
+   ──────────────────────────────────────────────── */
+
+.context-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+.context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+}
+
+/* 현위치 / 계획 모드 토글. */
+.mode-toggle {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--px-outline);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+.mode-toggle__button {
+  min-block-size: 28px;
+  padding: var(--u1) var(--u2);
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--px-ink-sub);
+  background: var(--px-panel-muted);
+  border: 0;
+  cursor: pointer;
+}
+
+.mode-toggle__button[aria-pressed="true"] {
+  color: var(--px-ink);
+  background: var(--cat-festival);
+}
+
+.context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  padding: var(--u1) var(--u2);
+  font-family: var(--font-display);
+  font-size: 12px;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+.context-place {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+  padding: var(--u1) var(--u2);
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+}
+
+.context-place__name {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ────────────────────────────────────────────────
+   10. 지도와 3단 시트 (§10 S03)
+   ──────────────────────────────────────────────── */
+
+.map-shell {
+  position: relative;
+  border: 2px solid var(--px-outline);
+  box-shadow: var(--px-shadow);
+  overflow: hidden;
+}
+
+.map-canvas {
+  block-size: clamp(220px, 38dvh, 340px);
+  inline-size: 100%;
+  background: #cfe0c3;
+}
+
+.home-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+  padding: var(--u3);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: var(--px-shadow);
+}
+
+.home-sheet__grip {
+  align-self: center;
+  inline-size: 48px;
+  block-size: 6px;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+/* 3스냅: 접힘 / 중간 / 전체. 높이만 바꾸고 내용은 유지합니다. */
+.home-sheet[data-snap="collapsed"] .home-sheet__body {
+  max-block-size: 0;
+  overflow: hidden;
+}
+
+.home-sheet[data-snap="mid"] .home-sheet__body {
+  max-block-size: 40dvh;
+  overflow-y: auto;
+}
+
+.home-sheet[data-snap="full"] .home-sheet__body {
+  max-block-size: none;
+  overflow: visible;
+}
+
+/* ────────────────────────────────────────────────
+   11. 대표 꿈돌이와 도감 (§5, §10 S09)
+   ──────────────────────────────────────────────── */
+
+.profile-panel {
+  display: flex;
+  align-items: center;
+  gap: var(--u3);
+}
+
+/* 대표 꿈돌이는 약 96px. 지면에서 뜨지 않도록 바닥 그림자를 붙입니다. (§3.2) */
+.ggumdori-figure {
+  position: relative;
+  inline-size: 96px;
+  block-size: 96px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: var(--px-paper);
+  border: 2px solid var(--px-outline);
+  box-shadow: var(--px-shadow);
+}
+
+.ggumdori-figure img {
+  inline-size: 88px;
+  block-size: 88px;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+}
+
+.ggumdori-figure::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  inline-size: 44px;
+  block-size: 4px;
+  background: rgba(44, 29, 22, 0.45);
+}
+
+.ggumdori-figure--sm {
+  inline-size: 48px;
+  block-size: 48px;
+}
+
+.ggumdori-figure--sm img {
+  inline-size: 42px;
+  block-size: 42px;
+}
+
+/* 도감은 3열 고정입니다. (§19) */
+.collection-grid,
+.ggumdori-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--u2);
+}
+
+.ggumdori-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u1);
+  padding: var(--u2);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: 2px 2px 0 var(--px-outline);
+  cursor: pointer;
+}
+
+.ggumdori-card__no {
+  align-self: flex-start;
+  font-family: var(--font-display);
+  font-size: 10px;
+  color: var(--px-ink-sub);
+}
+
+.ggumdori-card__name {
+  font-family: var(--font-display);
+  font-size: 11px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  inline-size: 100%;
+}
+
+/* 잠긴 항목: 무채색 + 어두운 오버레이 + 자물쇠 + 텍스트를 함께 씁니다. (§5.3) */
+.ggumdori-card.is-locked img {
+  filter: grayscale(1) contrast(0.85) brightness(0.75);
+}
+
+.ggumdori-card.is-locked .ggumdori-figure::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgba(44, 29, 22, 0.45);
+}
+
+.ggumdori-card__lock {
+  position: absolute;
+  top: var(--u2);
+  inset-inline-end: var(--u2);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 20px;
+  block-size: 20px;
+  color: var(--px-panel);
+  background: var(--px-outline);
+  border: 1px solid var(--px-outline);
+}
+
+.ggumdori-card.is-locked .ggumdori-card__name {
+  color: var(--px-ink-sub);
+}
+
+.collection-count {
+  font-family: var(--font-display);
+  font-size: 13px;
+}
+
+/* ────────────────────────────────────────────────
+   12. 공용 퀘스트 상세 시트 (§10 S06)
+   제목·CTA 는 고정되고 본문만 스크롤합니다. (§19)
+   ──────────────────────────────────────────────── */
+
+.quest-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.quest-sheet[hidden] {
+  display: none;
+}
+
+.quest-sheet__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(44, 29, 22, 0.7);
+}
+
+.quest-sheet__panel {
+  position: relative;
+  z-index: 1;
+  inline-size: 100%;
+  max-inline-size: var(--shell-max-width);
+  margin: 0 auto;
+  max-block-size: 92dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--px-panel);
+  border: 3px solid var(--px-outline);
+  border-bottom: 0;
+  box-shadow: 0 -4px 0 rgba(44, 29, 22, 0.35);
+}
+
+.quest-sheet__head {
+  position: sticky;
+  top: 0;
+}
+
+.quest-sheet__body {
+  overflow-y: auto;
+  padding: var(--u3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+}
+
+.quest-sheet__cta {
+  padding: var(--u3);
+  padding-bottom: calc(var(--u3) + var(--safe-bottom));
+  background: var(--px-paper);
+  border-top: 2px solid var(--px-outline);
+  display: flex;
+  gap: var(--u2);
+}
+
+.quest-sheet__cta .px-button {
+  flex: 1;
+}
+
+/* 수치 3분할 HUD. 거리 / 시간 / 난이도. */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--u1);
+}
+
+.stat-cell {
+  padding: var(--u1);
+  text-align: center;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.stat-cell__label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 10px;
+  color: var(--px-ink-sub);
+}
+
+.stat-cell__value {
+  font-family: var(--font-display);
+  font-size: 14px;
+}
+
+/* ────────────────────────────────────────────────
+   13. 상태 표시 (색만으로 구분하지 않음, §3.2)
+   ──────────────────────────────────────────────── */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--u1);
+  padding: 1px var(--u1);
+  font-family: var(--font-display);
+  font-size: 11px;
+  border: 1px solid var(--px-outline);
+}
+
+.status-badge--available { background: var(--px-panel-muted); }
+.status-badge--active { background: var(--px-gold); }
+.status-badge--done { color: var(--px-panel); background: var(--px-success); }
+.status-badge--locked { color: var(--px-panel); background: var(--px-ink-sub); }
+.status-badge--error { color: var(--px-panel); background: var(--px-danger); }
+
+/* ────────────────────────────────────────────────
+   14. 폼
+   ──────────────────────────────────────────────── */
+
+input[type="text"],
+input[type="search"],
+input[type="date"],
+input[type="email"],
+select,
+textarea {
+  inline-size: 100%;
+  min-block-size: var(--touch-min);
+  padding: var(--u2);
+  font-size: 15px;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: var(--px-bevel);
+}
+
+/* 입력창은 강제 픽셀화하지 않고 본문 서체를 유지합니다. (§3.2) */
+input,
+textarea,
+select {
+  font-family: var(--font-body);
+}
+
+.consent-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+.consent-check {
+  min-block-size: var(--touch-min);
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  font-size: 14px;
+}
+
+.consent-check input[type="checkbox"] {
+  inline-size: 20px;
+  block-size: 20px;
+  min-block-size: 20px;
+  flex: 0 0 auto;
+  accent-color: var(--cat-festival);
+}
+
+.oauth-login-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+}
+
+.social-login-button {
+  min-block-size: var(--touch-min);
+  inline-size: 100%;
+  font-family: var(--font-display);
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: var(--px-shadow);
+  cursor: pointer;
+}
+
+/* ────────────────────────────────────────────────
+   15. 접근성 (§13.3)
+   ──────────────────────────────────────────────── */
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--px-blue);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  top: var(--u2);
+  inset-inline-start: var(--u2);
+  z-index: 100;
+  padding: var(--u2) var(--u3);
+  background: var(--px-gold);
+  border: 2px solid var(--px-outline);
+  translate: -200% 0;
+}
+
+.skip-link:focus {
+  translate: 0 0;
+}
+
+.px-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 모션 줄이기: 책장 넘김·드로어 슬라이드·꿈돌이 모션을 정지시킵니다. (§5.4) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .app-drawer {
+    transition: none;
+  }
+}
+
+/* 앱 내 모션 줄이기 설정(마이페이지)도 같은 결과를 냅니다. */
+body[data-reduced-motion="true"] .view-panel.is-turning {
+  animation: none;
+}
+
+body[data-reduced-motion="true"] .app-drawer {
+  transition: none;
+}

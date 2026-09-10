@@ -1,10 +1,10 @@
 // 사용자 모바일 웹/PWA의 정적 자산과 추천 API 응답 캐시를 관리하는 서비스워커입니다.
 
 // 정적 자산 캐시 이름입니다.
-const STATIC_CACHE_NAME = "questbook-user-web-static-v18";
+const STATIC_CACHE_NAME = "questbook-user-web-static-v20";
 
 // 배포마다 주소가 달라지도록 해 오래된 CSS/JS 캐시와 즉시 분리합니다.
-const STATIC_ASSET_VERSION = "20260904-4";
+const STATIC_ASSET_VERSION = "20260910-1";
 
 
 // 설치 시 미리 저장할 정적 자산 경로입니다.
@@ -14,8 +14,13 @@ const STATIC_ASSETS = [
   "./service-worker.js",
   `../src/app.js?v=${STATIC_ASSET_VERSION}`,
   `../src/styles.css?v=${STATIC_ASSET_VERSION}`,
-  `../src/retro-theme.css?v=${STATIC_ASSET_VERSION}`,
+  `../src/stitch-theme.css?v=${STATIC_ASSET_VERSION}`,
+  `../src/reward-fx.css?v=${STATIC_ASSET_VERSION}`,
   `../src/scroll-fab.js?v=${STATIC_ASSET_VERSION}`,
+  // app.js 가 그냥 import 하므로 요청 주소에 ?v= 가 붙지 않는다. 쿼리 없이 담는다.
+  "../src/reward-fx.js",
+  // GPS 인증 성공 연출이 300ms 에 바로 쓰는 스프라이트다. 첫 완료에서 늦으면 안 된다.
+  "./assets/fx/dumdori_cheer_96x96_4f.png",
   "./assets/ggumdori/default-1.svg",
   "./assets/ggumdori/science-1.svg",
   "./assets/ggumdori/science-2.svg",

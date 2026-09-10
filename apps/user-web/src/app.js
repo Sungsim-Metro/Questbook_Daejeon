@@ -1,5 +1,8 @@
 // 사용자 모바일 웹/PWA의 화면 상태, API 호출, 목업 fallback 렌더링을 담당하는 파일입니다.
 
+// GPS 인증 성공 연출(지침서 T2-B)의 DOM 조립 함수입니다.
+import { createRewardFx, playRewardFlash } from "./reward-fx.js";
+
 // API 요청이 실패했을 때 화면을 채우는 기본 사용자 정보입니다.
 const FALLBACK_USER = {
   nickname: "대전 탐험가",
@@ -16,33 +19,87 @@ const FALLBACK_LOCATION = {
   lat: 36.3504,
   lng: 127.3845,
   label: "대전광역시청 기준",
+  // 실측 GPS 좌표인지 여부입니다. 계획 좌표로는 완료 인증을 할 수 없습니다. (명세 §19)
+  measured: false,
 };
 
-// 화면에서 선택할 수 있는 관광 카테고리 이름입니다.
+// 화면에서 선택할 수 있는 관광 카테고리 이름입니다. (명세 §4.1 카테고리 8종)
 const CATEGORY_LABELS = {
   all: "전체",
   default: "기본",
-  nature: "자연",
-  science: "과학",
-  downtown: "원도심",
-  market: "상권",
-  mobility: "이동",
-  hotspring: "온천",
-  nightview: "야경",
+  science: "과학·우주",
+  bread: "빵·미식",
+  nature: "자연·산책",
+  heritage: "원도심·역사",
+  culture: "문화·예술",
+  market: "시장·상권",
+  tashu: "이동·타슈",
+  festival: "축제·이벤트",
 };
 
-// 하단 탭과 헤더에서 사용하는 화면 메타데이터입니다.
+// v1 콘텐츠의 카테고리 값을 v2 8종으로 옮기는 표입니다. (명세 §4.1)
+const LEGACY_CATEGORY_MAP = {
+  downtown: "heritage",
+  mobility: "tashu",
+  hotspring: "nature",
+  nightview: "culture",
+};
+
+// 최상위 다섯 화면의 메타데이터입니다. (명세 §7.1)
+// icon 값은 Material Symbols 리거처 이름이며 이모지를 쓰지 않습니다. (명세 §3.2)
 const VIEW_META = {
-  home: { title: "모험가 홈", eyebrow: "QUESTBOOK", icon: "✦", label: "홈", navIcon: "⌂" },
-  map: { title: "탐험 지도", eyebrow: "MAP", icon: "⌖", label: "지도", navIcon: "⌖" },
-  quests: { title: "퀘스트 목록", eyebrow: "QUEST", icon: "✓", label: "퀘스트", navIcon: "✓" },
-  notes: { title: "탐험 노트", eyebrow: "NOTE", icon: "▤", label: "수첩", navIcon: "▤" },
-  badges: { title: "뱃지 수첩", eyebrow: "BADGE", icon: "●", label: "뱃지", navIcon: "●" },
-  customize: { title: "꿈돌이 꾸미기", eyebrow: "CUSTOM", icon: "✦", label: "꾸미기", navIcon: "✦" },
+  home: {
+    title: "홈",
+    eyebrow: "QUESTBOOK",
+    icon: "home",
+    label: "홈",
+    description: "현위치·계획 지도와 주변 퀘스트",
+    accent: "var(--cat-festival)",
+  },
+  adventure: {
+    title: "모험 중",
+    eyebrow: "ADVENTURE",
+    icon: "swords",
+    label: "모험 중",
+    description: "진행 중인 퀘스트",
+    accent: "var(--cat-bread)",
+  },
+  quests: {
+    title: "퀘스트",
+    eyebrow: "QUEST",
+    icon: "explore",
+    label: "퀘스트",
+    description: "탐색 컨텍스트 기준 추천",
+    accent: "var(--cat-science)",
+  },
+  collection: {
+    title: "도감",
+    eyebrow: "COLLECTION",
+    icon: "auto_awesome_motion",
+    label: "도감",
+    description: "꿈돌이와 연결 뱃지",
+    accent: "var(--cat-culture)",
+  },
+  me: {
+    title: "마이페이지",
+    eyebrow: "MY PAGE",
+    icon: "person",
+    label: "마이페이지",
+    description: "계정·기록·설정·권한",
+    accent: "var(--cat-tashu)",
+  },
 };
 
-// 하단 탭의 표시 순서입니다.
-const NAVIGATION_ITEMS = ["home", "map", "quests", "customize", "notes"];
+// 드로어 메뉴의 표시 순서입니다. (명세 §7.1)
+const NAVIGATION_ITEMS = ["home", "adventure", "quests", "collection", "me"];
+
+// v1 해시를 v2 라우트로 넘겨 주는 표입니다. 설치된 PWA의 북마크를 깨뜨리지 않습니다.
+const LEGACY_VIEW_MAP = {
+  map: "home",
+  badges: "collection",
+  customize: "collection",
+  notes: "me",
+};
 
 // NAVER Maps JavaScript SDK URL입니다.
 const NAVER_MAPS_SDK_URL = "https://oapi.map.naver.com/openapi/v3/maps.js";
@@ -168,6 +225,9 @@ const QUEST_STATUS_KEY = "questbook:user-web:quest-status";
 // 브라우저에 저장할 선택 꿈돌이 키입니다.
 const SELECTED_GGUMDORI_KEY = "questbook:user-web:selected-ggumdori";
 
+// 마이페이지의 모션 줄이기 설정을 저장하는 키입니다.
+const REDUCED_MOTION_KEY = "questbook:user-web:reduced-motion";
+
 // 브라우저에 저장할 baseline access token 키입니다.
 const ACCESS_TOKEN_KEY = "questbook:user-web:access-token";
 
@@ -217,6 +277,19 @@ const state = {
   selectedGgumdoriId: readSelectedGgumdoriId(),
   customizerPreviewId: readSelectedGgumdoriId(),
   customizerCategory: "all",
+  // 드로어를 열기 직전에 포커스가 있던 요소입니다. 닫을 때 되돌립니다.
+  drawerReturnFocus: null,
+  // history.back() 을 이미 요청했는지 표시합니다. 중복 되감기를 막습니다.
+  drawerClosing: false,
+  // 마이페이지의 모션 줄이기 설정입니다. (명세 §12)
+  reducedMotion: readStorageValue(REDUCED_MOTION_KEY) === "true",
+  // 홈 3단 시트의 현재 스냅입니다. (명세 §10 S03)
+  homeSheetSnap: "mid",
+  // 모험 중 화면의 정렬 기준입니다. (명세 §10 S04)
+  adventureSort: "distance",
+  // 탐색 컨텍스트입니다. 현위치와 계획 모드를 명시적으로 구분합니다. (명세 §6.1)
+  explorationMode: "current",
+  plannedDate: "",
   selectedMapInstanceId: FALLBACK_RECOMMENDATIONS[0]?.instanceId || "",
   accessToken: readStorageValue(ACCESS_TOKEN_KEY) || (IS_DESIGN_PREVIEW ? "design-preview" : ""),
   naverMapConfigured: false,
@@ -322,7 +395,21 @@ function readInitialView() {
   // URL 해시에서 #view- 접두사를 제거한 화면 ID입니다.
   const viewFromHash = window.location.hash.replace(/^#view-/, "");
 
-  return VIEW_META[viewFromHash] ? viewFromHash : "home";
+  return resolveViewId(viewFromHash);
+}
+
+/**
+ * 입력: 라우트 후보 문자열.
+ * 출력: 다섯 최상위 화면 중 하나의 ID.
+ * 역할: v1 해시(#view-map 등)를 통합된 v2 라우트로 옮긴다.
+ * 호출 예시: resolveViewId("map")
+ */
+function resolveViewId(candidate) {
+  if (VIEW_META[candidate]) {
+    return candidate;
+  }
+
+  return LEGACY_VIEW_MAP[candidate] || "home";
 }
 
 /**
@@ -648,8 +735,8 @@ function setConsentPanelVisible(isVisible) {
   const panel = select("#consent-panel");
   // 로그인 이후 화면 묶음입니다.
   const appViews = select("#app-views");
-  // 하단 탭 메뉴입니다.
-  const bottomNavigation = select("#bottom-nav");
+  // 우측 책갈피 손잡이입니다. 동의 전에는 이동할 화면이 없어 감춥니다.
+  const handle = select("#bookmark-handle");
 
   if (panel) {
     panel.hidden = !isVisible;
@@ -657,8 +744,11 @@ function setConsentPanelVisible(isVisible) {
   if (appViews) {
     appViews.hidden = isVisible;
   }
-  if (bottomNavigation) {
-    bottomNavigation.hidden = isVisible;
+  if (handle) {
+    handle.hidden = isVisible;
+  }
+  if (isVisible) {
+    closeDrawer();
   }
 }
 
@@ -1453,6 +1543,7 @@ function renderAppHeader() {
   const levelElement = select("#header-level");
 
   if (iconElement) {
+    iconElement.classList.add("px-icon");
     iconElement.textContent = meta.icon;
   }
   if (eyebrowElement) {
@@ -1471,12 +1562,12 @@ function renderAppHeader() {
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 하단 탭 메뉴를 렌더링하고 현재 화면을 강조한다.
- * 호출 예시: renderBottomNavigation()
+ * 역할: 우측 드로어의 다섯 최상위 메뉴를 렌더링하고 현재 화면을 강조한다.
+ * 호출 예시: renderDrawerNavigation()
  */
-function renderBottomNavigation() {
-  // 하단 탭 컨테이너입니다.
-  const navigation = select("#bottom-nav");
+function renderDrawerNavigation() {
+  // 드로어 메뉴 컨테이너입니다.
+  const navigation = select("#drawer-nav");
 
   if (!navigation) {
     return;
@@ -1484,31 +1575,252 @@ function renderBottomNavigation() {
 
   navigation.replaceChildren();
 
-  NAVIGATION_ITEMS.forEach((viewId) => {
-    // 하단 탭 하나의 메타데이터입니다.
+  NAVIGATION_ITEMS.forEach((viewId, index) => {
+    // 메뉴 하나의 메타데이터입니다.
     const meta = VIEW_META[viewId];
-    // 현재 탭이 활성 상태인지 여부입니다.
+    // 현재 메뉴가 활성 상태인지 여부입니다.
     const isActive = state.activeView === viewId;
-    // 하단 탭 버튼입니다.
+    // 카트리지형 메뉴 버튼입니다.
     const button = createElement("button", `nav-link${isActive ? " is-active" : ""}`.trim());
     button.type = "button";
     button.dataset.viewTarget = viewId;
-    button.setAttribute("aria-current", isActive ? "page" : "false");
-    button.append(createElement("span", "", meta.navIcon), createElement("span", "", meta.label));
+    // 현재 메뉴는 aria-current 와 시각 표시를 함께 제공합니다. (명세 §7.2)
+    if (isActive) {
+      button.setAttribute("aria-current", "page");
+    }
+
+    // 메뉴를 구분하는 사각 아이콘입니다.
+    const icon = createElement("span", "px-icon-box");
+    icon.style.setProperty("--cat-color", meta.accent);
+    icon.append(createElement("span", "px-icon px-icon--sm", meta.icon));
+
+    // 메뉴 이름과 설명을 담는 영역입니다.
+    const text = createElement("div", "nav-link__text");
+    // 활성 메뉴는 색 외에 텍스트로도 현재 위치를 알립니다.
+    const label = createElement("span", "nav-link__label", meta.label);
+    if (isActive) {
+      label.append(createElement("span", "px-sr-only", " (현재 화면)"));
+    }
+    text.append(label, createElement("span", "nav-link__desc", meta.description));
+
+    button.append(icon, text, createElement("span", "nav-link__index px-counter", String(index + 1)));
     navigation.append(button);
   });
 }
 
 /**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 드로어 상단의 사용자 요약을 채운다.
+ * 호출 예시: renderDrawerProfile()
+ */
+function renderDrawerProfile() {
+  // 드로어와 마이페이지가 같은 형태의 계정 요약을 공유합니다.
+  const targets = [select("#drawer-profile"), select("#me-account-panel")].filter(Boolean);
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  // 홈 대표로 지정한 꿈돌이입니다.
+  const selected = getSelectedGgumdori();
+
+  targets.forEach((target) => {
+    target.replaceChildren();
+
+    // 대표 꿈돌이 썸네일입니다.
+    const art = createElement("div", "drawer-profile__art");
+    if (selected?.imageRef) {
+      const image = document.createElement("img");
+      image.src = selected.imageRef;
+      image.alt = `${selected.name} 대표 꿈돌이`;
+      art.append(image);
+    }
+
+    // 닉네임과 레벨을 담는 영역입니다.
+    const meta = createElement("div", "drawer-profile__meta");
+    const nameRow = createElement("div", "context-row");
+    nameRow.append(
+      createElement("span", "nav-link__label", state.user.nickname || "모험가"),
+      createElement("span", "level-pill px-counter", `Lv.${toNumber(state.user.level, 1)}`),
+    );
+    meta.append(nameRow, createElement("span", "nav-link__desc", state.user.title || "대전 탐험가"));
+
+    target.append(art, meta);
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 드로어가 열려 있는지 여부.
+ * 역할: 뒤로가기·Esc 처리에서 드로어 상태를 한 곳에서 판단한다.
+ * 호출 예시: if (isDrawerOpen()) closeDrawer()
+ */
+function isDrawerOpen() {
+  return Boolean(select("#app-drawer")?.classList.contains("is-open"));
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 우측 책갈피 드로어를 열고 포커스를 드로어 안에 가둔다. (명세 §7.2)
+ * 호출 예시: openDrawer()
+ */
+function openDrawer() {
+  // 드로어 패널입니다.
+  const drawer = select("#app-drawer");
+  // 배경을 덮는 딤 레이어입니다.
+  const scrim = select("#drawer-scrim");
+  // 드로어를 연 책갈피 손잡이입니다.
+  const handle = select("#bookmark-handle");
+
+  if (!drawer || drawer.classList.contains("is-open")) {
+    return;
+  }
+
+  // 닫을 때 포커스를 되돌릴 요소를 기억합니다.
+  state.drawerReturnFocus = document.activeElement;
+  state.drawerClosing = false;
+
+  drawer.hidden = false;
+  if (scrim) {
+    scrim.hidden = false;
+  }
+  handle?.setAttribute("aria-expanded", "true");
+  // hidden 을 푼 직후 레이아웃을 한 번 읽어야 슬라이드가 시작 위치부터 보입니다.
+  // requestAnimationFrame 은 탭이 백그라운드일 때 멈추므로 쓰지 않습니다.
+  void drawer.offsetWidth;
+  drawer.classList.add("is-open");
+
+  document.body.dataset.drawerOpen = "true";
+  select("#drawer-close")?.focus({ preventScroll: true });
+
+  // 브라우저 뒤로가기로도 닫히도록 히스토리 항목을 하나 쌓습니다. (명세 §7.2)
+  window.history.pushState({ drawerOpen: true }, "", `#view-${state.activeView}`);
+}
+
+/**
+ * 입력: 히스토리 이동으로 닫히는지 여부.
+ * 출력: 없음.
+ * 역할: 드로어를 닫고 포커스를 열기 전 요소로 되돌린다.
+ * 호출 예시: closeDrawer()
+ */
+function closeDrawer(fromHistory = false) {
+  // 드로어 패널입니다.
+  const drawer = select("#app-drawer");
+  // 배경을 덮는 딤 레이어입니다.
+  const scrim = select("#drawer-scrim");
+  // 책갈피 손잡이입니다.
+  const handle = select("#bookmark-handle");
+
+  // 이미 닫혀 있으면 아무것도 하지 않습니다.
+  // 이 검사를 history.back() 보다 먼저 해야 중복 호출이 앱 밖으로 나가지 않습니다.
+  if (!drawer || !drawer.classList.contains("is-open")) {
+    return;
+  }
+
+  // 뒤로가기가 아닌 경로로 닫을 때는 쌓아 둔 히스토리 항목을 먼저 되감습니다.
+  // popstate 가 다시 이 함수를 fromHistory 로 호출해 실제 닫기를 수행합니다.
+  if (!fromHistory && window.history.state?.drawerOpen) {
+    // history.back() 은 비동기라 popstate 전에 다시 불릴 수 있습니다.
+    // 표시를 남겨 두 번 되감아 앱 밖으로 나가는 일을 막습니다.
+    if (state.drawerClosing) {
+      return;
+    }
+    state.drawerClosing = true;
+    window.history.back();
+    return;
+  }
+
+  state.drawerClosing = false;
+
+  drawer.classList.remove("is-open");
+  if (scrim) {
+    scrim.hidden = true;
+  }
+  handle?.setAttribute("aria-expanded", "false");
+  delete document.body.dataset.drawerOpen;
+
+  // 슬라이드가 끝난 뒤에 hidden 을 돌려놓아 보조기기에서 감춥니다.
+  window.setTimeout(() => {
+    if (!drawer.classList.contains("is-open")) {
+      drawer.hidden = true;
+    }
+  }, 200);
+
+  // 포커스는 드로어를 열었던 요소로 되돌립니다.
+  const target =
+    state.drawerReturnFocus instanceof HTMLElement && state.drawerReturnFocus.isConnected
+      ? state.drawerReturnFocus
+      : handle;
+  target?.focus({ preventScroll: true });
+  state.drawerReturnFocus = null;
+}
+
+/**
+ * 입력: Tab 키 이벤트.
+ * 출력: 없음.
+ * 역할: 드로어가 열린 동안 포커스가 드로어 밖으로 나가지 않게 한다. (명세 §7.2)
+ * 호출 예시: trapDrawerFocus(event)
+ */
+function trapDrawerFocus(event) {
+  // 드로어 패널입니다.
+  const drawer = select("#app-drawer");
+
+  if (!drawer || !drawer.classList.contains("is-open")) {
+    return;
+  }
+
+  // 드로어 안에서 포커스를 받을 수 있는 요소들입니다.
+  const focusable = Array.from(
+    drawer.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"),
+  ).filter((element) => !element.hasAttribute("disabled") && element.offsetParent !== null);
+
+  if (focusable.length === 0) {
+    return;
+  }
+
+  // 순환의 양 끝 요소입니다.
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+    return;
+  }
+
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 모션을 줄여야 하면 true.
+ * 역할: OS 설정과 앱 설정 중 하나라도 켜지면 전환 연출을 생략한다. (명세 §7.3)
+ * 호출 예시: if (prefersReducedMotion()) { ... }
+ */
+function prefersReducedMotion() {
+  return (
+    state.reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
  * 입력: 전환할 화면 ID와 URL 해시 갱신 여부.
  * 출력: 없음.
- * 역할: 단일 PWA 안에서 홈, 지도, 퀘스트, 수첩, 뱃지를 페이지처럼 전환한다.
+ * 역할: 단일 PWA 안에서 다섯 최상위 메뉴를 책장 넘김으로 전환한다. (명세 §7.3)
  * 호출 예시: setActiveView("quests")
  */
 function setActiveView(viewId, shouldUpdateHash = true) {
   if (!VIEW_META[viewId]) {
     return;
   }
+
+  // 같은 화면을 다시 고른 경우인지 여부입니다. 연출을 반복하지 않습니다.
+  const isSameView = state.activeView === viewId;
 
   state.activeView = viewId;
 
@@ -1519,10 +1831,24 @@ function setActiveView(viewId, shouldUpdateHash = true) {
     const isActive = panel.dataset.viewPanel === viewId;
     panel.hidden = !isActive;
     panel.classList.toggle("is-active", isActive);
+    panel.classList.remove("is-turning");
   });
 
+  // 활성 패널입니다. 책장 넘김과 포커스 이동의 대상입니다.
+  const activePanel = select(`[data-view-panel="${viewId}"]`);
+
+  // 메뉴 이동에만 짧은 종이 전환을 씁니다. 모션 줄이기에서는 즉시 전환합니다.
+  if (activePanel && !isSameView && !prefersReducedMotion()) {
+    activePanel.classList.add("is-turning");
+    activePanel.addEventListener(
+      "animationend",
+      () => activePanel.classList.remove("is-turning"),
+      { once: true },
+    );
+  }
+
   renderAppHeader();
-  renderBottomNavigation();
+  renderDrawerNavigation();
 
   if (shouldUpdateHash) {
     window.history.replaceState(null, "", `#view-${viewId}`);
@@ -1532,6 +1858,17 @@ function setActiveView(viewId, shouldUpdateHash = true) {
   const main = select("#main-content");
   if (main) {
     main.scrollTop = 0;
+  }
+  window.scrollTo({ top: 0 });
+
+  // 새 화면 도착 후 화면 제목으로 포커스를 옮깁니다. (명세 §7.3)
+  if (!isSameView) {
+    // 화면 제목 요소입니다. 시각적으로 감춘 제목도 포커스 대상이 됩니다.
+    const heading = activePanel?.querySelector("h2");
+    if (heading) {
+      heading.setAttribute("tabindex", "-1");
+      heading.focus({ preventScroll: true });
+    }
   }
 }
 
@@ -1949,7 +2286,54 @@ function createRecommendationCard(recommendation) {
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 선택한 카테고리에 맞는 추천 목록을 렌더링한다.
+ * 역할: 수락한 퀘스트만 모아 모험 중 화면에 정렬해 표시한다. (명세 §10 S04)
+ * 호출 예시: renderAdventure()
+ */
+function renderAdventure() {
+  // 진행 중 퀘스트 목록 컨테이너입니다.
+  const list = select("#adventure-list");
+
+  if (!list) {
+    return;
+  }
+
+  // 수락했거나 수행 중인 퀘스트만 모은 목록입니다. (명세 §10 S04)
+  const activeQuests = state.recommendations.filter((item) => {
+    // 로컬 저장소까지 반영한 현재 상태입니다.
+    const status = getQuestStatus(item.instanceId, item.status);
+    return status === "accepted" || status === "in_progress";
+  });
+
+  // 가까운 순 또는 시작 순으로 정렬한 목록입니다. (명세 §19)
+  const sortedQuests = [...activeQuests].sort((left, right) => {
+    if (state.adventureSort === "started") {
+      return String(right.acceptedAt || "").localeCompare(String(left.acceptedAt || ""));
+    }
+    return toNumber(left.distanceMeters, Infinity) - toNumber(right.distanceMeters, Infinity);
+  });
+
+  list.replaceChildren();
+
+  if (sortedQuests.length === 0) {
+    list.append(
+      createElement("p", "empty-message", "진행 중인 퀘스트가 없습니다. 퀘스트 화면에서 모험을 시작하세요."),
+    );
+    return;
+  }
+
+  sortedQuests.forEach((recommendation) => {
+    list.append(createRecommendationCard(recommendation));
+  });
+
+  document.querySelectorAll("[data-adventure-sort]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.adventureSort === state.adventureSort);
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 퀘스트 카드 목록을 현재 카테고리 필터로 렌더링한다.
  * 호출 예시: renderRecommendations()
  */
 function renderRecommendations() {
@@ -3147,13 +3531,16 @@ function renderCustomizer() {
  */
 function renderAll() {
   renderAppHeader();
-  renderBottomNavigation();
+  renderDrawerNavigation();
+  renderDrawerProfile();
+  renderHomeContext();
   renderProfile();
   renderHomeMetrics();
   renderRecentBadges();
   renderHomeRecommendations();
   renderRecommendationMeta();
   renderRecommendations();
+  renderAdventure();
   renderQuestBoard();
   renderMapView();
   renderBadges();
@@ -3222,6 +3609,7 @@ function normalizeMeasuredLocation(position) {
     lng: coordinates.longitude,
     accuracyMeters,
     label: `현재 위치 기준, 정확도 ${Math.round(accuracyMeters)}m`,
+    measured: true,
   };
 }
 
@@ -3536,8 +3924,30 @@ function showQuestActionDialog(action, recommendation, actionResult = {}, messag
     message: message || (succeeded ? "버튼 입력이 정상 처리되었습니다." : "요청이 처리되지 않았습니다."),
     details: details.filter(Boolean),
     tone: succeeded ? "success" : "warning",
+    // GPS 완료가 성공한 경우에만 보상 연출을 얹습니다.
+    reward: isComplete && succeeded ? resolveRewardBadge(recommendation) : null,
   };
   renderActionDialog();
+}
+
+/**
+ * 입력: 액션 대상 추천 항목.
+ * 출력: 보상 연출에 쓸 뱃지 표시 정보.
+ * 역할: 완료한 퀘스트의 뱃지 이름으로 실제 뱃지 등급과 카테고리를 찾는다.
+ * 호출 예시: resolveRewardBadge(recommendation)
+ */
+function resolveRewardBadge(recommendation) {
+  // 완료한 퀘스트가 주는 뱃지 이름입니다.
+  const badgeName = recommendation?.badgeName || "";
+  // 뱃지 목록에서 찾은 같은 이름의 뱃지입니다. 없으면 최근 획득 뱃지를 씁니다.
+  const badge =
+    state.badges.find((item) => item.name === badgeName) || getEarnedBadges()[0] || state.badges[0];
+
+  return {
+    name: badgeName || badge?.name || "탐험 뱃지",
+    category: badge?.category || recommendation?.category || "default",
+    tier: badge?.tier || 1,
+  };
 }
 
 /**
@@ -3601,6 +4011,13 @@ function renderActionDialog() {
   closeButton.addEventListener("click", closeActionDialog);
 
   dialog.append(title, message, detailList, closeButton);
+
+  // GPS 인증 성공 연출입니다. 노드를 붙이는 순간 900ms 연출이 시작됩니다.
+  if (state.actionDialog.reward) {
+    dialog.prepend(createRewardFx(state.actionDialog.reward));
+    playRewardFlash();
+  }
+
   overlay.append(dialog);
   document.body.append(overlay);
   closeButton.focus({ preventScroll: true });
@@ -3677,6 +4094,7 @@ async function loadRecommendations(forceRefresh = false) {
   renderHomeMetrics();
   renderHomeRecommendations();
   renderRecommendations();
+  renderAdventure();
   renderQuestBoard();
   renderMapView();
 }
@@ -4007,6 +4425,13 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-adventure-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.adventureSort = button.dataset.adventureSort === "started" ? "started" : "distance";
+      renderAdventure();
+    });
+  });
+
   document.querySelectorAll("[data-customize-category]").forEach((button) => {
     button.addEventListener("click", () => {
       state.customizerCategory = button.dataset.customizeCategory || "all";
@@ -4045,6 +4470,8 @@ function bindEvents() {
       return;
     }
 
+    // 드로어에서 메뉴를 고르면 드로어를 먼저 닫고 화면을 넘깁니다.
+    closeDrawer();
     setActiveView(viewTarget.dataset.viewTarget || "home");
   });
 
@@ -4052,11 +4479,248 @@ function bindEvents() {
     setActiveView(readInitialView(), false);
   });
 
+  bindDrawerEvents();
+  bindHomeContextEvents();
+  bindSettingEvents();
+
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.actionDialog) {
       closeActionDialog();
+      return;
+    }
+
+    // 오버레이가 없으면 Esc 로 드로어를 닫습니다. (명세 §7.2)
+    if (event.key === "Escape" && isDrawerOpen()) {
+      closeDrawer();
+      return;
+    }
+
+    if (event.key === "Tab") {
+      trapDrawerFocus(event);
     }
   });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 우측 책갈피 손잡이, 닫기 버튼, 배경 탭, 가장자리 스와이프, 뒤로가기를 연결한다. (명세 §7.2)
+ * 호출 예시: bindDrawerEvents()
+ */
+function bindDrawerEvents() {
+  select("#bookmark-handle")?.addEventListener("click", openDrawer);
+  select("#drawer-close")?.addEventListener("click", () => closeDrawer());
+  select("#drawer-scrim")?.addEventListener("click", () => closeDrawer());
+
+  // 뒤로가기는 열린 드로어를 먼저 닫습니다. (명세 §7.4)
+  window.addEventListener("popstate", () => {
+    if (isDrawerOpen()) {
+      closeDrawer(true);
+      return;
+    }
+    setActiveView(readInitialView(), false);
+  });
+
+  // 스와이프 인식을 오른쪽 가장자리 24px 안에서 시작한 제스처로만 제한해
+  // 지도 드래그·OS 뒤로가기 제스처와 충돌을 줄입니다. (명세 §7.2)
+  const EDGE_WIDTH = 24;
+  const SWIPE_MIN = 40;
+
+  // 제스처 시작 좌표입니다.
+  let touchStartX = 0;
+  let touchStartY = 0;
+  // 이번 제스처가 드로어 대상인지 여부입니다.
+  let isEdgeGesture = false;
+
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      if (event.touches.length !== 1) {
+        isEdgeGesture = false;
+        return;
+      }
+
+      const touch = event.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      // 열려 있으면 드로어 안에서 시작한 오른쪽 스와이프를 닫기로 받습니다.
+      isEdgeGesture = isDrawerOpen()
+        ? Boolean(event.target instanceof Element && event.target.closest("#app-drawer"))
+        : touch.clientX >= window.innerWidth - EDGE_WIDTH;
+    },
+    { passive: true },
+  );
+
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      if (!isEdgeGesture) {
+        return;
+      }
+      isEdgeGesture = false;
+
+      const touch = event.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+
+      // 가로 이동량과 세로 이동량입니다. 세로가 크면 스크롤로 봅니다.
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+      if (Math.abs(deltaX) < SWIPE_MIN || Math.abs(deltaY) > Math.abs(deltaX)) {
+        return;
+      }
+
+      if (!isDrawerOpen() && deltaX < 0) {
+        openDrawer();
+        return;
+      }
+      if (isDrawerOpen() && deltaX > 0) {
+        closeDrawer();
+      }
+    },
+    { passive: true },
+  );
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈의 현위치·계획 모드 토글과 3단 시트 손잡이를 연결한다. (명세 §6, §10 S03)
+ * 호출 예시: bindHomeContextEvents()
+ */
+function bindHomeContextEvents() {
+  document.querySelectorAll("[data-context-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setExplorationMode(button.dataset.contextMode || "current");
+    });
+  });
+
+  select("#home-sheet-grip")?.addEventListener("click", cycleHomeSheetSnap);
+
+  select("#home-plan-date")?.addEventListener("change", (event) => {
+    state.plannedDate = event.target.value || "";
+    renderHomeContext();
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 마이페이지 설정 항목을 연결하고 저장된 값을 화면에 반영한다. (명세 §12)
+ * 호출 예시: bindSettingEvents()
+ */
+function bindSettingEvents() {
+  // 모션 줄이기 체크박스입니다.
+  const reducedMotionInput = select("#setting-reduced-motion");
+
+  applyReducedMotion();
+
+  if (reducedMotionInput) {
+    reducedMotionInput.checked = state.reducedMotion;
+    reducedMotionInput.addEventListener("change", (event) => {
+      state.reducedMotion = Boolean(event.target.checked);
+      writeStorageValue(REDUCED_MOTION_KEY, String(state.reducedMotion));
+      applyReducedMotion();
+    });
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 앱 모션 줄이기 설정을 body 속성으로 내려 CSS가 연출을 멈추게 한다.
+ * 호출 예시: applyReducedMotion()
+ */
+function applyReducedMotion() {
+  document.body.dataset.reducedMotion = String(state.reducedMotion);
+}
+
+/**
+ * 입력: "current" 또는 "planned".
+ * 출력: 없음.
+ * 역할: 탐색 기준 위치를 명시적으로 전환한다. (명세 §6.1)
+ * 호출 예시: setExplorationMode("planned")
+ */
+function setExplorationMode(mode) {
+  state.explorationMode = mode === "planned" ? "planned" : "current";
+  renderHomeContext();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈 시트를 접힘·중간·전체 순으로 순환시킨다. (명세 §10 S03)
+ * 호출 예시: cycleHomeSheetSnap()
+ */
+function cycleHomeSheetSnap() {
+  // 3스냅 순환 순서입니다.
+  const order = ["collapsed", "mid", "full"];
+  // 다음 스냅 위치입니다.
+  const next = order[(order.indexOf(state.homeSheetSnap) + 1) % order.length];
+
+  state.homeSheetSnap = next;
+  renderHomeSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈 시트의 현재 스냅을 DOM에 반영한다.
+ * 호출 예시: renderHomeSheet()
+ */
+function renderHomeSheet() {
+  // 홈 3단 시트입니다.
+  const sheet = select("#home-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  sheet.dataset.snap = state.homeSheetSnap;
+
+  // 스냅 상태를 스크린리더에도 알립니다.
+  const grip = select("#home-sheet-grip");
+  if (grip) {
+    // 현재 스냅의 한국어 이름입니다.
+    const label = { collapsed: "접힘", mid: "중간", full: "전체" }[state.homeSheetSnap] || "중간";
+    grip.setAttribute("aria-label", `시트 높이 변경 (현재 ${label})`);
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈 상단의 탐색 컨텍스트 표시를 현재 상태로 갱신한다. (명세 §6)
+ * 호출 예시: renderHomeContext()
+ */
+function renderHomeContext() {
+  // 계획 모드인지 여부입니다.
+  const isPlanned = state.explorationMode === "planned";
+
+  document.querySelectorAll("[data-context-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.contextMode === state.explorationMode));
+  });
+
+  // 계획 위치·날짜 입력 줄입니다. 현위치 모드에서는 감춥니다.
+  const planControls = select("#home-plan-controls");
+  if (planControls) {
+    planControls.hidden = !isPlanned;
+  }
+
+  // 현재 기준 위치 이름입니다.
+  const placeText = select("#home-place-text");
+  if (placeText) {
+    placeText.textContent = state.location.label || "대전광역시청";
+  }
+
+  // GPS 상태 표시입니다. 계획 모드에서는 실제 측위가 아님을 명시합니다.
+  const gpsState = select("#home-gps-state");
+  if (gpsState) {
+    gpsState.textContent = isPlanned ? "계획 위치" : state.location.measured ? "GPS ON" : "기본 좌표";
+  }
+
+  renderHomeSheet();
 }
 
 /**
