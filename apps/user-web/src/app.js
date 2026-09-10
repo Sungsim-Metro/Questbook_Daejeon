@@ -8122,6 +8122,42 @@ function trapFocus(panel) {
 
 /**
  * 입력: 없음.
+ * 출력: 오버레이를 하나 닫았는지 여부.
+ * 역할: 뒤로가기가 화면을 넘기기 전에 열려 있는 시트를 위에서부터 하나만 닫는다. (명세 §7.4)
+ * 호출 예시: if (closeTopOverlay()) return;
+ */
+function closeTopOverlay() {
+  // 나중에 연 것이 위에 있으므로 이 순서로 검사합니다.
+  if (state.photo.open) {
+    closePhotoSheet();
+    return true;
+  }
+  if (state.recordSheetOpen) {
+    closeRecordSheet();
+    return true;
+  }
+  if (state.planSheetOpen) {
+    closePlanSheet();
+    return true;
+  }
+  if (state.weatherSheetOpen) {
+    closeWeatherSheet();
+    return true;
+  }
+  if (state.catalogSheetId) {
+    closeCatalogSheet();
+    return true;
+  }
+  if (state.questSheetId) {
+    closeQuestSheet();
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 입력: 없음.
  * 출력: 없음.
  * 역할: 전체 화면을 현재 상태 기준으로 다시 그린다.
  * 호출 예시: renderAll()
@@ -9139,13 +9175,22 @@ function bindEvents() {
       return;
     }
 
-    // 드로어에서 메뉴를 고르면 드로어를 먼저 닫고 화면을 넘깁니다.
-    closeDrawer();
+    // 드로어에서 메뉴를 고를 때는 히스토리를 되감지 않습니다.
+    // history.back() 은 비동기라 아래 setActiveView 가 replaceState 로 바꾼 해시를
+    // 이전 값으로 되돌리고, 그 hashchange 가 화면을 홈으로 덮어씁니다.
+    // 드로어가 쌓아 둔 항목은 setActiveView 의 replaceState 가 목적지 항목으로 바꿔 씁니다.
+    closeDrawer(true);
     setActiveView(viewTarget.dataset.viewTarget || "home");
   });
 
   window.addEventListener("hashchange", () => {
-    setActiveView(readInitialView(), false);
+    // 해시가 가리키는 화면입니다.
+    const nextView = readInitialView();
+    // 이미 그 화면이면 다시 그리지 않습니다. 히스토리 이동 중 화면이 되돌아가는 것을 막습니다.
+    if (nextView === state.activeView) {
+      return;
+    }
+    setActiveView(nextView, false);
   });
 
   bindDrawerEvents();
@@ -9215,8 +9260,10 @@ function bindDrawerEvents() {
   // 뒤로가기는 열린 드로어를 먼저 닫습니다. (명세 §7.4)
   window.addEventListener("popstate", () => {
     // 뒤로가기는 최상위 오버레이 → 열린 드로어 → 이전 화면 순으로 닫습니다. (명세 §7.4)
-    if (state.questSheetId) {
-      closeQuestSheet();
+    if (closeTopOverlay()) {
+      // 시트는 히스토리 항목을 쌓지 않으므로 되감긴 항목을 되돌려 보던 화면을 유지합니다.
+      // 해시를 원래대로 돌려놓으면 뒤이어 오는 hashchange 도 같은 화면이라 아무 일도 하지 않습니다.
+      window.history.pushState(null, "", `#view-${state.activeView}`);
       return;
     }
     if (isDrawerOpen()) {
