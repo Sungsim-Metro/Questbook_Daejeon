@@ -1503,29 +1503,9 @@ p {
   box-shadow: 0 -12px 28px rgba(94, 78, 54, 0.08);
 }
 
-.nav-link {
-  min-width: 0;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  gap: 3px;
-  padding: 0;
-  color: #8a7f6e;
-  text-align: center;
-  background: transparent;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.nav-link span:first-child {
-  font-family: system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
-  font-size: 17px;
-  line-height: 1;
-}
-
-.nav-link.is-active {
-  color: var(--green-dark);
-}
+/* v1 하단 탭의 .nav-link 규칙은 제거했다.
+   v2 의 .nav-link 는 우측 드로어의 카트리지 메뉴이며 stitch-theme.css 가 정의한다.
+   특히 옛 규칙의 이모지 폰트 스택이 Material Symbols 아이콘을 덮어썼다. */
 
 .action-dialog-overlay {
   position: fixed;

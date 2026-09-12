@@ -15,3 +15,13 @@ plan/
 Todo/
 docs/superpowers
 dist/
+
+# 꿈돌이 원본 PNG. 44MB 라 저장소에 두지 않는다.
+# scripts/build_ggumdori_assets.mjs 가 구운 결과(0.33MB)만 커밋한다.
+# 매핑 설정은 예외로 함께 관리한다.
+assets-src/ggumdori/*.png
+!assets-src/ggumdori/manifest.overrides.json
+!assets-src/ggumdori/quest-mapping.json
+
+# scripts/seed_quest_rewards.mjs 가 매니페스트에서 생성하는 시드입니다.
+database/seeds/*.generated.sql
