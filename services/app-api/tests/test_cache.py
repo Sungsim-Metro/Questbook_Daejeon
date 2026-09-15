@@ -225,6 +225,41 @@ class TourPlaceRedisCacheTest(unittest.TestCase):
         self.assertIsNotNone(cache.get("demo:any", "36.33:127.43", "nature"))
         self.assertTrue(all("demo" not in key for key in fake_client.values))
 
+    def test_invalidation_preserves_selected_regions_without_resetting_ttl(self) -> None:
+        """
+        입력: 여러 권역과 사용자에 분리된 장소 캐시.
+        출력: 없음.
+        역할: 대전 전체 후보만 기존 TTL로 보존하며 주변 캐시 제거와 사용자 격리를 유지한다.
+        호출 예시: self.test_invalidation_preserves_selected_regions_without_resetting_ttl()
+        """
+        # 변수 의미: 실제 Redis 대신 메모리 경계를 사용하는 캐시다.
+        cache = TourPlaceRedisCache("redis://127.0.0.1:6379/0", default_ttl_seconds=1800)
+        # 변수 의미: 저장 값과 남은 TTL을 직접 확인할 테스트 Redis다.
+        fake_client = FakeRedisClient()
+        cache._client = fake_client
+        cache.set("alice:*", "citywide:daejeon", "all", [make_place("city")], "live")
+        cache.set("alice:*", "citywide:daejeon", "science", [make_place("science")], "live")
+        cache.set("alice:*", "nearby:36.33:127.43:5000", "all", [make_place("nearby")], "live")
+        cache.set("alice:other", "nearby:36.33:127.43:5000", "all", [make_place("other")], "live")
+        # 변수 의미: 보존할 대전 전체 후보의 키와 원본 직렬화 값이다.
+        city_key = cache._key("alice:*", "citywide:daejeon", "all")
+        city_value = fake_client.values[city_key]
+        fake_client.expirations[city_key] = 913
+        with patch.object(fake_client, "set", wraps=fake_client.set) as mocked_set, patch.object(
+            fake_client, "get", wraps=fake_client.get
+        ) as mocked_get:
+            self.assertEqual(cache.invalidate_for_user("alice:*", preserve_region_keys=("citywide:daejeon",)), 1)
+            mocked_set.assert_not_called()
+            mocked_get.assert_not_called()
+        self.assertEqual(fake_client.values[city_key], city_value)
+        self.assertEqual(fake_client.expirations[city_key], 913)
+        self.assertIsNotNone(cache.get("alice:*", "citywide:daejeon", "science"))
+        self.assertIsNone(cache.get("alice:*", "nearby:36.33:127.43:5000", "all"))
+        self.assertIsNotNone(cache.get("alice:other", "nearby:36.33:127.43:5000", "all"))
+        self.assertEqual(cache.invalidate_for_user("alice:*"), 2)
+        self.assertIsNone(cache.get("alice:*", "citywide:daejeon", "all"))
+        self.assertIsNotNone(cache.get("alice:other", "nearby:36.33:127.43:5000", "all"))
+
 
 if __name__ == "__main__":
     unittest.main()

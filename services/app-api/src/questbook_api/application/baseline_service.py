@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
 import re
 from threading import Lock
 from typing import Any
 
+from questbook_api.application.quest_generation import QUEST_TEMPLATES, build_template_quest
 from questbook_api.domain.models import QuestTemplate, TourPlaceCandidate
 from questbook_api.infrastructure.cache import TourPlaceRedisCache, utc_now
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.object_storage.client import sanitize_object_key_token
-from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters
+from questbook_api.integrations.tourapi.client import TourApiClient, haversine_meters, with_distances
 
 
 # 변수 의미: 영수증 시간 비교와 표시에서 사용할 한국 시간대다.
@@ -37,15 +39,8 @@ GENERIC_ITEM_WORDS = {
     "로컬",
 }
 
-# 변수 의미: baseline 카테고리별 템플릿 기반 퀘스트 생성 정책이다.
-QUEST_TEMPLATES: dict[str, QuestTemplate] = {
-    "nature": QuestTemplate("nature", "방문형", "gps", 50, "{place_name} 자연 관찰 체크인", "{place_name} 주변에서 오늘의 자연 단서를 기록하고 초록 탐험가 XP를 획득합니다."),
-    "science": QuestTemplate("science", "테마형", "checklist", 80, "{place_name} 과학 탐험", "{place_name}에서 전시 키워드 하나를 수첩에 남기고 과학 탐험가 XP를 획득합니다."),
-    "downtown": QuestTemplate("downtown", "이동형", "gps_distance", 40, "{place_name} 원도심 걷기", "{place_name} 주변을 걸으며 원도심 산책 기록을 완성합니다."),
-    "market": QuestTemplate("market", "소비형", "receipt_or_sign_photo", 60, "{place_name} 로컬 상권 방문", "{place_name} 방문 사진 또는 영수증 인증으로 지역 상권 XP를 획득합니다."),
-    "mobility": QuestTemplate("mobility", "이동형", "gps_distance", 70, "{place_name} 이동 루트", "{place_name}을 출발점으로 가까운 관광지를 연결하는 이동형 퀘스트입니다."),
-    "nightview": QuestTemplate("nightview", "활동형", "time_window_photo", 70, "{place_name} 야경 기록", "{place_name}에서 저녁 시간대 전망 기록을 남깁니다."),
-}
+# 변수 의미: 거리 없는 대전 관광지 탐색 화면에 반환할 최대 결과 수다.
+MAX_PLACE_RECOMMENDATIONS = 30
 
 
 def normalize_match_text(value: str) -> str:
@@ -246,6 +241,140 @@ class BaselineQuestbookService:
         """
         return self.repository.ensure_user(user_id)
 
+    def update_preferences(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        입력: 인증된 사용자 ID와 관심 카테고리 배열을 담은 요청 본문.
+        출력: 저장된 사용자 선호도.
+        역할: 실제 퀘스트를 지원하는 관심사만 허용하고 빈 선택도 명시적 설정으로 저장한다.
+        호출 예시: preference = service.update_preferences("demo-user", {"categories": ["nature"]})
+        """
+        # 변수 의미: 사용자가 저장하려는 관심 카테고리 목록이다.
+        categories = payload.get("categories")
+        if not isinstance(categories, list):
+            raise ValueError("categories must be an array.")
+        if len(categories) > len(QUEST_TEMPLATES):
+            raise ValueError("Too many interest categories.")
+        if any(not isinstance(category, str) or category not in QUEST_TEMPLATES for category in categories):
+            raise ValueError("categories contains an unsupported interest category.")
+        if len(set(categories)) != len(categories):
+            raise ValueError("categories must not contain duplicates.")
+        return self.repository.update_preferences(user_id, categories)
+
+    def update_nickname(self, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        입력: 인증된 사용자 ID와 nickname 요청 본문.
+        출력: 닉네임이 갱신된 전체 사용자 프로필.
+        역할: main UI와 같은 필수·최대 20자 규칙으로 닉네임을 저장한다.
+        호출 예시: user = service.update_nickname("demo-user", {"nickname": "대전 산책가"})
+        """
+        # 변수 의미: 요청에서 받은 닉네임 원본 값이다.
+        raw_nickname = payload.get("nickname")
+        if not isinstance(raw_nickname, str):
+            raise ValueError("nickname must be a string.")
+        # 변수 의미: 저장 전 앞뒤 공백을 제거한 닉네임이다.
+        nickname = raw_nickname.strip()
+        if not nickname:
+            raise ValueError("nickname is required.")
+        if len(nickname) > 20:
+            raise ValueError("nickname must be 20 characters or fewer.")
+        return self.repository.update_nickname(user_id, nickname)
+
+    def select_ggumdori(self, user_id: str, payload: dict[str, Any]) -> dict[str, str]:
+        """
+        입력: 인증된 사용자 ID와 selectedGgumdoriId 요청 본문.
+        출력: 저장된 대표 꿈돌이 식별자.
+        역할: 비어 있거나 잘못된 ID를 거부하고 저장소의 소유권 검사를 호출한다.
+        호출 예시: result = service.select_ggumdori("demo-user", {"selectedGgumdoriId": "ggumdori_default_1"})
+        """
+        # 변수 의미: 대표로 선택할 꿈돌이 식별자 원본 값이다.
+        raw_variant_id = payload.get("selectedGgumdoriId")
+        if not isinstance(raw_variant_id, str) or not raw_variant_id.strip():
+            raise ValueError("selectedGgumdoriId is required.")
+        # 변수 의미: 앞뒤 공백을 제거한 legacy 꿈돌이 variant ID다.
+        variant_id = raw_variant_id.strip()
+        return {"selectedGgumdoriId": self.repository.select_ggumdori(user_id, variant_id)}
+
+    def get_place_recommendations(
+        self,
+        user_id: str,
+        category_key: str = "all",
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        """
+        입력: 사용자 ID, 선택적 카테고리 필터와 강제 새로고침 여부.
+        출력: 현재 좌표 없이 관심사에 맞춰 정렬한 대전 관광지와 캐시 정보.
+        역할: 지역 관광지 후보만 조회하고 퀘스트 생성 없이 선호 일치 이유를 제공한다.
+        호출 예시: response = service.get_place_recommendations("demo-user", "nature")
+        """
+        if category_key != "all" and category_key not in QUEST_TEMPLATES:
+            raise ValueError("Unsupported place category.")
+        self.repository.ensure_user(user_id)
+        # 변수 의미: 현재 요청에 반영할 최신 사용자 선호도다.
+        preference = self.repository.get_user(user_id)["preference"]
+        # 변수 의미: 대전 전체 후보 캐시에 사용하며 위치 기반 캐시와 겹치지 않는 권역 키다.
+        cache_region_key = "citywide:daejeon"
+        # 변수 의미: 카테고리 변경에도 재사용할 사용자별 전체 지역 후보 캐시다.
+        cache_entry = None if force_refresh else self.cache.get(user_id, cache_region_key, "all")
+        # 변수 의미: 이번 응답이 기존 장소 후보 캐시를 사용했는지 여부다.
+        cache_hit = cache_entry is not None
+        if cache_entry is None:
+            # 변수 의미: 모든 내부 카테고리의 대전 관광지와 라이브 또는 예시 원천 상태다.
+            places, source_status = self.tour_client.fetch_daejeon(category_key="all")
+            cache_entry = self.cache.set(user_id, cache_region_key, "all", places, source_status)
+
+        # 변수 의미: 관광지 순위에 사용할 관심 카테고리 집합이다.
+        preferred_categories = set(preference["categories"])
+        # 변수 의미: 기존 예시 대체 응답에는 카탈로그 등록 필터를 적용하지 않는다.
+        is_fallback = cache_entry.source_status.startswith("fallback")
+        # 변수 의미: 라이브 후보 contentId에 연결된 현재 승인 퀘스트를 한 번에 읽은 결과다.
+        catalog_quests = (
+            {} if is_fallback else self.repository.get_catalog_quests(
+                [place.content_id for place in cache_entry.places]
+            )
+        )
+        # 변수 의미: GPS와 완료 이력을 사용하지 않는 관광지 추천 항목이다.
+        recommendations: list[dict[str, Any]] = []
+        # 변수 의미: 지역 후보 캐시에서 현재 평가하는 관광지다.
+        for place in cache_entry.places:
+            if category_key != "all" and place.category_code != category_key:
+                continue
+            if not is_fallback and not any(
+                quest["category_code"] == place.category_code
+                for quest in catalog_quests.get(place.content_id, [])
+            ):
+                continue
+            # 변수 의미: 관광지 테마가 사용자가 선택한 관심사에 포함되는지 여부다.
+            matches_preference = place.category_code in preferred_categories
+            # 변수 의미: 거리 기준이 없는 지역 탐색용 장소 응답이다.
+            public_place = place.to_public_dict()
+            public_place["distanceMeters"] = None
+            recommendations.append({
+                "place": public_place,
+                "score": 100 if matches_preference else 0,
+                "matchesPreference": matches_preference,
+                "reason": (
+                    "선택한 관심 카테고리와 일치해요." if matches_preference
+                    else "대전에서 둘러볼 수 있는 관광지예요."
+                ),
+            })
+        recommendations.sort(key=lambda item: (
+            -item["score"], item["place"]["title"], item["place"]["contentId"],
+        ))
+        return {
+            "scope": "daejeon",
+            "preference": preference,
+            "categoryKey": category_key,
+            "cache": {
+                "hit": cache_hit,
+                "sourceStatus": cache_entry.source_status,
+                "fetchedAt": cache_entry.fetched_at.isoformat(),
+                "expiresAt": cache_entry.expires_at.isoformat(),
+                "ttlSeconds": self.cache.default_ttl_seconds,
+            },
+            "recommendations": recommendations[:MAX_PLACE_RECOMMENDATIONS],
+            "attribution": "관광정보 제공: 한국관광공사(TourAPI)",
+        }
+
     def get_recommendations(
         self,
         user_id: str,
@@ -254,13 +383,20 @@ class BaselineQuestbookService:
         category_key: str,
         radius_meters: int,
         force_refresh: bool = False,
+        mode: str = "nearby",
     ) -> dict[str, Any]:
         """
-        입력: 사용자 ID, 현재 좌표, 카테고리, 반경, 강제 새로고침 여부.
+        입력: 사용자 ID, 추천 기준 좌표, 카테고리, 반경, 새로고침 여부와 nearby 또는 planning 모드.
         출력: 추천 관광지와 사용자별 퀘스트 후보 응답.
-        역할: TourAPI 캐시 확인, 후보 조회, 점수 계산, ReusableQuest와 UserQuestInstance 생성을 수행한다.
+        역할: 라이브 관광지에 저장 퀘스트를 결합하고 점수와 사용자 인스턴스를 준비한다.
         호출 예시: payload = service.get_recommendations(\"demo-user\", 36.327, 127.427, \"nature\", 5000, False)
         """
+        if mode not in {"nearby", "planning"}:
+            raise ValueError("mode must be nearby or planning.")
+        if not math.isfinite(latitude) or not -90 <= latitude <= 90:
+            raise ValueError("latitude must be a finite value between -90 and 90.")
+        if not math.isfinite(longitude) or not -180 <= longitude <= 180:
+            raise ValueError("longitude must be a finite value between -180 and 180.")
         self.repository.ensure_user(user_id)
         # 변수 의미: 허용되는 내부 카테고리 코드 목록이다.
         allowed_codes = self.repository.get_category_codes()
@@ -268,16 +404,18 @@ class BaselineQuestbookService:
         normalized_category = normalize_category(category_key, allowed_codes)
         # 변수 의미: 캐시 권역 키다.
         region_key = build_region_key(latitude, longitude)
+        # 변수 의미: 실제 외부 요청 정밀도와 모드 및 반경을 포함한 내부 캐시 권역 키다.
+        cache_region_key = f"{mode}:{latitude:.7f}:{longitude:.7f}:{radius_meters}"
         if force_refresh:
-            self.cache.invalidate_for_user(user_id)
-        self._invalidate_if_query_changed(user_id, region_key, normalized_category)
+            self.cache.invalidate_for_user(user_id, preserve_region_keys=("citywide:daejeon",))
+        self._invalidate_if_query_changed(user_id, cache_region_key, normalized_category)
         # 변수 의미: 캐시 조회 결과다.
-        cached_entry = self.cache.get(user_id, region_key, normalized_category)
+        cached_entry = self.cache.get(user_id, cache_region_key, normalized_category)
         if cached_entry is None:
             # 변수 의미: TourAPI 또는 fallback에서 조회한 장소 후보 목록과 원천 상태다.
             places, source_status = self.tour_client.fetch_nearby(latitude, longitude, normalized_category, radius_meters)
             # 변수 의미: 새로 저장한 캐시 엔트리다.
-            cache_entry = self.cache.set(user_id, region_key, normalized_category, places, source_status)
+            cache_entry = self.cache.set(user_id, cache_region_key, normalized_category, places, source_status)
             # 변수 의미: 캐시 적중 여부다.
             cache_hit = False
         else:
@@ -292,31 +430,64 @@ class BaselineQuestbookService:
         recommendation_profile = self.repository.get_recommendation_profile(user_id)
         # 변수 의미: 추천 결과 목록이다.
         recommendations: list[dict[str, Any]] = []
-        for place in cache_entry.places:
-            # 변수 의미: 해당 장소에 적용할 퀘스트 템플릿이다.
-            template = QUEST_TEMPLATES.get(place.category_code, QUEST_TEMPLATES["downtown"])
-            # 변수 의미: 공용 퀘스트 생성 또는 재사용에 필요한 데이터다.
-            quest_data = self._build_quest_data(user_id, place, template)
-            # 변수 의미: 공용 재사용 퀘스트다.
-            reusable_quest = self.repository.get_or_create_reusable_quest(user_id, quest_data)
-            # 변수 의미: 추천 만료 시각이다.
-            expires_at = (utc_now() + timedelta(hours=4)).isoformat()
-            # 변수 의미: 사용자별 퀘스트 인스턴스다.
-            instance = self.repository.get_or_create_user_quest_instance(user_id, reusable_quest["id"], expires_at)
-            # 변수 의미: 추천 점수다.
-            score = self._score_place(place, preferred_categories, recommendation_profile)
-            recommendations.append(
-                {
-                    "score": score,
-                    "place": place.to_public_dict(),
-                    "quest": self._quest_payload(reusable_quest, instance),
-                }
+        # 변수 의미: 계획 모드에서는 예시 데이터도 선택 지점으로부터 거리를 재계산한 후보 목록이다.
+        candidate_places = (
+            with_distances(cache_entry.places, latitude, longitude)
+            if mode == "planning" else cache_entry.places
+        )
+        # 변수 의미: API 미설정과 장애 시에는 기존 예시 퀘스트 생성 동작을 유지한다.
+        is_fallback = cache_entry.source_status.startswith("fallback")
+        # 변수 의미: 라이브 후보의 사전 저장 승인 퀘스트를 일괄 조회한 결과다.
+        catalog_quests = (
+            {} if is_fallback else self.repository.get_catalog_quests(
+                [place.content_id for place in candidate_places]
             )
+        )
+        for place in candidate_places:
+            if normalized_category != "all" and place.category_code != normalized_category:
+                continue
+            if mode == "planning" and place.distance_meters > radius_meters:
+                continue
+            if is_fallback:
+                # 변수 의미: 기존 예시 장소에 적용할 퀘스트 템플릿이다.
+                template = QUEST_TEMPLATES.get(place.category_code, QUEST_TEMPLATES["downtown"])
+                # 변수 의미: 예시 공용 퀘스트를 생성하거나 재사용할 데이터다.
+                quest_data = self._build_quest_data(user_id, place, template)
+                # 변수 의미: 예시 대체 흐름의 단일 퀘스트다.
+                place_quests = [self.repository.get_or_create_reusable_quest(user_id, quest_data)]
+            else:
+                # 변수 의미: 현재 라이브 장소와 카테고리가 일치하는 저장 퀘스트 목록이다.
+                place_quests = [
+                    quest for quest in catalog_quests.get(place.content_id, [])
+                    if quest["category_code"] == place.category_code
+                ]
+            for reusable_quest in place_quests:
+                # 변수 의미: 추천 만료 시각이다.
+                expires_at = (utc_now() + timedelta(hours=4)).isoformat()
+                # 변수 의미: 선택된 장소 메타데이터를 함께 보관하는 사용자 퀘스트 인스턴스다.
+                instance = self.repository.get_or_create_user_quest_instance(
+                    user_id, reusable_quest["id"], expires_at, place=place,
+                )
+                # 변수 의미: 추천 점수다.
+                score = self._score_place(place, preferred_categories, recommendation_profile)
+                recommendations.append(
+                    {
+                        "score": score,
+                        "place": place.to_public_dict(),
+                        "quest": self._quest_payload(reusable_quest, instance),
+                    }
+                )
 
         recommendations.sort(key=lambda item: item["score"], reverse=True)
         return {
             "userId": user_id,
             "regionKey": region_key,
+            "mode": mode,
+            "referenceLocation": {
+                "latitude": latitude,
+                "longitude": longitude,
+                "radiusMeters": radius_meters,
+            },
             "categoryKey": normalized_category,
             "cache": {
                 "hit": cache_hit,
@@ -342,7 +513,7 @@ class BaselineQuestbookService:
             # 변수 의미: 같은 사용자의 직전 요청 키다.
             previous_key = self._last_query_keys.get(user_id)
             if previous_key is not None and previous_key != current_key:
-                self.cache.invalidate_for_user(user_id)
+                self.cache.invalidate_for_user(user_id, preserve_region_keys=("citywide:daejeon",))
             self._last_query_keys[user_id] = current_key
 
     def accept_quest(self, user_id: str, instance_id: str) -> dict[str, Any]:
@@ -353,8 +524,15 @@ class BaselineQuestbookService:
         호출 예시: result = service.accept_quest(\"demo-user\", instance_id)
         """
         self.repository.ensure_user(user_id)
+        # 변수 의미: 수락 전에 사용자 소유와 장소 참조를 확인한 인스턴스다.
+        existing_instance = self.repository.get_instance_with_quest(user_id, instance_id)
+        # 변수 의미: 수락 당시 좌표 보존에 사용할 사용자별 관광지 후보이며 캐시 만료 시 None이다.
+        place = (
+            self.cache.find_place_for_user(user_id, existing_instance["place_content_id"])
+            if existing_instance is not None else None
+        )
         # 변수 의미: 갱신된 인스턴스와 퀘스트 정보다.
-        instance = self.repository.accept_quest(user_id, instance_id)
+        instance = self.repository.accept_quest(user_id, instance_id, place=place)
         return {"quest": self._quest_payload_from_joined(instance), "status": "accepted"}
 
     def complete_quest(self, user_id: str, instance_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -467,18 +645,7 @@ class BaselineQuestbookService:
         역할: 장소명과 카테고리를 템플릿에 삽입해 baseline 퀘스트를 만든다.
         호출 예시: data = self._build_quest_data(user_id, place, template)
         """
-        return {
-            "title": template.title_template.format(place_name=place.title),
-            "description": template.description_template.format(place_name=place.title),
-            "type": template.quest_type,
-            "categoryCode": template.category_code,
-            "rewardXp": template.reward_xp,
-            "verificationType": template.verification_type,
-            "placeContentId": place.content_id,
-            "placeName": place.title,
-            "source": "template",
-            "createdForUserId": user_id,
-        }
+        return build_template_quest(place, template, created_for_user_id=user_id)
 
     def _score_place(
         self,
@@ -545,18 +712,31 @@ class BaselineQuestbookService:
                 "accuracyMeters": accuracy_meters,
             }, 0.0
 
-        # 변수 의미: 캐시에서 찾은 장소 후보 좌표다.
-        place = self.cache.find_place_for_user(user_id, instance["place_content_id"])
-        if place is None:
-            # 변수 의미: 캐시 만료 후 라이브 재조회로 복구한 장소 후보다.
-            place = self._refetch_place_for_completion(user_id, instance, latitude, longitude)
-        if place is None:
-            return {"method": instance["verification_type"], "decision": "needs_review", "reason": "place_cache_missing"}, 0.0
+        # 변수 의미: 수락 때 고정한 사용자 소유 장소 정보다.
+        place_snapshot = instance.get("place_snapshot")
+        # 변수 의미: 라이브 관광지를 수락한 경우에만 사용하는 고정된 완료 인증 기준이다.
+        has_live_snapshot = (
+            instance.get("status") in {"accepted", "in_progress"}
+            and isinstance(place_snapshot, dict)
+            and place_snapshot.get("source") == "tourapi"
+        )
+        if has_live_snapshot:
+            # 변수 의미: 일일 갱신과 관계없이 유지하는 수락 당시 장소 좌표다.
+            target_latitude, target_longitude = place_snapshot["latitude"], place_snapshot["longitude"]
+            # 변수 의미: 수락 시 보존한 방문 인증 반경이다.
+            allowed_radius_meters = instance.get("allowed_radius_meters") or 50
+        else:
+            # 변수 의미: 예시 또는 이전 인스턴스에서 기존 방식으로 조회한 장소 후보다.
+            place = self.cache.find_place_for_user(user_id, instance["place_content_id"])
+            if place is None:
+                place = self._refetch_place_for_completion(user_id, instance, latitude, longitude)
+            if place is None:
+                return {"method": instance["verification_type"], "decision": "needs_review", "reason": "place_cache_missing"}, 0.0
+            target_latitude, target_longitude = place.latitude, place.longitude
+            allowed_radius_meters = 50
 
         # 변수 의미: 제출 좌표와 장소 좌표 사이 거리다.
-        distance_meters = haversine_meters(latitude, longitude, place.latitude, place.longitude)
-        # 변수 의미: 방문형 baseline 인증 반경이다.
-        allowed_radius_meters = 50
+        distance_meters = haversine_meters(latitude, longitude, target_latitude, target_longitude)
         if distance_meters > allowed_radius_meters:
             return {
                 "method": instance["verification_type"],
@@ -741,6 +921,13 @@ class BaselineQuestbookService:
         역할: DB 컬럼명을 프론트엔드 계약에 맞게 변환한다.
         호출 예시: payload = self._quest_payload(quest, instance)
         """
+        # 변수 의미: 이미 수락한 인스턴스에 고정한 퀘스트 조건이다.
+        quest_snapshot = instance.get("quest_snapshot_json")
+        if isinstance(quest_snapshot, dict):
+            reusable_quest = {
+                **reusable_quest, **quest_snapshot,
+                "id": quest_snapshot["reusable_quest_id"],
+            }
         return {
             "instanceId": instance["id"],
             "reusableQuestId": reusable_quest["id"],
