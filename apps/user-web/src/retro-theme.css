@@ -3410,3 +3410,406 @@ body[data-active-view="customize"] .app-main {
     font-size: 12px;
   }
 }
+
+/* 왼쪽 위 메뉴는 기존 민트색 아이콘을 유지하고 터치 영역만 넓힌다. */
+.app-menu-button {
+  position: relative;
+  padding: 0;
+  font-size: 23px;
+}
+
+.app-menu-button::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+
+.app-menu-button[aria-expanded="true"] {
+  background: var(--travel-yellow);
+}
+
+/* 네이티브 대화상자는 앱 너비 안에서 헤더 바로 아래에 열린다. */
+.app-menu-dialog {
+  position: fixed;
+  inset: auto;
+  top: calc(var(--header-min-height) + 8px);
+  left: max(12px, calc((100vw - var(--shell-max-width)) / 2 + 14px));
+  width: min(360px, calc(100vw - 28px), calc(var(--shell-max-width) - 28px));
+  max-width: none;
+  max-height: calc(100dvh - var(--header-min-height) - 24px - var(--safe-bottom));
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 2px solid var(--travel-ink);
+  border-radius: 18px;
+  color: var(--travel-ink);
+  background: var(--travel-card);
+  box-shadow: 5px 6px 0 rgba(23, 51, 79, 0.3);
+  scrollbar-color: var(--travel-line) var(--travel-card);
+  scrollbar-width: thin;
+}
+
+.app-menu-dialog[open] {
+  display: grid;
+}
+
+.app-menu-dialog::backdrop {
+  background: rgba(13, 34, 49, 0.42);
+}
+
+.app-menu-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--travel-ink);
+  background: var(--travel-mint);
+}
+
+.app-menu-heading h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding-left: 4px;
+  font-size: 19px;
+  line-height: 1.45;
+}
+
+.menu-icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--travel-line);
+  border-radius: 12px;
+  color: var(--travel-ink);
+  background: var(--travel-card);
+  font-size: 25px;
+  line-height: 1;
+}
+
+.app-menu-panel {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  padding: 16px;
+}
+
+.app-menu-panel > .primary-action,
+.app-menu-panel > .secondary-action,
+.app-menu-panel .interest-fieldset > .secondary-action {
+  width: 100%;
+  min-height: 44px;
+  white-space: normal;
+}
+
+.menu-mode-status {
+  justify-self: start;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px dashed #a48333;
+  border-radius: 8px;
+  background: #fff1c7;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.menu-item-list {
+  display: grid;
+  gap: 10px;
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 35px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 74px;
+  padding: 12px 10px;
+  border: 1px solid var(--travel-line);
+  border-radius: 13px;
+  color: var(--travel-ink);
+  background: #f1f7f4;
+  text-align: left;
+}
+
+.menu-item > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  background: #d8ede4;
+  font-size: 25px;
+}
+
+.menu-item > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.menu-item strong {
+  font-size: 15px;
+}
+
+.menu-item small {
+  color: #536675;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.menu-item > span:last-child {
+  font-size: 24px;
+}
+
+.app-menu-panel .interest-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.app-menu-panel .planning-help {
+  margin: 0;
+}
+
+.app-menu-panel .interest-fieldset .planning-help {
+  margin-top: 10px;
+}
+
+.app-menu-panel .planning-mode-button {
+  min-height: 108px;
+  justify-content: center;
+  overflow-wrap: anywhere;
+}
+
+.menu-profile {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.menu-profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 12px;
+  border: 1px solid var(--travel-line);
+  border-radius: 14px;
+  background: var(--travel-mint);
+}
+
+.menu-profile-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 72px;
+  width: 72px;
+  height: 88px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.menu-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.menu-profile-details {
+  min-width: 0;
+}
+
+.menu-profile-details h3,
+.menu-profile-details p {
+  margin: 0;
+}
+
+.menu-profile-details h3 {
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.menu-profile-details p {
+  margin-top: 6px;
+  color: #536675;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.menu-profile-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.menu-profile-stats > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px 5px;
+  border: 1px solid var(--travel-line);
+  border-radius: 11px;
+  background: #fff4d9;
+  text-align: center;
+}
+
+.menu-profile-stats strong {
+  overflow-wrap: anywhere;
+  font-size: 17px;
+}
+
+.menu-profile-stats span {
+  color: #536675;
+  font-size: 11px;
+}
+
+/* 계획 화면은 위치와 관심사 탐색을 같은 여행 수첩 안에서 전환한다. */
+#view-planning {
+  gap: 18px;
+}
+
+.planning-hero .page-title {
+  font-size: clamp(23px, 6.5vw, 28px);
+  line-height: 1.35;
+}
+
+.planning-hero .page-copy {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.planning-tabs {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 8px;
+  margin-top: 18px;
+  padding: 5px;
+  border: 1px solid var(--travel-line);
+  border-radius: 15px;
+  background: var(--travel-mint);
+}
+
+.planning-tabs .planning-mode-button {
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 9px 6px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.planning-tabs .planning-mode-button.is-active {
+  border-color: var(--travel-ink);
+  background: var(--travel-yellow);
+  box-shadow: 0 2px 0 rgba(23, 51, 79, 0.2);
+}
+
+.planning-pane > .section-heading-row .section-title {
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.planning-pane > .section-heading-row {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.planning-pane > .section-heading-row .text-link {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 8px 0;
+}
+
+.planning-pane .planning-coordinate-details summary {
+  display: list-item;
+  min-height: 44px;
+  padding-block: 12px;
+}
+
+.planning-pane .planning-reference:empty,
+.planning-pane .planning-address-results:empty {
+  display: none;
+}
+
+.app-menu-button:focus-visible,
+.app-menu-dialog button:focus-visible,
+.planning-pane .text-link:focus-visible {
+  outline: 3px solid var(--travel-orange);
+  outline-offset: 3px;
+}
+
+.app-menu-button:focus-visible {
+  outline-color: var(--travel-yellow);
+}
+
+/* display를 지정한 새 패널에서도 hidden 속성이 항상 화면을 숨긴다. */
+.app-menu-dialog:not([open]),
+.app-menu-dialog[hidden],
+.app-menu-dialog [hidden],
+#view-planning[hidden],
+#view-planning [hidden],
+[data-planning-only][hidden],
+[data-exploration-only][hidden] {
+  display: none !important;
+}
+
+@media (hover: hover) {
+  .menu-item:hover,
+  .menu-icon-button:hover {
+    border-color: var(--travel-teal);
+    background: #ddf1e7;
+  }
+}
+
+@media (min-width: 720px) {
+  .app-menu-dialog {
+    top: calc(var(--header-min-height) + 31px);
+    max-height: calc(100dvh - var(--header-min-height) - 67px);
+  }
+}
+
+@media (max-width: 360px) {
+  .app-menu-panel {
+    padding: 14px 12px;
+  }
+
+  .planning-tabs {
+    gap: 5px;
+    padding: 4px;
+  }
+
+  .planning-tabs .planning-mode-button {
+    padding-inline: 4px;
+    font-size: 11px;
+  }
+
+  .planning-pane .attraction-tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .planning-pane .attraction-tools .secondary-action {
+    width: 100%;
+  }
+
+  .planning-pane > .section-heading-row {
+    flex-wrap: wrap;
+  }
+}

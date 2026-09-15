@@ -1,4 +1,4 @@
-# Questbook 통합 로컬/테스트 스택: web + app + postgres + redis.
+# Questbook 통합 로컬/테스트 스택: web + app + catalog-sync + postgres + redis.
 # 사용법:
 #   cp .env.example .env
 #   sed -i "s|^QUESTBOOK_JWT_SECRET=.*|QUESTBOOK_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env
@@ -67,6 +67,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  catalog-sync:
+    build:
+      context: .
+      dockerfile: services/app-api/Dockerfile
+    image: qbook-app:local
+    container_name: questbook-catalog-sync
+    restart: unless-stopped
+    # API 서버와 분리된 프로세스가 한국 날짜마다 한 번 카탈로그를 갱신한다.
+    command: ["python", "-m", "questbook_api.catalog_sync", "--daily"]
+    env_file:
+      - .env
+    environment:
+      QUESTBOOK_DATABASE_URL: postgresql://${QUESTBOOK_POSTGRES_USER:-questbook}:${QUESTBOOK_POSTGRES_PASSWORD:-questbook_local_password}@postgres:5432/${QUESTBOOK_POSTGRES_DB:-questbook}
+      TZ: Asia/Seoul
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app:
+        condition: service_healthy
 
   web:
     build:

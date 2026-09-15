@@ -48,6 +48,7 @@ const PLANNING_PRESETS = [
 // 하단 탭과 헤더에서 사용하는 화면 메타데이터입니다.
 const VIEW_META = {
   home: { title: "모험가 홈", eyebrow: "QUESTBOOK", icon: "✦", label: "홈", navIcon: "⌂" },
+  planning: { title: "여행 계획", eyebrow: "PLANNING", icon: "⌖", label: "계획", navIcon: "⌂" },
   map: { title: "탐험 지도", eyebrow: "MAP", icon: "⌖", label: "지도", navIcon: "⌖" },
   quests: { title: "퀘스트 목록", eyebrow: "QUEST", icon: "✓", label: "퀘스트", navIcon: "✓" },
   notes: { title: "탐험 노트", eyebrow: "NOTE", icon: "▤", label: "수첩", navIcon: "▤" },
@@ -217,6 +218,11 @@ const state = {
   selectedCategory: "all",
   location: { ...FALLBACK_LOCATION },
   recommendationMode: "nearby", // 변수 의미: 주변 또는 여행 계획 추천 모드입니다.
+  planningTab: "location", // 변수 의미: 계획 화면에서 선택한 위치 또는 선호도 탐색입니다.
+  explorationCategory: "all", // 변수 의미: 계획 모드에 들어가기 전 탐험 필터입니다.
+  planningCategory: "all", // 변수 의미: 계획 모드에서 마지막으로 선택한 퀘스트 필터입니다.
+  menuPanel: "main", // 변수 의미: 메뉴 팝업 안에서 보고 있는 화면입니다.
+  menuReturnFocus: null, // 변수 의미: 팝업을 닫은 뒤 포커스를 돌려줄 요소입니다.
   plannedLocation: { ...PLANNING_PRESETS[0] }, // 변수 의미: 실측 GPS와 독립적인 여행 계획 기준점입니다.
   planningInputLocationKey: "", // 변수 의미: 좌표 입력에 마지막으로 반영한 기준점입니다.
   preference: { categories: [], isConfigured: false }, // 변수 의미: 서버에 저장된 관심사입니다.
@@ -235,7 +241,7 @@ const state = {
   addressRequestId: 0, // 변수 의미: 이전 주소 검색 응답을 무시하는 순번입니다.
   addressPending: false, // 변수 의미: 주소 검색 진행 여부입니다.
   attractions: [], // 변수 의미: 퀘스트를 생성하지 않은 대전 관광지 목록입니다.
-  attractionCategory: "all", // 변수 의미: 대전 관광지 목록의 단일 필터입니다.
+  attractionCategory: "preferred", // 변수 의미: 대전 관광지 목록의 단일 필터입니다.
   attractionRequestId: 0, // 변수 의미: 대전 관광지 요청 순번입니다.
   attractionPending: false, // 변수 의미: 대전 관광지 조회 진행 여부입니다.
   attractionMessage: "", // 변수 의미: 대전 관광지 데이터 출처 또는 오류 안내입니다.
@@ -626,7 +632,13 @@ function isUnauthorizedError(error) {
  * 호출 예시: resetExpiredSession("세션이 만료되었습니다.")
  */
 function resetExpiredSession(message = "세션이 만료되었습니다. 다시 동의 후 시작하세요.") {
+  closeAppMenu();
   state.accessToken = "";
+  state.planningTab = "location";
+  state.explorationCategory = "all";
+  state.planningCategory = "all";
+  state.selectedCategory = "all";
+  state.attractionCategory = "preferred";
   state.sessionVersion += 1;
   state.preferenceRequestId += 1;
   state.locationRequestId += 1;
@@ -703,6 +715,10 @@ async function fetchJson(path, options = {}) {
  * 호출 예시: setConsentPanelVisible(true)
  */
 function setConsentPanelVisible(isVisible) {
+  // 변수 의미: 로그인 전 메뉴 접근을 막는 버튼입니다.
+  const menuButton = select("#app-menu-button");
+  if (menuButton) menuButton.disabled = isVisible;
+  if (isVisible) closeAppMenu();
   // 필수 동의 패널 요소입니다.
   const panel = select("#consent-panel");
   // 로그인 이후 화면 묶음입니다.
@@ -768,7 +784,7 @@ function startLocalDemoSession() {
   updateSystemStatus(false, "체험 모드");
   renderAll();
   loadRecommendations();
-  loadAttractions();
+  if (state.recommendationMode === "planning" && state.planningTab === "preferences") loadAttractions();
 }
 
 /**
@@ -1418,7 +1434,7 @@ function registerServiceWorker() {
   }
 
   navigator.serviceWorker
-    .register("./service-worker.js?v=20260906-2", { updateViaCache: "none" })
+    .register("./service-worker.js?v=20260906-5", { updateViaCache: "none" })
     .then((registration) => registration.update())
     .catch(() => {
       updateSystemStatus(false, "서비스워커 등록 실패");
@@ -1558,9 +1574,9 @@ function renderBottomNavigation() {
 
   NAVIGATION_ITEMS.forEach((viewId) => {
     // 하단 탭 하나의 메타데이터입니다.
-    const meta = VIEW_META[viewId];
+    const meta = VIEW_META[viewId === "home" && state.recommendationMode === "planning" ? "planning" : viewId];
     // 현재 탭이 활성 상태인지 여부입니다.
-    const isActive = state.activeView === viewId;
+    const isActive = state.activeView === viewId || (viewId === "home" && state.activeView === "planning");
     // 하단 탭 버튼입니다.
     const button = createElement("button", `nav-link${isActive ? " is-active" : ""}`.trim());
     button.type = "button";
@@ -1582,6 +1598,9 @@ function setActiveView(viewId, shouldUpdateHash = true) {
     return;
   }
 
+  closeAppMenu();
+  if (viewId === "home" && state.recommendationMode === "planning") viewId = "planning";
+  if (viewId === "planning" && state.recommendationMode !== "planning") viewId = "home";
   state.activeView = viewId;
 
   // 모든 화면 패널입니다.
@@ -1614,6 +1633,7 @@ function setActiveView(viewId, shouldUpdateHash = true) {
  * 호출 예시: renderProfile()
  */
 function renderProfile() {
+  renderMenuProfile();
   // 프로필 카드 컨테이너입니다.
   const panel = select("#profile-panel");
 
@@ -1833,6 +1853,9 @@ function renderRecommendationMeta() {
   if (homeDataNote) {
     homeDataNote.textContent = getTourApiStatusText();
   }
+  // 변수 의미: 계획 화면에서도 실제 관광정보 또는 예시 데이터의 출처를 안내합니다.
+  const planningDataNote = select("#planning-data-note");
+  if (planningDataNote) planningDataNote.textContent = getTourApiStatusText();
 }
 
 /**
@@ -2027,6 +2050,7 @@ function createRecommendationCard(recommendation) {
  * 호출 예시: renderRecommendations()
  */
 function renderRecommendations() {
+  renderPlanningRecommendations();
   // 추천 카드 목록 컨테이너입니다.
   const list = select("#recommendation-list");
 
@@ -3256,6 +3280,136 @@ function renderAll() {
 }
 
 /**
+ * 입력: 표시할 메뉴 패널 이름. 출력: 없음.
+ * 역할: 현재 화면을 유지한 채 메뉴를 열고 제목으로 포커스를 이동합니다.
+ * 호출 예시: openAppMenu("preferences")
+ */
+function openAppMenu(panel = "main") {
+  if (!ensureSessionReady() || !["main", "profile", "preferences", "mode"].includes(panel)) return;
+  // 변수 의미: 메뉴 대화상자와 현재 패널 제목입니다.
+  const dialog = select("#app-menu-dialog");
+  const title = select("#app-menu-title");
+  const back = select("#app-menu-back");
+  const titles = { main: "메뉴", profile: "내 프로필", preferences: "선호 카테고리", mode: "모드 변경" };
+  if (!dialog) return;
+  if (!dialog.open) state.menuReturnFocus = document.activeElement;
+  state.menuPanel = panel;
+  document.querySelectorAll("[data-menu-panel]").forEach((element) => { element.hidden = element.dataset.menuPanel !== panel; });
+  if (title) title.textContent = titles[panel];
+  if (back) back.hidden = panel === "main";
+  renderMenuProfile();
+  renderPlanningSettings();
+  if (!dialog.open) dialog.showModal();
+  select("#app-menu-button")?.setAttribute("aria-expanded", "true");
+  title?.focus();
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 메뉴를 닫고 열기 직전 버튼으로 포커스를 되돌립니다.
+ * 호출 예시: closeAppMenu()
+ */
+function closeAppMenu() {
+  // 변수 의미: 닫을 메뉴 대화상자와 복귀할 입력 요소입니다.
+  const dialog = select("#app-menu-dialog");
+  const returnFocus = state.menuReturnFocus;
+  if (!dialog?.open) return;
+  dialog.close();
+  select("#app-menu-button")?.setAttribute("aria-expanded", "false");
+  state.menuReturnFocus = null;
+  if (returnFocus?.isConnected && !returnFocus.disabled) returnFocus.focus();
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 홈과 같은 계정 및 장착 꿈돌이 정보로 메뉴 프로필을 갱신합니다.
+ * 호출 예시: renderMenuProfile()
+ */
+function renderMenuProfile() {
+  // 변수 의미: 메뉴의 프로필 영역과 장착 중인 꿈돌이입니다.
+  const panel = select("#menu-profile");
+  if (!panel) return;
+  const selected = getSelectedGgumdori();
+  const summary = createElement("div", "menu-profile-summary");
+  const avatar = createGgumdoriFigure(selected);
+  const details = createElement("div", "menu-profile-details");
+  const stats = createElement("div", "menu-profile-stats");
+  avatar.classList.add("menu-profile-avatar");
+  details.append(
+    createElement("strong", "profile-name", state.user.nickname || FALLBACK_USER.nickname),
+    createElement("p", "profile-meta", `Lv.${toNumber(state.user.level, 1)} · ${toNumber(state.user.xp).toLocaleString("ko-KR")} XP`),
+    createElement("span", "selected-ggumdori-name", selected?.name || "기본 꿈돌이"),
+  );
+  summary.append(avatar, details);
+  [["완료 퀘스트", state.user.completedQuestCount], ["획득 뱃지", state.user.badgeCount]].forEach(([label, value]) => {
+    // 변수 의미: 프로필의 탐험 통계 한 칸입니다.
+    const item = createElement("div");
+    item.append(createElement("strong", "", `${toNumber(value)}개`), createElement("span", "", label));
+    stats.append(item);
+  });
+  panel.replaceChildren(summary, stats);
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 메뉴 열기, 하위 패널, Escape 및 배경 클릭 닫기를 연결합니다.
+ * 호출 예시: bindAppMenuEvents()
+ */
+function bindAppMenuEvents() {
+  select("#app-menu-button")?.addEventListener("click", () => openAppMenu());
+  select("#app-menu-close")?.addEventListener("click", closeAppMenu);
+  select("#app-menu-back")?.addEventListener("click", () => openAppMenu());
+  document.querySelectorAll("[data-menu-panel-target]").forEach((button) => {
+    button.addEventListener("click", () => openAppMenu(button.dataset.menuPanelTarget));
+  });
+  // 변수 의미: 브라우저 기본 포커스 순환을 사용하는 메뉴 대화상자입니다.
+  const dialog = select("#app-menu-dialog");
+  dialog?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeAppMenu();
+  });
+  dialog?.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    // 변수 의미: 현재 메뉴 패널에서 실제로 조작 가능한 요소와 포커스 위치입니다.
+    const controls = [...dialog.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]")]
+      .filter((element) => element.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const active = document.activeElement;
+    if (!first) return;
+    if (!controls.includes(active) || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  });
+  dialog?.addEventListener("click", (event) => {
+    // 변수 의미: 배경과 내부 여백의 클릭을 구분하는 경계입니다.
+    const bounds = dialog.getBoundingClientRect();
+    if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) closeAppMenu();
+  });
+}
+
+/**
+ * 입력: 없음. 출력: 없음.
+ * 역할: 계획 위치 주변의 관광지와 퀘스트를 기존 카드로 표시합니다.
+ * 호출 예시: renderPlanningRecommendations()
+ */
+function renderPlanningRecommendations() {
+  // 변수 의미: 계획 화면의 추천 카드 컨테이너입니다.
+  const list = select("#planning-recommendation-list");
+  if (!list) return;
+  list.replaceChildren();
+  list.setAttribute("aria-busy", String(state.recommendationPending));
+  if (state.recommendationPending || !state.recommendations.length) {
+    list.append(createElement("p", "empty-message", state.recommendationPending
+      ? "선택한 위치 주변 관광지와 퀘스트를 불러오고 있어요."
+      : state.dataSource === "error" ? "추천을 불러오지 못했습니다. 위치를 다시 선택해 주세요." : "이 위치 주변에 추천할 퀘스트가 없습니다. 다른 위치를 골라 보세요."));
+    return;
+  }
+  state.recommendations.forEach((recommendation) => list.append(createRecommendationCard(recommendation)));
+}
+
+/**
  * 입력: 없음. 출력: 추천 기준 좌표와 이름.
  * 역할: 실측 위치와 계획 위치를 모드에 따라 구분합니다.
  * 호출 예시: const location = getRecommendationLocation()
@@ -3318,7 +3472,7 @@ async function savePreferences() {
     state.preferenceMessage = IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW
       ? "미리보기에서만 적용했습니다. 계정에는 저장되지 않습니다."
       : "관심사를 저장했습니다. 추천에 반영했어요.";
-    await Promise.allSettled([loadRecommendations(), loadAttractions()]);
+    await Promise.allSettled([loadRecommendations(), ...(state.recommendationMode === "planning" && state.planningTab === "preferences" ? [loadAttractions()] : [])]);
   } catch (error) {
     if (!isCurrentSession(token, version) || requestId !== state.preferenceRequestId) return;
     state.preferenceMessage = "관심사 저장에 실패했습니다. 선택을 확인한 뒤 다시 저장해 주세요.";
@@ -3337,19 +3491,56 @@ async function savePreferences() {
  */
 function setRecommendationMode(mode) {
   if (!ensureSessionReady() || !["nearby", "planning"].includes(mode)) return;
-  state.locationRequestId += 1;
-  state.recommendationMode = mode;
-  state.planningMessage = mode === "planning" ? "계획할 지역을 고르면 주변 퀘스트를 볼 수 있어요." : "내 위치로 추천 버튼을 누르면 GPS 위치를 사용합니다.";
+  applyRecommendationMode(mode);
+  state.planningMessage = mode === "planning" ? "가고 싶은 위치를 고르면 주변 관광지와 퀘스트를 볼 수 있어요." : "내 위치로 추천 버튼을 누르면 GPS 위치를 사용합니다.";
   renderPlanningSettings();
+  setActiveView(mode === "planning" ? "planning" : "home");
   loadRecommendations();
+  if (mode === "planning" && state.planningTab === "preferences") loadAttractions();
 }
 
 /**
- * 입력: 위도·경도·이름을 가진 위치와 퀘스트 화면 이동 여부. 출력: 유효한 적용 여부.
+ * 입력: 추천 모드. 출력: 없음.
+ * 역할: 모드별 위치와 필터를 보존하고 이전 모드의 지연 응답을 무효화합니다.
+ * 호출 예시: applyRecommendationMode("nearby")
+ */
+function applyRecommendationMode(mode) {
+  if (state.recommendationMode !== mode) {
+    if (mode === "planning") {
+      state.explorationCategory = state.selectedCategory;
+      state.selectedCategory = state.planningCategory;
+    } else {
+      state.planningCategory = state.selectedCategory;
+      state.selectedCategory = state.explorationCategory;
+    }
+  }
+  state.locationRequestId += 1;
+  state.addressRequestId += 1;
+  state.attractionRequestId += 1;
+  state.addressPending = false;
+  state.addressResults = [];
+  state.attractionPending = false;
+  state.recommendationMode = mode;
+}
+
+/**
+ * 입력: location 또는 preferences. 출력: 없음.
+ * 역할: 계획 화면의 탐색 방법을 전환하고 필요할 때만 대전 관광지를 조회합니다.
+ * 호출 예시: selectPlanningTab("preferences")
+ */
+function selectPlanningTab(tab) {
+  if (state.recommendationMode !== "planning" || !["location", "preferences"].includes(tab)) return;
+  state.planningTab = tab;
+  renderPlanningSettings();
+  if (tab === "preferences") loadAttractions();
+}
+
+/**
+ * 입력: 위도·경도·이름을 가진 위치, 퀘스트 화면 이동 여부, 카테고리. 출력: 유효한 적용 여부.
  * 역할: 지도, 주소, 거점, 좌표 입력을 같은 여행 계획 상태로 적용합니다.
  * 호출 예시: setPlanningLocation({lat:36.35,lng:127.38,label:"여행 시작점"}, true)
  */
-function setPlanningLocation(location, openQuests = false) {
+function setPlanningLocation(location, openQuests = false, category = "all") {
   // 변수 의미: 검증할 숫자 좌표입니다.
   const lat = Number(location.lat);
   const lng = Number(location.lng);
@@ -3359,10 +3550,12 @@ function setPlanningLocation(location, openQuests = false) {
     return false;
   }
   if (!ensureSessionReady()) return false;
+  if (state.recommendationMode !== "planning") applyRecommendationMode("planning");
   state.locationRequestId += 1;
   state.addressRequestId += 1;
   state.addressPending = false;
-  state.recommendationMode = "planning";
+  state.selectedCategory = category;
+  state.planningTab = "location";
   state.plannedLocation = { lat, lng, label: String(location.label || "선택한 계획 위치") };
   state.planningInputLocationKey = "";
   state.planningMessage = `${state.plannedLocation.label} 주변 퀘스트를 조회합니다. 완료 인증은 현장 GPS가 필요합니다.`;
@@ -3370,6 +3563,7 @@ function setPlanningLocation(location, openQuests = false) {
   renderPlanningSettings();
   loadRecommendations();
   if (openQuests) setActiveView("quests");
+  else if (state.activeView !== "map") setActiveView("planning");
   return true;
 }
 
@@ -3379,7 +3573,7 @@ function setPlanningLocation(location, openQuests = false) {
  * 호출 예시: await searchPlanningAddress()
  */
 async function searchPlanningAddress() {
-  if (!ensureSessionReady()) return;
+  if (state.recommendationMode !== "planning" || !ensureSessionReady()) return;
   // 변수 의미: 사용자가 입력한 검색어입니다.
   const query = select("#planning-address")?.value.trim() || "";
   if (!query) {
@@ -3420,6 +3614,33 @@ async function searchPlanningAddress() {
  * 호출 예시: renderPlanningSettings()
  */
 function renderPlanningSettings() {
+  // 변수 의미: 계획 모드 전용 화면 요소와 현재 탐색 방법입니다.
+  const isPlanning = state.recommendationMode === "planning";
+  document.querySelectorAll("[data-planning-only]").forEach((element) => { element.hidden = !isPlanning; });
+  document.querySelectorAll("[data-exploration-only]").forEach((element) => { element.hidden = isPlanning; });
+  document.querySelectorAll("[data-planning-panel]").forEach((panel) => { panel.hidden = panel.dataset.planningPanel !== state.planningTab; });
+  document.querySelectorAll("[data-planning-tab]").forEach((button) => {
+    // 변수 의미: 계획 탐색 버튼의 선택 여부입니다.
+    const selected = button.dataset.planningTab === state.planningTab;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  document.querySelectorAll("[data-category]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.category === state.selectedCategory);
+  });
+  // 변수 의미: 메뉴의 모드 상태와 계획 화면의 저장된 관심사 요약입니다.
+  const modeStatus = select("#menu-mode-status");
+  const preferenceSummary = select("#planning-preference-summary");
+  const attractionCategory = select("#attraction-category");
+  const questCopy = select("#quests-copy");
+  if (attractionCategory) attractionCategory.value = state.attractionCategory;
+  if (modeStatus) modeStatus.textContent = isPlanning ? "계획 모드 · 여행을 준비하고 있어요" : "탐험 모드 · 내 주변을 탐험해요";
+  if (preferenceSummary) preferenceSummary.textContent = state.preference.categories.length
+    ? `내 선호 카테고리 · ${state.preference.categories.map((category) => CATEGORY_LABELS[category]).join(" · ")}`
+    : "선호 카테고리를 설정하면 좋아하는 주제로 추천해요. 지금은 전체 관광지를 보여드려요.";
+  if (questCopy) questCopy.textContent = isPlanning
+    ? "선택한 계획 위치와 카테고리를 기준으로 관광지와 퀘스트를 추천합니다."
+    : "현재 위치와 관심사, 탐험 이력을 바탕으로 퀘스트를 추천합니다.";
   document.querySelectorAll("[data-interest-category]").forEach((input) => {
     input.checked = state.interestDraft.includes(input.dataset.interestCategory);
     input.disabled = state.preferencePending;
@@ -3457,7 +3678,7 @@ function renderPlanningSettings() {
   }
   // 변수 의미: 현재 추천 기준과 모드 요약입니다.
   const location = getRecommendationLocation();
-  const summary = `${state.recommendationMode === "planning" ? "여행 계획" : "내 주변"} · ${location.label}`;
+  const summary = `${state.recommendationMode === "planning" ? "계획 위치" : "내 주변"} · ${location.label}`;
   document.querySelectorAll("[data-recommendation-summary]").forEach((element) => { element.textContent = summary; });
   // 변수 의미: 선택한 기준점에 맞게 동기화할 좌표 입력입니다.
   const latitude = select("#planning-latitude");
@@ -3489,9 +3710,9 @@ function renderPlanningSettings() {
   const mapHint = select("#map-planning-hint");
   const mapTitle = select("#map-title");
   if (mapHint) mapHint.textContent = state.recommendationMode === "planning"
-    ? "NAVER 지도 빈 곳을 누르면 계획 위치가 바뀝니다. 지도 연결이 없으면 추천 설정의 주요 지점·좌표 입력을 사용하세요."
-    : "여행 전에 다른 지역을 살펴보려면 추천 설정에서 여행 계획 모드를 선택하세요.";
-  if (mapTitle) mapTitle.textContent = state.recommendationMode === "planning" ? "계획 위치 주변 퀘스트" : "내 주변 퀘스트";
+    ? "NAVER 지도 빈 곳을 누르면 계획 위치가 바뀝니다. 지도 연결이 없으면 계획 화면의 주요 지점·좌표 입력을 사용하세요."
+    : "";
+  if (mapTitle) mapTitle.textContent = state.recommendationMode === "planning" ? "계획 위치 주변 퀘스트" : "현재 위치 주변 퀘스트";
 }
 
 /**
@@ -3500,12 +3721,13 @@ function renderPlanningSettings() {
  * 호출 예시: await loadAttractions(true)
  */
 async function loadAttractions(forceRefresh = false) {
+  if (state.recommendationMode !== "planning" || !ensureSessionReady()) return;
   // 변수 의미: 조회가 속한 사용자와 요청 순번입니다.
   const token = state.accessToken;
   const version = state.sessionVersion;
   const requestId = ++state.attractionRequestId;
   // 변수 의미: GPS를 포함하지 않는 대전 전체 조회 조건입니다.
-  const query = new URLSearchParams({ category: state.attractionCategory });
+  const query = new URLSearchParams({ category: state.attractionCategory === "preferred" ? "all" : state.attractionCategory });
   if (forceRefresh) query.set("refresh", "1");
   state.attractionPending = true;
   state.attractionMessage = "대전 관광지를 불러오고 있습니다.";
@@ -3557,11 +3779,15 @@ function renderAttractions() {
     list.append(createElement("p", "empty-message", "관심사에 맞는 대전 관광지를 찾고 있어요."));
     return;
   }
-  if (state.attractions.length === 0) {
+  // 변수 의미: 선호 탐색에서는 저장된 주제만 표시하고 다른 필터에서는 서버 결과를 유지합니다.
+  const attractions = state.attractionCategory === "preferred" && state.preference.categories.length
+    ? state.attractions.filter((item) => state.preference.categories.includes(item.place?.categoryCode || item.place?.category))
+    : state.attractions;
+  if (attractions.length === 0) {
     list.append(createElement("p", "empty-message", "표시할 관광지가 없습니다. 다른 카테고리를 선택하거나 다시 불러와 주세요."));
     return;
   }
-  state.attractions.forEach((item) => {
+  attractions.forEach((item) => {
     // 변수 의미: 서버가 반환한 관광지와 표시할 카드입니다.
     const place = item.place || {};
     const card = createElement("article", "attraction-card");
@@ -3573,7 +3799,7 @@ function renderAttractions() {
     const longitude = place.longitude ?? place.lng;
     button.type = "button";
     button.disabled = latitude == null || longitude == null || !Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude));
-    button.addEventListener("click", () => setPlanningLocation({ lat: latitude, lng: longitude, label: title.textContent }, true));
+    button.addEventListener("click", () => setPlanningLocation({ lat: latitude, lng: longitude, label: title.textContent }, true, INTEREST_CATEGORIES.includes(category) ? category : "all"));
     card.append(createElement("span", "category-tag", `${getCategoryIcon(category)} ${CATEGORY_LABELS[category] || "관광"}`), title);
     if (place.address) card.append(createElement("p", "card-place", place.address));
     card.append(reason, button);
@@ -4042,7 +4268,8 @@ function requestLocation() {
     .then((position) => {
       if (!isCurrentSession(token, version) || requestId !== state.locationRequestId) return;
       state.location = normalizeMeasuredLocation(position);
-      state.recommendationMode = "nearby";
+      applyRecommendationMode("nearby");
+      if (state.activeView === "planning") setActiveView("home");
       state.planningMessage = "현재 위치를 추천 기준으로 적용했습니다.";
       renderPlanningSettings();
       loadRecommendations();
@@ -4371,14 +4598,14 @@ async function loadHealth() {
  */
 async function loadInitialData(forceRefresh = false) {
   if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
-    await Promise.allSettled([loadRecommendations(forceRefresh), loadAttractions(forceRefresh)]);
+    await Promise.allSettled([loadRecommendations(forceRefresh), ...(state.recommendationMode === "planning" && state.planningTab === "preferences" ? [loadAttractions(forceRefresh)] : [])]);
     updateSystemStatus(false, "화면 체험 모드");
     renderAll();
     return;
   }
   await Promise.allSettled([loadHealth(), loadUser(), loadBadges(), loadNotes(), loadGgumdori(), loadMapConfig()]);
   if (!state.accessToken) return;
-  await Promise.allSettled([loadRecommendations(forceRefresh), loadAttractions(forceRefresh)]);
+  await Promise.allSettled([loadRecommendations(forceRefresh), ...(state.recommendationMode === "planning" && state.planningTab === "preferences" ? [loadAttractions(forceRefresh)] : [])]);
   renderAll();
 }
 
@@ -4513,6 +4740,10 @@ function bindEvents() {
  * 호출 예시: bindPlanningEvents()
  */
 function bindPlanningEvents() {
+  bindAppMenuEvents();
+  document.querySelectorAll("[data-planning-tab]").forEach((button) => {
+    button.addEventListener("click", () => selectPlanningTab(button.dataset.planningTab));
+  });
   document.querySelectorAll("[data-interest-category]").forEach((input) => {
     input.addEventListener("change", () => {
       state.interestDraft = [...document.querySelectorAll("[data-interest-category]:checked")].map((item) => item.dataset.interestCategory);
@@ -4548,9 +4779,7 @@ function bindPlanningEvents() {
   });
   document.querySelectorAll("[data-open-planning-settings]").forEach((button) => {
     button.addEventListener("click", () => {
-      setActiveView("home");
-      select("#recommendation-settings-title")?.focus({ preventScroll: true });
-      select("#recommendation-settings")?.scrollIntoView({ block: "start" });
+      setActiveView("planning");
     });
   });
   select("#attraction-category")?.addEventListener("change", (event) => {

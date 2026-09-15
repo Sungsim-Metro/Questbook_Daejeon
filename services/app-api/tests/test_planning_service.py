@@ -132,6 +132,11 @@ def service() -> BaselineQuestbookService:
     repository.update_preferences = Mock(side_effect=save_categories)
     repository.get_category_codes.return_value = ["default", "nature", "science", "downtown", "market", "mobility", "nightview", "hotspring"]
     repository.get_recommendation_profile.return_value = {}
+    # 변수 의미: 선호도 및 캐시 테스트의 관광지는 모두 사전 등록되어 있는 퀘스트 목록이다.
+    repository.get_catalog_quests = Mock(return_value={
+        place.content_id: [{"category_code": place.category_code}]
+        for place in PLACES
+    })
     # 변수 의미: 외부 API 경계만 대체하는 관광지 클라이언트다.
     tour_client = Mock()
     tour_client.fetch_daejeon.return_value = (PLACES, "live")
@@ -219,6 +224,9 @@ def test_citywide_filters_strictly_and_limits_results(service: BaselineQuestbook
     service.tour_client.fetch_daejeon.return_value = (
         [replace(PLACES[1], content_id=str(index), title=f"자연 {index:02}") for index in range(40)], "live",
     )
+    service.repository.get_catalog_quests.return_value = {
+        str(index): [{"category_code": "nature"}] for index in range(40)
+    }
     assert len(service.get_place_recommendations("alice", force_refresh=True)["recommendations"]) == 30
 
 

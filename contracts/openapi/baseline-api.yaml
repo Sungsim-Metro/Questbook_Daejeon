@@ -90,7 +90,7 @@ paths:
   /api/places/recommendations:
     get:
       summary: 현재 위치와 활동 이력 없이 관심사 기준으로 대전 전체 관광지를 추천한다.
-      description: 관심사 일치 장소를 우선하며 같은 그룹은 안정적으로 정렬한다. 관광지 조회로 퀘스트 인스턴스를 생성하지 않는다.
+      description: 관심사 일치 장소를 우선하며 같은 그룹은 안정적으로 정렬한다. 정상 TourAPI 응답에서는 contentId가 승인된 재사용 퀘스트와 연결된 장소만 표시하며 관광지 조회로 퀘스트 인스턴스를 생성하지 않는다. 기존 예시 폴백은 유지한다.
       security:
         - bearerAuth: []
       parameters:
@@ -146,6 +146,7 @@ paths:
   /api/recommendations:
     get:
       summary: 현재 위치 또는 사용자가 정한 계획 위치 주변의 관광지와 퀘스트 후보를 반환한다.
+      description: 정상 TourAPI 응답에서는 관광지를 선별한 뒤 contentId와 분류가 일치하는 승인된 저장 퀘스트를 조회한다. 퀘스트가 없는 장소는 제외하며 공용 퀘스트는 이 요청에서 생성하지 않는다. API 실패의 기존 예시 폴백은 유지한다.
       security:
         - bearerAuth: []
       parameters:
