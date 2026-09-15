@@ -10,6 +10,14 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from questbook_api.domain.models import TourPlaceCandidate
+from questbook_api.infrastructure.quest_catalog import CATALOG_SCHEMA_SQL, QuestCatalogRepositoryMixin
+from questbook_api.infrastructure.quest_snapshots import (
+    QUEST_SNAPSHOT_EXPRESSION,
+    SNAPSHOT_SCHEMA_SQL,
+    place_snapshot,
+)
+
 
 def now_iso() -> str:
     """
@@ -328,7 +336,7 @@ GGUMDORI_SEEDS = [
 ]
 
 
-class QuestbookRepository:
+class QuestbookRepository(QuestCatalogRepositoryMixin):
     """
     입력: PostgreSQL 데이터베이스 접속 URL.
     출력: baseline 관계형 저장소 객체.
@@ -359,6 +367,8 @@ class QuestbookRepository:
         """
         with self._lock, self._connection.transaction():
             self._connection.execute(SCHEMA_SQL)
+            self._connection.execute(SNAPSHOT_SCHEMA_SQL)
+            self._connection.execute(CATALOG_SCHEMA_SQL)
             self._seed_reference_data()
 
     def close(self) -> None:
@@ -809,14 +819,24 @@ class QuestbookRepository:
             )
             return dict(self._connection.execute("SELECT * FROM reusable_quests WHERE id = %s", (quest_id,)).fetchone())
 
-    def get_or_create_user_quest_instance(self, user_id: str, reusable_quest_id: str, expires_at: str) -> dict[str, Any]:
+    def get_or_create_user_quest_instance(
+        self, user_id: str, reusable_quest_id: str, expires_at: str,
+        place: TourPlaceCandidate | None = None,
+    ) -> dict[str, Any]:
         """
-        입력: 사용자 ID, 공용 퀘스트 ID, 추천 만료 시각.
+        입력: 사용자 ID, 공용 퀘스트 ID, 추천 만료 시각과 선택한 관광지.
         출력: 사용자별 퀘스트 인스턴스 row 딕셔너리.
         역할: 같은 사용자의 진행 중 퀘스트 상태를 재사용하고 없으면 추천 상태로 만든다.
         호출 예시: instance = repository.get_or_create_user_quest_instance(user_id, quest_id, expires_at)
         """
         with self._lock, self._connection.transaction():
+            # 변수 의미: 같은 사용자·공용 퀘스트의 중복 생성을 막는 DB 잠금이다.
+            self._connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"quest-instance:{user_id}:{reusable_quest_id}",),
+            )
+            # 변수 의미: 추천 시점의 최소 관광지 정보다.
+            selected_place = place_snapshot(place)
             # 변수 의미: 아직 완료되지 않은 기존 인스턴스 row다.
             existing_row = self._connection.execute(
                 """
@@ -828,7 +848,15 @@ class QuestbookRepository:
                 (user_id, reusable_quest_id),
             ).fetchone()
             if existing_row is not None:
-                return dict(existing_row)
+                if existing_row["status"] == "recommended" and selected_place is not None:
+                    self._connection.execute(
+                        """UPDATE user_quest_instances SET place_snapshot_json = %s
+                           WHERE id = %s AND status = 'recommended' AND quest_snapshot_json IS NULL""",
+                        (Jsonb(selected_place), existing_row["id"]),
+                    )
+                return dict(self._connection.execute(
+                    "SELECT * FROM user_quest_instances WHERE id = %s", (existing_row["id"],),
+                ).fetchone())
 
             # 변수 의미: 새 사용자 퀘스트 인스턴스 ID다.
             instance_id = make_id("uqi")
@@ -837,10 +865,14 @@ class QuestbookRepository:
             self._connection.execute(
                 """
                 INSERT INTO user_quest_instances(
-                  id, user_id, reusable_quest_id, status, recommended_at, accepted_at, expires_at, completed_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                  id, user_id, reusable_quest_id, status, recommended_at, accepted_at, expires_at, completed_at,
+                  place_snapshot_json
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (instance_id, user_id, reusable_quest_id, "recommended", recommended_at, None, expires_at, None),
+                (
+                    instance_id, user_id, reusable_quest_id, "recommended", recommended_at,
+                    None, expires_at, None, Jsonb(selected_place) if selected_place is not None else None,
+                ),
             )
             self._connection.execute(
                 "UPDATE reusable_quests SET reuse_count = reuse_count + 1 WHERE id = %s",
@@ -863,23 +895,92 @@ class QuestbookRepository:
                        uqi.expires_at, uqi.completed_at,
                        rq.id AS reusable_quest_id, rq.title, rq.description, rq.type,
                        rq.category_code, rq.reward_xp, rq.verification_type,
-                       rq.place_content_id, rq.place_name, rq.source
+                       rq.place_content_id, rq.place_name, rq.source, rq.review_status,
+                       uqi.quest_snapshot_json, uqi.place_snapshot_json,
+                       uqi.reusable_quest_id AS linked_reusable_quest_id
                 FROM user_quest_instances uqi
-                JOIN reusable_quests rq ON rq.id = uqi.reusable_quest_id
+                LEFT JOIN reusable_quests rq ON rq.id = uqi.reusable_quest_id
                 WHERE uqi.user_id = %s AND uqi.id = %s
                 """,
                 (user_id, instance_id),
             ).fetchone()
-            return dict(row) if row is not None else None
+            if row is None or row["reusable_quest_id"] is None and not row["quest_snapshot_json"]:
+                return None
+            # 변수 의미: 사본을 우선하여 공용 갱신·삭제에 영향을 받지 않는 사용자 응답이다.
+            result = dict(row)
+            if result["quest_snapshot_json"]:
+                result.update(result["quest_snapshot_json"])
+            result["place_snapshot"] = result.pop("place_snapshot_json")
+            result.pop("quest_snapshot_json")
+            return result
 
-    def accept_quest(self, user_id: str, instance_id: str) -> dict[str, Any]:
+    def _preserve_quests_before_catalog_change(self, content_ids: list[str]) -> None:
         """
-        입력: 사용자 ID와 사용자별 퀘스트 인스턴스 ID.
+        입력: 공용 정보 변경·삭제 대상 관광지 식별자 목록.
+        출력: 없음.
+        역할: 기존 수락·진행·완료 기록의 사본을 먼저 확보한다.
+        호출 예시: repository._preserve_quests_before_catalog_change(["123"])
+        """
+        with self._lock:
+            self._connection.execute(
+                "UPDATE user_quest_instances uqi SET quest_snapshot_json = "
+                + QUEST_SNAPSHOT_EXPRESSION + """
+                FROM reusable_quests rq
+                WHERE uqi.reusable_quest_id = rq.id
+                  AND rq.place_content_id = ANY(%s)
+                  AND uqi.status IN ('accepted', 'in_progress', 'completed')
+                  AND uqi.quest_snapshot_json IS NULL
+                """,
+                (content_ids,),
+            )
+
+    def _freeze_quest_instance(
+        self, user_id: str, instance_id: str, place: TourPlaceCandidate | None = None,
+    ) -> None:
+        """
+        입력: 사용자 ID, 사용자 인스턴스 ID와 서버가 조회한 관광지.
+        출력: 없음.
+        역할: 수락·완료 직전 현재 정의를 한 번 복사하고 이미 고정된 정보는 유지한다.
+        호출 예시: repository._freeze_quest_instance(user_id, instance_id, place)
+        """
+        # 변수 의미: 서버가 확인한 관광지 최소 사본이다.
+        selected_place = place_snapshot(place)
+        # 공용 갱신·삭제와 같은 순서로 잠근다. 완료 횟수 변경 시 잠금 승격 교착도 방지한다.
+        self._connection.execute(
+            """SELECT rq.id FROM reusable_quests rq
+               JOIN user_quest_instances uqi ON uqi.reusable_quest_id = rq.id
+               WHERE uqi.user_id = %s AND uqi.id = %s FOR UPDATE OF rq""",
+            (user_id, instance_id),
+        ).fetchone()
+        self._connection.execute(
+            "UPDATE user_quest_instances uqi SET quest_snapshot_json = "
+            + QUEST_SNAPSHOT_EXPRESSION + """
+            FROM reusable_quests rq
+            WHERE uqi.reusable_quest_id = rq.id AND uqi.user_id = %s AND uqi.id = %s
+              AND uqi.quest_snapshot_json IS NULL
+            """,
+            (user_id, instance_id),
+        )
+        if selected_place is not None:
+            # 기존 사본의 좌표가 없을 때만 같은 관광지의 서버 확인값으로 보충한다.
+            self._connection.execute(
+                """UPDATE user_quest_instances SET place_snapshot_json = %s
+                   WHERE user_id = %s AND id = %s AND place_snapshot_json IS NULL
+                     AND quest_snapshot_json->>'place_content_id' = %s""",
+                (Jsonb(selected_place), user_id, instance_id, selected_place["contentId"]),
+            )
+
+    def accept_quest(
+        self, user_id: str, instance_id: str, place: TourPlaceCandidate | None = None,
+    ) -> dict[str, Any]:
+        """
+        입력: 사용자 ID, 사용자별 퀘스트 인스턴스 ID와 서버가 조회한 장소.
         출력: 갱신된 퀘스트 인스턴스 딕셔너리.
         역할: 추천 상태 퀘스트를 진행 상태로 바꾼다.
         호출 예시: instance = repository.accept_quest(user_id, instance_id)
         """
         with self._lock, self._connection.transaction():
+            self._freeze_quest_instance(user_id, instance_id, place)
             # 변수 의미: 갱신 시각 문자열이다.
             accepted_at = now_iso()
             self._connection.execute(
@@ -911,6 +1012,12 @@ class QuestbookRepository:
         호출 예시: result = repository.complete_quest(user_id, instance, verification, 0.2, photo_ref)
         """
         with self._lock, self._connection.transaction():
+            self._freeze_quest_instance(user_id, instance["instance_id"])
+            # 변수 의미: 공용 삭제 이후에도 보존된 정의와 실제 남은 외래 키다.
+            saved_instance = self.get_instance_with_quest(user_id, instance["instance_id"])
+            if saved_instance is None:
+                return None
+            instance = saved_instance
             # 변수 의미: 완료 시각 문자열이다.
             completed_at = now_iso()
             # 변수 의미: 완료 기록 ID다.
@@ -941,7 +1048,7 @@ class QuestbookRepository:
                     completion_id,
                     user_id,
                     instance["instance_id"],
-                    instance["reusable_quest_id"],
+                    instance["linked_reusable_quest_id"],
                     completed_at,
                     earned_xp,
                     Jsonb(verification_result),
@@ -973,7 +1080,7 @@ class QuestbookRepository:
                 (
                     note_id,
                     user_id,
-                    instance["reusable_quest_id"],
+                    instance["linked_reusable_quest_id"],
                     completion_id,
                     instance["place_name"],
                     f"{instance['title']} 완료로 {earned_xp} XP를 획득했습니다.",
@@ -1188,15 +1295,20 @@ class QuestbookRepository:
             # 변수 의미: 사용자 수첩 기록 row 목록이다.
             rows = self._connection.execute(
                 """
-                SELECT an.id, an.reusable_quest_id, an.quest_completion_id, an.place_name,
+                SELECT an.id,
+                       COALESCE(uqi.quest_snapshot_json->>'reusable_quest_id', an.reusable_quest_id) AS reusable_quest_id,
+                       an.quest_completion_id, an.place_name,
                        an.summary, an.badges_json, an.distance_km, an.share_image_url,
                        an.entry_type, an.entry_title, an.entry_body, an.entry_rating,
-                       an.entry_updated_at, an.created_at, rq.title AS quest_title,
+                       an.entry_updated_at, an.created_at,
+                       COALESCE(uqi.quest_snapshot_json->>'title', rq.title) AS quest_title,
                        qc.earned_xp, qc.completed_at, qc.photo_ref
                 FROM adventure_notes an
                 JOIN quest_completions qc
                   ON qc.id = an.quest_completion_id AND qc.user_id = an.user_id
-                JOIN reusable_quests rq ON rq.id = an.reusable_quest_id
+                JOIN user_quest_instances uqi
+                  ON uqi.id = qc.user_quest_instance_id AND uqi.user_id = an.user_id
+                LEFT JOIN reusable_quests rq ON rq.id = an.reusable_quest_id
                 WHERE an.user_id = %s
                 ORDER BY an.created_at DESC
                 """,
@@ -1235,15 +1347,20 @@ class QuestbookRepository:
                   WHERE id = %s AND user_id = %s
                   RETURNING *
                 )
-                SELECT an.id, an.reusable_quest_id, an.quest_completion_id, an.place_name,
+                SELECT an.id,
+                       COALESCE(uqi.quest_snapshot_json->>'reusable_quest_id', an.reusable_quest_id) AS reusable_quest_id,
+                       an.quest_completion_id, an.place_name,
                        an.summary, an.badges_json, an.distance_km, an.share_image_url,
                        an.entry_type, an.entry_title, an.entry_body, an.entry_rating,
-                       an.entry_updated_at, an.created_at, rq.title AS quest_title,
+                       an.entry_updated_at, an.created_at,
+                       COALESCE(uqi.quest_snapshot_json->>'title', rq.title) AS quest_title,
                        qc.earned_xp, qc.completed_at, qc.photo_ref
                 FROM updated_note an
                 JOIN quest_completions qc
                   ON qc.id = an.quest_completion_id AND qc.user_id = an.user_id
-                JOIN reusable_quests rq ON rq.id = an.reusable_quest_id
+                JOIN user_quest_instances uqi
+                  ON uqi.id = qc.user_quest_instance_id AND uqi.user_id = an.user_id
+                LEFT JOIN reusable_quests rq ON rq.id = an.reusable_quest_id
                 """,
                 (entry_type, title, body, rating, updated_at, note_id, user_id),
             ).fetchone()
@@ -1332,11 +1449,14 @@ class QuestbookRepository:
             # 변수 의미: 완료한 퀘스트의 카테고리별 횟수 row 목록이다.
             completion_rows = self._connection.execute(
                 """
-                SELECT rq.category_code, COUNT(*) AS completion_count
+                SELECT COALESCE(uqi.quest_snapshot_json->>'category_code', rq.category_code) AS category_code,
+                       COUNT(*) AS completion_count
                 FROM quest_completions qc
-                JOIN reusable_quests rq ON rq.id = qc.reusable_quest_id
+                JOIN user_quest_instances uqi
+                  ON uqi.id = qc.user_quest_instance_id AND uqi.user_id = qc.user_id
+                LEFT JOIN reusable_quests rq ON rq.id = qc.reusable_quest_id
                 WHERE qc.user_id = %s
-                GROUP BY rq.category_code
+                GROUP BY COALESCE(uqi.quest_snapshot_json->>'category_code', rq.category_code)
                 """,
                 (user_id,),
             ).fetchall()
