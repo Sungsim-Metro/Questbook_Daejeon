@@ -1,0 +1,310 @@
+/* GPS 인증 성공 연출 (지침서 T2-B). styles.css / retro-theme.css 뒤에 로드한다.
+
+   캐릭터를 점프시키는 대신 보상이 나타나는 것 자체를 연출한다. 기준 원화는
+   왼팔이 얼굴에, 오른팔이 몸통에 붙어 있어 팔을 레이어로 분리할 수 없다.
+   팔이 안 올라가는 점프는 점프로 읽히지 않는다. 추가 이미지 0장, 총 900ms.
+
+   0ms   화면 플래시           120ms
+   60ms  뱃지 오버슛 확대      420ms
+   260ms 방사형 반짝임 8방향   380ms
+   300ms 꿈돌이 cheer 4f x2    600ms
+   400ms 획득 문구 페이드인    240ms
+   900ms 완료. 뱃지는 그대로 유지 */
+
+/* 연출이 얹히는 자리 — 완료 팝업 맨 위 */
+.reward-fx {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 4px 0 2px;
+}
+
+/* 연출이 얹히면 팝업이 길어진다. 작은 화면에서 잘리지 않게 스크롤을 연다.
+   연출이 있는 팝업에만 걸리므로 기존 팝업 레이아웃은 그대로다. */
+.action-dialog:has(.reward-fx) {
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+
+/* 뱃지 등장 — 오버슛이 핵심이다. 선형으로 커지면 밋밋하다 */
+@keyframes badge-pop {
+  0% {
+    transform: scale(0) rotate(-12deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.15) rotate(3deg);
+    opacity: 1;
+  }
+  75% {
+    transform: scale(0.95) rotate(-1deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.badge-reward {
+  /* 원본 64px 의 정수 2배. 96px 로 두면 1.5배가 되어 픽셀이 고르지 않게 늘어난다 */
+  width: 128px;
+  height: 128px;
+  animation: badge-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) 60ms both;
+  image-rendering: pixelated;
+}
+
+/* 화면 플래시 */
+@keyframes flash {
+  0% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.reward-flash {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  pointer-events: none;
+  /* .action-dialog-overlay 가 z-index 60 이라 그 위에 얹는다 */
+  z-index: 70;
+  opacity: 0;
+  animation: flash 120ms ease-out both;
+}
+
+/* 방사형 반짝임 — 8개 span 을 각도만 바꿔 배치 */
+@keyframes spark {
+  0% {
+    transform: rotate(var(--a)) translateY(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(var(--a)) translateY(-46px) scale(0);
+    opacity: 0;
+  }
+}
+
+.spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  /* palette_v2.json 의 body_lt. 새 색을 만들지 마라 */
+  background: #fec335;
+  pointer-events: none;
+  opacity: 0;
+  animation: spark 380ms ease-out 260ms both;
+}
+
+/* 반짝임의 회전 원점을 뱃지 한가운데로 잡아 주는 상자 */
+.badge-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 128px;
+  height: 128px;
+}
+
+/* 꿈돌이 cheer — 96x96 4프레임 스프라이트시트를 300ms 부터 두 바퀴.
+
+   background-position 을 % 로 주면 안 된다. % 는 (요소폭 - 이미지폭) 기준이라
+   steps(4) 가 프레임 경계에 안 맞고 프레임이 반씩 잘려 나온다. px 로 계산한다.
+   --s 는 정수 배율만 쓴다. 소수 배율은 pixelated 라도 프레임 경계가 샌다. */
+@keyframes cheer-play {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: calc(-384px * var(--s));
+  }
+}
+
+.dumdori-cheer {
+  --s: 1;
+  width: calc(96px * var(--s));
+  height: calc(96px * var(--s));
+  /* 서빙 루트가 public/ 이라 /assets 절대경로를 쓴다 (imageRef 컨벤션과 동일) */
+  background-image: url("/assets/fx/dumdori_cheer_96x96_4f.png");
+  background-size: calc(384px * var(--s)) calc(96px * var(--s));
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  /* fill 을 주지 않는다 — 끝나면 프레임 0(기본 포즈)으로 돌아온다 */
+  animation: cheer-play 300ms steps(4) 300ms 2;
+}
+
+/* 획득 문구 */
+@keyframes label-up {
+  0% {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.reward-label {
+  animation: label-up 240ms ease-out 400ms both;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  text-align: center;
+}
+
+.reward-label .reward-badge-name {
+  font-size: 19px;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.reward-label .reward-badge-tier {
+  font-size: 14px;
+  color: var(--sub);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-reward,
+  .reward-flash,
+  .spark,
+  .reward-label,
+  .dumdori-cheer {
+    animation: none;
+  }
+  .reward-flash,
+  .spark {
+    display: none;
+  }
+}
+
+/* ── S08 완료 보상 확장 (명세 §10 S08) ──
+   0ms   화면 플래시
+   60ms  뱃지 팝
+   300ms 꿈돌이 cheer + 고유 꿈돌이 등장
+   450ms XP·레벨 반영
+   700ms 새 꿈돌이와 뱃지 획득 문구
+   900ms 액션 버튼 노출                                        */
+
+/* 환호 꿈돌이와 새로 얻은 고유 꿈돌이를 한 줄에 둡니다.
+   발바닥 y축을 고정해야 하므로 아래쪽 기준으로 정렬합니다. (명세 §10 S08) */
+.reward-cast {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* 새로 얻은 고유 컬러 꿈돌이입니다. cheer 와 같은 300ms 에 함께 나타납니다. */
+@keyframes ggumdori-in {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.reward-ggumdori {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  /* 발바닥이 흔들리지 않게 아래를 원점으로 확대합니다. */
+  transform-origin: bottom center;
+  image-rendering: pixelated;
+  animation: ggumdori-in 260ms cubic-bezier(0.34, 1.56, 0.64, 1) 300ms both;
+}
+
+/* XP·레벨 진행입니다. 450ms 에 반영합니다. */
+.reward-xp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  animation: label-up 200ms ease-out 450ms both;
+}
+
+.reward-xp__gain {
+  font-size: 17px;
+  color: var(--ink);
+}
+
+.reward-xp__level {
+  font-size: 13px;
+  color: var(--sub);
+}
+
+.reward-xp__track {
+  display: block;
+  flex: 0 0 120px;
+  height: 8px;
+  background: #eee6d2;
+  border: 2px solid #2c1d16;
+}
+
+@keyframes xp-fill {
+  from {
+    width: 0;
+  }
+  to {
+    width: var(--p, 0%);
+  }
+}
+
+.reward-xp__fill {
+  display: block;
+  height: 100%;
+  width: var(--p, 0%);
+  background: #fec335;
+  animation: xp-fill 320ms ease-out 470ms both;
+}
+
+/* 획득 문구는 명세의 700ms 로 맞춥니다. */
+.reward-label {
+  animation-delay: 700ms;
+}
+
+/* 액션 버튼은 연출이 끝나는 900ms 에 노출합니다. */
+.reward-actions {
+  display: flex;
+  gap: 8px;
+  animation: label-up 200ms ease-out 900ms both;
+}
+
+.reward-actions > * {
+  flex: 1 1 0;
+}
+
+/* 모션 줄이기에서는 최종 화면을 즉시 보여 줍니다. (명세 §10 S08)
+   앱 설정과 OS 설정을 모두 존중합니다. */
+body[data-reduced-motion="true"] .badge-reward,
+body[data-reduced-motion="true"] .reward-ggumdori,
+body[data-reduced-motion="true"] .dumdori-cheer,
+body[data-reduced-motion="true"] .reward-xp,
+body[data-reduced-motion="true"] .reward-xp__fill,
+body[data-reduced-motion="true"] .reward-label,
+body[data-reduced-motion="true"] .reward-actions {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+body[data-reduced-motion="true"] .reward-flash,
+body[data-reduced-motion="true"] .spark {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reward-ggumdori,
+  .reward-xp,
+  .reward-xp__fill,
+  .reward-actions {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

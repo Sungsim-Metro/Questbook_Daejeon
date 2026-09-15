@@ -443,6 +443,43 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
+        def do_PATCH(self) -> None:
+            """
+            입력: PATCH 요청.
+            출력: JSON API 응답.
+            역할: 현재 사용자의 수첩 기록 내용을 수정한다.
+            호출 예시: PATCH /api/notes/note_x
+            """
+            # 변수 의미: 파싱된 요청 URL이다.
+            parsed_url = urlparse(self.path)
+            # 변수 의미: 요청 경로 토큰이다.
+            path_parts = [part for part in parsed_url.path.split("/") if part]
+            try:
+                if len(path_parts) == 3 and path_parts[:2] == ["api", "notes"]:
+                    # 변수 의미: 토큰에서 검증한 사용자 ID다.
+                    user_id = self._required_user_id()
+                    # 변수 의미: 수정할 수첩 기록 ID다.
+                    note_id = path_parts[2]
+                    # 변수 의미: 수첩 기록 수정 요청 본문이다.
+                    payload = self._read_json_body()
+                    # 변수 의미: 사용자 소유권 확인을 거친 수첩 기록 수정 결과다.
+                    note = state.service.update_note_entry(user_id, note_id, payload)
+                    if note is None:
+                        self._send_json(HTTPStatus.NOT_FOUND, {"error": "note_not_found"})
+                        return
+                    self._send_json(HTTPStatus.OK, {"note": note})
+                    return
+            except PermissionError as error:
+                self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(error)})
+                return
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "bad_request", "message": str(error)})
+                return
+            except Exception as error:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error", "message": str(error)})
+                return
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
         def log_message(self, format: str, *args: Any) -> None:
             """
             입력: 표준 HTTP 로그 포맷과 인자.
@@ -1035,7 +1072,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if origin != state.settings.public_base_url:
                 return
             self.send_header("Access-Control-Allow-Origin", origin)
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
             self.send_header("Vary", "Origin")
 

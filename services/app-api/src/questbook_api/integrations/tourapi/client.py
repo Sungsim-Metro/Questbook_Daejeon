@@ -42,6 +42,72 @@ CATEGORY_NAMES = {
     "nightview": "야경 기록",
 }
 
+# 변수 의미: 공식 lclsSystmCode2 branch와 고정 leaf를 Questbook에 연결하는 규칙이다.
+# 공식 출처(2026-09-01 조회): https://apis.data.go.kr/B551011/KorService2/lclsSystmCode2
+LCLS_CATEGORY_RULES: tuple[
+    tuple[str, tuple[str, ...], tuple[str, ...]],
+    ...,
+] = (
+    # 변수 의미: 타워·전망대 분류를 야경 기록 테마로 연결한다.
+    ("nightview", (), ("VE010200",)),
+    # 변수 의미: 천문대·전시시설·첨단산업 체험 분류를 과학 문화 테마로 연결한다.
+    (
+        "science",
+        ("VE07",),
+        (
+            "VE020500",
+            "EX060200",
+            "EX060600",
+            "EX060700",
+            "EX060900",
+        ),
+    ),
+    # 변수 의미: 자연관광·도시공원·생태축제·자연치유 분류를
+    # 자연 관찰 테마로 연결한다.
+    ("nature", ("NA", "VE03"), ("EV010500", "EX050700")),
+    # 변수 의미: 음식·쇼핑·특산물축제·향토산업 분류를 지역 상권 테마로 연결한다.
+    ("market", ("FD", "SH"), ("EV010300", "EX060300", "EX060800")),
+    # 변수 의미: 레저스포츠·교통시설 분류를 이동형 테마로 연결한다.
+    ("mobility", ("LS", "VE11"), ()),
+)
+
+# 변수 의미: 신분류가 없을 때 기존 코드·제목 평가 순서를 보존하는 fallback 규칙이다.
+LEGACY_CATEGORY_RULES: tuple[
+    tuple[str, tuple[str, ...], tuple[str, ...]],
+    ...,
+] = (
+    ("market", ("A05",), ("시장", "성심", "빵")),
+    ("science", ("A02",), ("과학", "박물관")),
+    ("mobility", ("A03",), ("자전거", "타슈")),
+    ("nightview", (), ("전망", "야경")),
+    ("nature", ("A01",), ("공원", "수목원")),
+)
+
+
+def _normalize_classification_codes(
+    raw_item: dict[str, Any],
+    field_names: tuple[str, ...],
+) -> tuple[str, ...]:
+    """
+    입력: TourAPI item 딕셔너리와 읽을 분류 필드 이름 목록.
+    출력: 빈 값이 제거되고 대문자로 정규화된 분류 코드 튜플.
+    역할: 신분류와 구분류의 누락, null, 공백 형태를 동일하게 처리한다.
+    호출 예시: codes = _normalize_classification_codes(item, ("lclsSystm1", "lclsSystm2"))
+    """
+    # 변수 의미: 정규화한 유효 분류 코드를 순서대로 모은 목록이다.
+    normalized_codes: list[str] = []
+    # 변수 의미: 현재 읽을 TourAPI 분류 필드 이름이다.
+    for field_name in field_names:
+        # 변수 의미: TourAPI 응답에 들어 있던 원본 분류 코드 값이다.
+        raw_code = raw_item.get(field_name)
+        if raw_code is None:
+            continue
+        # 변수 의미: 공백 제거와 대문자 변환을 적용한 분류 코드다.
+        normalized_code = str(raw_code).strip().upper()
+        if normalized_code:
+            normalized_codes.append(normalized_code)
+    return tuple(normalized_codes)
+
 
 def haversine_meters(latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float) -> float:
     """
@@ -105,22 +171,42 @@ def map_tourapi_category(raw_item: dict[str, Any]) -> tuple[str, str]:
     역할: 복잡한 TourAPI 분류를 baseline 카테고리로 단순 매핑한다.
     호출 예시: category_code, category_name = map_tourapi_category(item)
     """
-    # 변수 의미: TourAPI 대분류 코드다.
-    category_one = str(raw_item.get("cat1", ""))
-    # 변수 의미: TourAPI 중분류 코드다.
-    category_two = str(raw_item.get("cat2", ""))
+    # 변수 의미: TourAPI 신분류 1·2·3Depth에서 정규화한 코드 목록이다.
+    lcls_codes = _normalize_classification_codes(
+        raw_item,
+        ("lclsSystm1", "lclsSystm2", "lclsSystm3"),
+    )
     # 변수 의미: 관광지 제목이다.
     title = str(raw_item.get("title", ""))
-    if "A05" in {category_one, category_two} or "시장" in title or "성심" in title or "빵" in title:
-        return "market", CATEGORY_NAMES["market"]
-    if "A02" in {category_one, category_two} or "과학" in title or "박물관" in title:
-        return "science", CATEGORY_NAMES["science"]
-    if "A03" in {category_one, category_two} or "자전거" in title or "타슈" in title:
-        return "mobility", CATEGORY_NAMES["mobility"]
-    if "전망" in title or "야경" in title:
-        return "nightview", CATEGORY_NAMES["nightview"]
-    if "A01" in {category_one, category_two} or "공원" in title or "수목원" in title:
-        return "nature", CATEGORY_NAMES["nature"]
+    if lcls_codes:
+        # 변수 의미: 우선순위대로 검사할 카테고리, branch 접두사, 고정 leaf 코드다.
+        for category_code, code_prefixes, exact_codes in LCLS_CATEGORY_RULES:
+            if any(
+                classification_code.startswith(code_prefix)
+                for classification_code in lcls_codes
+                for code_prefix in code_prefixes
+            ) or any(classification_code in exact_codes for classification_code in lcls_codes):
+                return category_code, CATEGORY_NAMES[category_code]
+    else:
+        # 변수 의미: 신분류가 없을 때 cat1·2·3에서 정규화한 구분류 코드 목록이다.
+        legacy_codes = _normalize_classification_codes(
+            raw_item,
+            ("cat1", "cat2", "cat3"),
+        )
+        # 변수 의미: 기존 우선순위대로 검사할 카테고리, 코드 접두사, 제목 키워드다.
+        for category_code, code_prefixes, title_keywords in LEGACY_CATEGORY_RULES:
+            if any(
+                legacy_code.startswith(code_prefix)
+                for legacy_code in legacy_codes
+                for code_prefix in code_prefixes
+            ) or any(title_keyword in title for title_keyword in title_keywords):
+                return category_code, CATEGORY_NAMES[category_code]
+        return "downtown", CATEGORY_NAMES["downtown"]
+
+    # 변수 의미: 신분류가 미등록일 때 기존 제목 fallback으로 검사할 카테고리와 키워드다.
+    for category_code, _code_prefixes, title_keywords in LEGACY_CATEGORY_RULES:
+        if any(title_keyword in title for title_keyword in title_keywords):
+            return category_code, CATEGORY_NAMES[category_code]
     return "downtown", CATEGORY_NAMES["downtown"]
 
 
@@ -196,6 +282,9 @@ class TourApiClient:
         if self._is_circuit_open():
             return self._fallback_places(latitude, longitude, category_key), "fallback:circuit_open"
 
+        # 내부 카테고리 하나가 여러 공식 신분류에 걸치므로
+        # lclsSystm 필터는 요청에 넣지 않는다.
+        # 위치 기반 전체 결과를 받은 뒤 LCLS_CATEGORY_RULES로 한 번만 로컬 분류한다.
         # 변수 의미: TourAPI 요청 쿼리 파라미터다.
         query_params = {
             "serviceKey": self.service_key,

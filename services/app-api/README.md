@@ -63,3 +63,9 @@ uv run --project services/app-api python scripts/run_baseline.py
 | `NCP_OBJECT_STORAGE_SECRET_KEY` | 빈 값 | Object Storage 접근용 Secret Key |
 | `NCP_OBJECT_STORAGE_PRESIGNED_URL_TTL_SECONDS` | `600` | 업로드·다운로드 presigned URL 만료 시간 |
 | `NCP_OBJECT_STORAGE_MAX_UPLOAD_BYTES` | `10485760` | 사진 1장 최대 업로드 크기 |
+| `NCP_CLOVA_OCR_INVOKE_URL` | 빈 값 | `/general`까지 포함된 CLOVA OCR API Gateway Invoke URL |
+| `NCP_CLOVA_OCR_SECRET_KEY` | 빈 값 | 서버의 `X-OCR-SECRET` 헤더에만 사용할 OCR Secret Key |
+| `NCP_CLOVA_OCR_LANGUAGE` | `ko` | CLOVA OCR 인식 언어 |
+| `NCP_CLOVA_OCR_TIMEOUT_SECONDS` | `8` | CLOVA OCR 상위 요청 제한 시간(초) |
+
+CLOVA OCR 도메인 생성, API Gateway 자동 연동, 키 보관 및 실제 영수증 검증 절차는 [CLOVA OCR 실제 연동 가이드](../../docs/clova-ocr-setup.md)를 따른다.

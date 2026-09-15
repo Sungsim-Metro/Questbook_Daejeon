@@ -1,8 +1,16 @@
 // 사용자 모바일 웹/PWA의 화면 상태, API 호출, 목업 fallback 렌더링을 담당하는 파일입니다.
 
+// GPS 인증 성공 연출(지침서 T2-B)의 DOM 조립 함수입니다.
+import { createRewardFx, playRewardFlash } from "./reward-fx.js";
+
 // API 요청이 실패했을 때 화면을 채우는 기본 사용자 정보입니다.
 const FALLBACK_USER = {
   nickname: "대전 탐험가",
+  // guest | social. 게스트도 모든 핵심 기능을 씁니다. (명세 §9.3)
+  accountType: "guest",
+  // 소셜 사용자만 값이 있습니다. 마이페이지에서만 표시합니다. (명세 §9.4)
+  email: "",
+  provider: "",
   level: 3,
   xp: 1240,
   nextLevelXp: 1800,
@@ -16,33 +24,110 @@ const FALLBACK_LOCATION = {
   lat: 36.3504,
   lng: 127.3845,
   label: "대전광역시청 기준",
+  // 실측 GPS 좌표인지 여부입니다. 계획 좌표로는 완료 인증을 할 수 없습니다. (명세 §19)
+  measured: false,
 };
 
-// 화면에서 선택할 수 있는 관광 카테고리 이름입니다.
+// 화면에서 선택할 수 있는 관광 카테고리 이름입니다. (명세 §4.1 카테고리 8종)
 const CATEGORY_LABELS = {
   all: "전체",
   default: "기본",
-  nature: "자연",
-  science: "과학",
-  downtown: "원도심",
-  market: "상권",
-  mobility: "이동",
-  hotspring: "온천",
-  nightview: "야경",
+  science: "과학·우주",
+  bread: "빵·미식",
+  nature: "자연·산책",
+  heritage: "원도심·역사",
+  culture: "문화·예술",
+  market: "시장·상권",
+  tashu: "이동·타슈",
+  festival: "축제·이벤트",
 };
 
-// 하단 탭과 헤더에서 사용하는 화면 메타데이터입니다.
+// 인증 5종의 표시 이름입니다. (명세 §4.3)
+const QUEST_TYPE_LABELS = {
+  visit: "방문형",
+  move: "이동형",
+  activity: "활동형",
+  spend: "소비형",
+  theme: "테마형",
+};
+
+// 난이도 3종의 표시 이름입니다. 보상 단계가 아닙니다. (명세 §4.2)
+const DIFFICULTY_LABELS = {
+  discover: "발견",
+  explore: "탐험",
+  conquer: "정복",
+};
+
+// S05 정렬 기준의 표시 이름입니다. (명세 §10 S05)
+const QUEST_SORT_LABELS = {
+  distance: "가까운 순",
+  duration: "짧은 순",
+  reward: "보상 높은 순",
+};
+
+// v1 콘텐츠의 카테고리 값을 v2 8종으로 옮기는 표입니다. (명세 §4.1)
+const LEGACY_CATEGORY_MAP = {
+  downtown: "heritage",
+  mobility: "tashu",
+  hotspring: "nature",
+  nightview: "culture",
+};
+
+// 최상위 다섯 화면의 메타데이터입니다. (명세 §7.1)
+// icon 값은 Material Symbols 리거처 이름이며 이모지를 쓰지 않습니다. (명세 §3.2)
 const VIEW_META = {
-  home: { title: "모험가 홈", eyebrow: "QUESTBOOK", icon: "✦", label: "홈", navIcon: "⌂" },
-  map: { title: "탐험 지도", eyebrow: "MAP", icon: "⌖", label: "지도", navIcon: "⌖" },
-  quests: { title: "퀘스트 목록", eyebrow: "QUEST", icon: "✓", label: "퀘스트", navIcon: "✓" },
-  notes: { title: "탐험 노트", eyebrow: "NOTE", icon: "▤", label: "수첩", navIcon: "▤" },
-  badges: { title: "뱃지 수첩", eyebrow: "BADGE", icon: "●", label: "뱃지", navIcon: "●" },
-  customize: { title: "꿈돌이 꾸미기", eyebrow: "CUSTOM", icon: "✦", label: "꾸미기", navIcon: "✦" },
+  home: {
+    title: "홈",
+    eyebrow: "QUESTBOOK",
+    icon: "home",
+    label: "홈",
+    description: "현위치·계획 지도와 주변 퀘스트",
+    accent: "var(--cat-festival)",
+  },
+  adventure: {
+    title: "모험 중",
+    eyebrow: "ADVENTURE",
+    icon: "swords",
+    label: "모험 중",
+    description: "진행 중인 퀘스트",
+    accent: "var(--cat-bread)",
+  },
+  quests: {
+    title: "퀘스트",
+    eyebrow: "QUEST",
+    icon: "explore",
+    label: "퀘스트",
+    description: "탐색 컨텍스트 기준 추천",
+    accent: "var(--cat-science)",
+  },
+  collection: {
+    title: "도감",
+    eyebrow: "COLLECTION",
+    icon: "auto_awesome_motion",
+    label: "도감",
+    description: "꿈돌이와 연결 뱃지",
+    accent: "var(--cat-culture)",
+  },
+  me: {
+    title: "마이페이지",
+    eyebrow: "MY PAGE",
+    icon: "person",
+    label: "마이페이지",
+    description: "계정·기록·설정·권한",
+    accent: "var(--cat-tashu)",
+  },
 };
 
-// 하단 탭의 표시 순서입니다.
-const NAVIGATION_ITEMS = ["home", "map", "quests", "customize", "notes"];
+// 드로어 메뉴의 표시 순서입니다. (명세 §7.1)
+const NAVIGATION_ITEMS = ["home", "adventure", "quests", "collection", "me"];
+
+// v1 해시를 v2 라우트로 넘겨 주는 표입니다. 설치된 PWA의 북마크를 깨뜨리지 않습니다.
+const LEGACY_VIEW_MAP = {
+  map: "home",
+  badges: "collection",
+  customize: "collection",
+  notes: "me",
+};
 
 // NAVER Maps JavaScript SDK URL입니다.
 const NAVER_MAPS_SDK_URL = "https://oapi.map.naver.com/openapi/v3/maps.js";
@@ -57,59 +142,216 @@ const NAVER_MAP_FOCUSED_ZOOM = 16;
 const FALLBACK_RECOMMENDATIONS = [
   {
     instanceId: "mock-science-001",
+    questId: "quest-science-001",
     placeName: "국립중앙과학관",
+    roadAddress: "대전광역시 유성구 대덕대로 481",
     category: "science",
+    difficulty: "explore",
+    questType: "visit",
     distanceMeters: 1800,
+    estimatedMinutes: 45,
     questTitle: "과학 키워드 3개 수집",
     questDescription: "전시관을 둘러본 뒤 기억에 남는 과학 키워드 3개를 수첩에 남깁니다.",
     rewardXp: 160,
     badgeName: "과학 탐험가",
+    rewardPair: {
+      badgeName: "과학 탐험가",
+      badgeImageRef: "/assets/badge/badge_science_lv1_64.png",
+      ggumdoriId: "science-1",
+      ggumdoriName: "연구원 꿈돌이",
+      ggumdoriStillImageRef: "/assets/ggumdori/science-1.png",
+    },
     verificationType: "GPS 방문",
     score: 94,
     status: "recommended",
   },
   {
     instanceId: "mock-market-001",
+    questId: "quest-bread-001",
     placeName: "성심당 본점 거리",
-    category: "market",
+    roadAddress: "대전광역시 중구 대종로480번길 15",
+    category: "bread",
+    difficulty: "discover",
+    questType: "spend",
     distanceMeters: 3200,
+    estimatedMinutes: 30,
     questTitle: "원도심 빵지순례",
     questDescription: "중앙로 주변 상권을 걸으며 대표 메뉴나 간판을 사진으로 기록합니다.",
     rewardXp: 140,
     badgeName: "빵지순례자",
-    verificationType: "사진 인증",
+    rewardPair: {
+      badgeName: "빵지순례자",
+      badgeImageRef: "/assets/badge/badge_bread_lv1_64.png",
+      ggumdoriId: "market-2",
+      ggumdoriName: "빵집 꿈돌이",
+      ggumdoriStillImageRef: "/assets/ggumdori/market-2.png",
+    },
+    verificationType: "영수증 OCR",
     score: 88,
     status: "recommended",
   },
   {
     instanceId: "mock-nature-001",
+    questId: "quest-nature-001",
     placeName: "한밭수목원",
+    roadAddress: "대전광역시 서구 둔산대로 169",
     category: "nature",
+    difficulty: "discover",
+    questType: "visit",
     distanceMeters: 900,
+    estimatedMinutes: 25,
     questTitle: "초록 탐험 루트",
     questDescription: "수목원 산책로에서 오늘 본 식물이나 풍경을 한 줄 메모로 남깁니다.",
     rewardXp: 120,
     badgeName: "초록 탐험가",
+    rewardPair: {
+      badgeName: "초록 탐험가",
+      badgeImageRef: "/assets/badge/badge_nature_lv1_64.png",
+      ggumdoriId: "nature-2",
+      ggumdoriName: "산책 꿈돌이",
+      ggumdoriStillImageRef: "/assets/ggumdori/nature-2.png",
+    },
     verificationType: "GPS 방문",
     score: 91,
     status: "accepted",
+    startedAt: "2026-09-10T09:20:00+09:00",
   },
   {
     instanceId: "mock-night-001",
+    questId: "quest-culture-001",
     placeName: "엑스포다리",
-    category: "nightview",
+    roadAddress: "대전광역시 유성구 대덕대로 480",
+    category: "culture",
+    difficulty: "explore",
+    questType: "activity",
     distanceMeters: 2400,
+    estimatedMinutes: 40,
     questTitle: "대전 야경 수집",
     questDescription: "해가 진 뒤 엑스포다리 주변 야경을 감상하고 방문 기록을 남깁니다.",
     rewardXp: 150,
     badgeName: "전망 수집가",
-    verificationType: "시간대+GPS",
+    rewardPair: {
+      badgeName: "전망 수집가",
+      badgeImageRef: "/assets/badge/badge_culture_lv1_64.png",
+      ggumdoriId: "culture-2",
+      ggumdoriName: "야경 꿈돌이",
+      ggumdoriStillImageRef: "/assets/ggumdori/culture-2.png",
+    },
+    verificationType: "사진 인증",
     score: 83,
     status: "recommended",
   },
+  {
+    instanceId: "mock-festival-001",
+    questId: "quest-festival-common",
+    placeName: "대전 축제 현장",
+    roadAddress: "대전광역시 유성구 온천북로 33",
+    category: "festival",
+    difficulty: "conquer",
+    questType: "visit",
+    distanceMeters: 2100,
+    estimatedMinutes: 90,
+    questTitle: "대전 축제에 참여하기",
+    questDescription: "참여 가능한 행사 중 하나를 골라 현장에서 방문을 인증합니다.",
+    rewardXp: 220,
+    badgeName: "축제 참여자",
+    rewardPair: {
+      badgeName: "축제 참여자",
+      badgeImageRef: "/assets/badge/badge_festival_lv1_64.png",
+      ggumdoriId: "festival-1",
+      ggumdoriName: "축제 꿈돌이",
+      ggumdoriStillImageRef: "/assets/ggumdori/nature-1.png",
+    },
+    verificationType: "GPS 방문",
+    score: 96,
+    status: "recommended",
+    // 공통 축제 퀘스트는 목록에서 카드 하나로만 보여 줍니다. (명세 §11.1)
+    isCommonFestival: true,
+    festivalTargetCount: 3,
+    availableFrom: "2026-09-01",
+    availableUntil: "2026-10-31",
+    // 신뢰 가능한 운영시간입니다. 이 범위 안일 때만 지금 참여 가능이 뜹니다. (명세 §6.5)
+    startTime: "10:00",
+    endTime: "21:00",
+    // 실제 수행할 수 있는 행사 회차입니다. 사용자가 하나를 고릅니다. (명세 §11.1, §16.2)
+    festivalTargets: [
+      {
+        eventId: "event-beer",
+        editionId: "2026-01",
+        title: "유성 맥주축제 2026",
+        venueName: "유성온천공원",
+        roadAddress: "대전광역시 유성구 온천북로 33",
+        latitude: 36.3546,
+        longitude: 127.3421,
+        startDate: "2026-09-04",
+        endDate: "2026-09-13",
+        startTime: "16:00",
+        endTime: "22:00",
+        availabilityLabel: "오늘 개최 중",
+        sourceContentId: "tour-1001",
+      },
+      {
+        eventId: "event-bread",
+        editionId: "2026-01",
+        title: "대전 빵축제 2026",
+        venueName: "옛 충남도청사",
+        roadAddress: "대전광역시 중구 중앙로 101",
+        latitude: 36.3283,
+        longitude: 127.4275,
+        startDate: "2026-10-17",
+        endDate: "2026-10-19",
+        startTime: "10:00",
+        endTime: "18:00",
+        availabilityLabel: "예정",
+        sourceContentId: "tour-1002",
+      },
+      {
+        eventId: "event-science",
+        editionId: "2026-01",
+        title: "대전 사이언스 페스티벌",
+        venueName: "엑스포과학공원",
+        roadAddress: "대전광역시 유성구 대덕대로 480",
+        latitude: 36.3745,
+        longitude: 127.3865,
+        startDate: "2026-09-08",
+        endDate: "2026-09-20",
+        startTime: "10:00",
+        endTime: "20:00",
+        availabilityLabel: "오늘 개최 중",
+        sourceContentId: "tour-1003",
+      },
+    ],
+  },
+  {
+    instanceId: "mock-festival-002",
+    questId: "quest-festival-hotspring",
+    placeName: "유성온천 축제 거리",
+    roadAddress: "대전광역시 유성구 봉명동 546",
+    category: "festival",
+    difficulty: "explore",
+    questType: "visit",
+    distanceMeters: 2600,
+    estimatedMinutes: 60,
+    questTitle: "유성온천 축제 즐기기",
+    questDescription: "축제 기간 중 현장을 방문하고 방문 기록을 남깁니다.",
+    rewardXp: 180,
+    badgeName: "온천 축제 참가자",
+    rewardPair: {
+      badgeName: "온천 축제 참가자",
+      badgeImageRef: "/assets/badge/badge_festival_lv2_64.png",
+      ggumdoriId: "festival-2",
+      ggumdoriName: "온천 꿈돌이",
+      ggumdoriStillImageRef: "/assets/ggumdori/festival-2.png",
+    },
+    verificationType: "GPS 방문",
+    score: 72,
+    status: "recommended",
+    // 이미 끝난 회차입니다. 목록에서 행사 종료로 구분됩니다. (명세 §10 S05)
+    availableFrom: "2026-05-16",
+    availableUntil: "2026-05-24",
+  },
 ];
 
-// API 실패 시 뱃지 화면을 채우는 기본 뱃지 목록입니다.
 const FALLBACK_BADGES = [
   { name: "초록 탐험가", category: "nature", tier: 2, progressXp: 420, requiredXp: 500, earnedAt: "2026-06-24" },
   { name: "과학 탐험가", category: "science", tier: 1, progressXp: 260, requiredXp: 300, earnedAt: "2026-06-23" },
@@ -152,14 +394,14 @@ const FALLBACK_NOTES = [
 
 // API 실패 시 꿈돌이 도감 화면을 채우는 기본 항목입니다.
 const FALLBACK_GGUMDORI = [
-  { id: "default-1", name: "기본 꿈돌이", themeCategory: "default", unlocked: true, condition: "기본 지급", imageRef: "/assets/ggumdori/default-1.svg" },
-  { id: "science-1", name: "안경 꿈돌이", themeCategory: "science", unlocked: true, condition: "science Lv.1", imageRef: "/assets/ggumdori/science-1.svg" },
-  { id: "science-2", name: "플라스크 꿈돌이", themeCategory: "science", unlocked: false, condition: "science Lv.2", imageRef: "/assets/ggumdori/science-2.svg" },
-  { id: "market-2", name: "제빵 꿈돌이", themeCategory: "market", unlocked: true, condition: "market Lv.2", imageRef: "/assets/ggumdori/market-2.svg" },
-  { id: "nature-2", name: "숲 탐험 꿈돌이", themeCategory: "nature", unlocked: true, condition: "nature Lv.2", imageRef: "/assets/ggumdori/nature-2.svg" },
-  { id: "mobility-1", name: "타슈 꿈돌이", themeCategory: "mobility", unlocked: false, condition: "mobility Lv.1", imageRef: "/assets/ggumdori/mobility-1.svg" },
-  { id: "hotspring-1", name: "온천 꿈돌이", themeCategory: "hotspring", unlocked: false, condition: "유성온천 방문", imageRef: "/assets/ggumdori/hotspring-1.svg" },
-  { id: "nightview-2", name: "야경 꿈돌이", themeCategory: "nightview", unlocked: false, condition: "nightview Lv.2", imageRef: "/assets/ggumdori/nightview-2.svg" },
+  { id: "nature-1", name: "기본 꿈돌이", themeCategory: "nature", unlocked: true, condition: "기본 지급", imageRef: "/assets/ggumdori/nature-1.png" },
+  { id: "science-1", name: "안경 꿈돌이", themeCategory: "science", unlocked: true, condition: "science Lv.1", imageRef: "/assets/ggumdori/science-1.png" },
+  { id: "science-2", name: "플라스크 꿈돌이", themeCategory: "science", unlocked: false, condition: "science Lv.2", imageRef: "/assets/ggumdori/science-2.png" },
+  { id: "market-2", name: "제빵 꿈돌이", themeCategory: "market", unlocked: true, condition: "market Lv.2", imageRef: "/assets/ggumdori/market-2.png" },
+  { id: "nature-2", name: "숲 탐험 꿈돌이", themeCategory: "nature", unlocked: true, condition: "nature Lv.2", imageRef: "/assets/ggumdori/nature-2.png" },
+  { id: "tashu-1", name: "타슈 꿈돌이", themeCategory: "tashu", unlocked: false, condition: "타슈 대여소 방문", imageRef: "/assets/ggumdori/tashu-1.png" },
+  { id: "festival-2", name: "온천 꿈돌이", themeCategory: "festival", unlocked: false, condition: "유성온천 방문", imageRef: "/assets/ggumdori/festival-2.png" },
+  { id: "culture-2", name: "야경 꿈돌이", themeCategory: "culture", unlocked: false, condition: "엑스포다리 야경 감상", imageRef: "/assets/ggumdori/culture-2.png" },
 ];
 
 // 브라우저에 저장할 퀘스트 상태 키입니다.
@@ -168,11 +410,42 @@ const QUEST_STATUS_KEY = "questbook:user-web:quest-status";
 // 브라우저에 저장할 선택 꿈돌이 키입니다.
 const SELECTED_GGUMDORI_KEY = "questbook:user-web:selected-ggumdori";
 
+// 마이페이지의 앱 설정 전체를 저장하는 키입니다. (명세 §10 S12)
+const APP_SETTINGS_KEY = "questbook:user-web:app-settings";
+
+// 마이페이지의 모션 줄이기 설정을 저장하는 키입니다.
+const REDUCED_MOTION_KEY = "questbook:user-web:reduced-motion";
+
 // 브라우저에 저장할 baseline access token 키입니다.
 const ACCESS_TOKEN_KEY = "questbook:user-web:access-token";
 
 // 브라우저 세션에 저장할 OAuth callback nonce 키입니다.
 const OAUTH_NONCE_KEY = "questbook:user-web:oauth-nonce";
+
+// 새 서비스워커로 넘어가며 이미 새로고침을 걸었는지 표시합니다. (명세 §14.1)
+let swReloading = false;
+
+// 촬영 중인 카메라 스트림입니다. 시트를 닫을 때 반드시 정리합니다. (명세 §10 S11)
+let photoStream = null;
+
+// 공통 축제에서 고른 행사 타깃을 기억하는 키입니다. (명세 §11.1)
+const FESTIVAL_SELECTION_KEY = "questbook:user-web:festival-selection";
+
+// 실제 방문한 행사 회차 기록 키입니다. 중복 기록을 막는 데 씁니다. (명세 §11.1)
+const FESTIVAL_VISIT_KEY = "questbook:user-web:festival-visits";
+
+// 마지막 계획 위치와 날짜를 복원하는 키입니다. (명세 §6.3)
+const PLAN_CONTEXT_KEY = "questbook:user-web:plan-context";
+
+// 소셜 연결 중 보관하는 게스트 토큰 키입니다. 연결이 성공해야만 버립니다. (명세 §9.3)
+const GUEST_TOKEN_KEY = "questbook:user-web:guest-token";
+
+// 이번 OAuth 왕복이 신규 로그인인지 게스트 승계인지 기억하는 세션 키입니다. (명세 §9.3)
+const OAUTH_INTENT_KEY = "questbook:user-web:oauth-intent";
+
+// 닉네임 자동 추천에 쓰는 조각입니다. 중복을 허용하므로 확인 API를 부르지 않습니다. (명세 §9.4)
+const NICKNAME_PREFIXES = ["씩씩한", "느긋한", "호기심 많은", "부지런한", "용감한", "다정한", "엉뚱한", "꼼꼼한"];
+const NICKNAME_NOUNS = ["꿈돌이", "탐험가", "기록가", "산책러", "미식가", "수집가", "여행자", "모험가"];
 
 // 사진 증빙 기본 업로드 제한 바이트 값입니다.
 const DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -182,6 +455,11 @@ const IS_DESIGN_PREVIEW = new URLSearchParams(window.location.search).has("proto
 
 // 정적 Sites 배포에서는 별도 앱 API 없이 로컬 체험 세션을 사용한다.
 const IS_HOSTED_STATIC_PREVIEW = window.location.hostname.endsWith(".chatgpt.site");
+// 수첩 기록 제목의 최대 글자 수입니다.
+const NOTE_ENTRY_TITLE_MAX_LENGTH = 100;
+
+// 수첩 기록 본문의 최대 글자 수입니다.
+const NOTE_ENTRY_BODY_MAX_LENGTH = 2000;
 
 // 화면 전체의 현재 상태입니다.
 const state = {
@@ -201,14 +479,114 @@ const state = {
   recommendations: [...FALLBACK_RECOMMENDATIONS],
   badges: [...FALLBACK_BADGES],
   notes: [...FALLBACK_NOTES],
+  notesSource: "fallback",
+  notePhotos: {},
+  noteDrafts: {},
   ggumdori: [...FALLBACK_GGUMDORI],
   questStatuses: readStoredQuestStatuses(),
   pendingQuestActions: {},
   evidenceUploads: {},
   actionDialog: null,
   selectedGgumdoriId: readSelectedGgumdoriId(),
-  customizerPreviewId: readSelectedGgumdoriId(),
-  customizerCategory: "all",
+  // 드로어를 열기 직전에 포커스가 있던 요소입니다. 닫을 때 되돌립니다.
+  drawerReturnFocus: null,
+  // history.back() 을 이미 요청했는지 표시합니다. 중복 되감기를 막습니다.
+  drawerClosing: false,
+  // 마이페이지의 모션 줄이기 설정입니다. (명세 §12)
+  reducedMotion: readAppSettings().reducedMotion,
+  // 홈 3단 시트의 현재 스냅입니다. (명세 §10 S03)
+  homeSheetSnap: "mid",
+  // 모험 중 화면의 정렬 기준입니다. (명세 §10 S04)
+  adventureSort: "distance",
+  // 사용자가 정렬을 직접 고른 적이 있는지 여부입니다. 고르기 전에는 위치 권한에 따라 기본값이 정해집니다. (명세 §10 S04)
+  adventureSortPinned: false,
+  // 공용 퀘스트 상세 시트가 보여 주는 퀘스트입니다. "" 이면 닫힘입니다. (명세 §10 S06)
+  questSheetId: "",
+  // 시트 안에서 알릴 안내 문구입니다.
+  questSheetMessage: "",
+  // Clipboard API 실패 시 사용자가 직접 선택해 복사할 텍스트입니다.
+  questSheetFallbackText: "",
+  // 시트를 열기 직전에 포커스가 있던 요소입니다.
+  questSheetReturnFocus: null,
+  // S12 앱 설정입니다. 소리·진동·알림·모션. (명세 §10 S12)
+  appSettings: readAppSettings(),
+  // 설정 영역에 알릴 문구입니다.
+  settingsMessage: "",
+  // 위치·카메라·알림 권한 상태입니다. 표시만 하고 여기서 요청하지 않습니다. (명세 §10 S12)
+  permissionStates: { location: "unknown", camera: "unknown", notification: "unknown" },
+  // S13 모험 기록 화면 상태입니다. 마이페이지에서만 엽니다. (명세 §10 S13)
+  recordSheetOpen: false,
+  recordDetailId: "",
+  recordMessage: "",
+  recordReturnFocus: null,
+  // S11 꿈돌이 2D 촬영 상태입니다. (명세 §10 S11)
+  photo: {
+    open: false,
+    ggumdoriId: "",
+    source: "idle",
+    scale: 40,
+    offsetX: 50,
+    resultDataUrl: "",
+    message: "",
+    pickedImageUrl: "",
+    returnFocus: null,
+  },
+  // 공통 축제에서 고른 행사 타깃입니다. instanceId -> targetKey. (명세 §11.1)
+  selectedFestivalTargets: readFestivalSelections(),
+  // 실제 방문한 행사 회차 기록입니다. (명세 §11.1, §11.2)
+  festivalVisits: readFestivalVisits(),
+  // 날씨 상태입니다. 값이 없으면 임의로 채우지 않습니다. (명세 §6.4)
+  weather: {
+    status: "idle",
+    temperatureC: null,
+    precipitationProbability: null,
+    condition: "",
+    hourly: [],
+    outdoorNote: "",
+    unavailable: false,
+    cacheKey: "",
+  },
+  // S14 날씨 상세 시트가 열려 있는지 여부입니다. (명세 §10 S14)
+  weatherSheetOpen: false,
+  // S15 계획 위치·날짜 시트가 열려 있는지 여부입니다. (명세 §10 S15)
+  planSheetOpen: false,
+  // 계획 위치 검색어와 결과입니다. (명세 §6.3)
+  planSearchQuery: "",
+  planSearchResults: [],
+  planMessage: "",
+  // S02 계정 설정 단계입니다. consent | nickname. (명세 §10 S02)
+  accountStep: "consent",
+  // 닉네임 입력 칸의 현재 값입니다. (명세 §9.4)
+  nicknameDraft: "",
+  // 소셜 연결(승계) 진행 상태입니다. idle | pending | failed. (명세 §9.3)
+  accountLinkState: "idle",
+  // 마이페이지 계정 영역에 알릴 문구입니다.
+  accountMessage: "",
+  // S09 도감 페이지입니다. 전체 수는 서버값을 그대로 씁니다. (명세 §5.2, §16.3)
+  catalog: { earnedCount: 0, totalCount: 0, entries: [], nextCursor: "" },
+  // S09 도감 검색어입니다. 꿈돌이와 퀘스트를 함께 찾습니다. (명세 §10 S09)
+  catalogSearch: "",
+  // S09 획득 상태 필터입니다. all | earned | locked. (명세 §10 S09)
+  catalogStatusFilter: "all",
+  // S09 카테고리 필터입니다. (명세 §10 S09)
+  catalogCategory: "all",
+  // S10 도감 상세 시트가 보여 주는 꿈돌이입니다. "" 이면 닫힘입니다. (명세 §10 S10)
+  catalogSheetId: "",
+  // 도감 상세에서 알릴 안내 문구입니다.
+  catalogMessage: "",
+  // 도감 시트를 열기 직전에 포커스가 있던 요소입니다.
+  catalogSheetReturnFocus: null,
+  // S05 퀘스트 목록의 보기 방식입니다. 목록형과 카드형이 같은 데이터를 씁니다. (명세 §10 S05)
+  questsViewMode: "card",
+  // S05 난이도 필터입니다. "all" 이면 전체입니다. (명세 §4.2, §10 S05)
+  questsDifficulty: "all",
+  // S05 정렬 기준입니다. (명세 §10 S05)
+  questsSort: "distance",
+  // 네트워크 연결 상태입니다. 오프라인이면 목록 위에 알립니다. (명세 §10 S05, §13.2)
+  isOnline: typeof navigator === "undefined" || navigator.onLine !== false,
+  // 탐색 컨텍스트입니다. 현위치와 계획 모드를 명시적으로 구분합니다. (명세 §6.1)
+  explorationMode: "current",
+  plannedDate: "",
   selectedMapInstanceId: FALLBACK_RECOMMENDATIONS[0]?.instanceId || "",
   accessToken: readStorageValue(ACCESS_TOKEN_KEY) || (IS_DESIGN_PREVIEW ? "design-preview" : ""),
   naverMapConfigured: false,
@@ -314,7 +692,38 @@ function readInitialView() {
   // URL 해시에서 #view- 접두사를 제거한 화면 ID입니다.
   const viewFromHash = window.location.hash.replace(/^#view-/, "");
 
-  return VIEW_META[viewFromHash] ? viewFromHash : "home";
+  return resolveViewId(viewFromHash);
+}
+
+/**
+ * 입력: 라우트 후보 문자열.
+ * 출력: 다섯 최상위 화면 중 하나의 ID.
+ * 역할: v1 해시(#view-map 등)를 통합된 v2 라우트로 옮긴다.
+ * 호출 예시: resolveViewId("map")
+ */
+function resolveViewId(candidate) {
+  if (VIEW_META[candidate]) {
+    return candidate;
+  }
+
+  return LEGACY_VIEW_MAP[candidate] || "home";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 로그아웃 상태에서 내부 화면 해시를 제거하고 앱 화면 상태를 홈으로 되돌린다.
+ * 호출 예시: resetLoggedOutNavigation()
+ */
+function resetLoggedOutNavigation() {
+  // 로그인 화면에서 노출하지 않을 내부 화면 해시를 제거한 URL입니다.
+  const cleanUrl = `${window.location.pathname}${window.location.search}`;
+
+  state.activeView = "home";
+  if (window.location.hash) {
+    window.history.replaceState(null, "", cleanUrl);
+  }
+  setActiveView("home", false);
 }
 
 /**
@@ -565,7 +974,14 @@ function isUnauthorizedError(error) {
  */
 function resetExpiredSession(message = "세션이 만료되었습니다. 다시 동의 후 시작하세요.") {
   state.accessToken = "";
+  state.notes = [];
+  state.notesSource = "api";
+  state.notePhotos = {};
+  state.noteDrafts = {};
   removeStorageValue(ACCESS_TOKEN_KEY);
+  removeSessionValue(OAUTH_NONCE_KEY);
+  resetLoggedOutNavigation();
+  renderNotes();
   setConsentPanelVisible(true);
   setConsentMessage(message);
   updateSystemStatus(false, "다시 로그인 필요");
@@ -616,8 +1032,8 @@ function setConsentPanelVisible(isVisible) {
   const panel = select("#consent-panel");
   // 로그인 이후 화면 묶음입니다.
   const appViews = select("#app-views");
-  // 하단 탭 메뉴입니다.
-  const bottomNavigation = select("#bottom-nav");
+  // 우측 책갈피 손잡이입니다. 동의 전에는 이동할 화면이 없어 감춥니다.
+  const handle = select("#bookmark-handle");
 
   if (panel) {
     panel.hidden = !isVisible;
@@ -625,8 +1041,11 @@ function setConsentPanelVisible(isVisible) {
   if (appViews) {
     appViews.hidden = isVisible;
   }
-  if (bottomNavigation) {
-    bottomNavigation.hidden = isVisible;
+  if (handle) {
+    handle.hidden = isVisible;
+  }
+  if (isVisible) {
+    closeDrawer();
   }
 }
 
@@ -719,13 +1138,19 @@ async function handleDemoLogin() {
   // 위치정보 동의 체크박스입니다.
   const locationInput = select("#location-consent");
 
-  if (!ageInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
-    setConsentMessage("세 항목을 모두 확인해야 추천 기능을 사용할 수 있습니다.");
+  // 서비스 이용약관 동의 체크박스입니다. (명세 §9.5)
+  const termsInput = select("#terms-consent");
+
+  if (!ageInput?.checked || !termsInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
+    setConsentMessage("네 항목을 모두 확인해야 시작할 수 있습니다.");
     return;
   }
 
   if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
     startLocalDemoSession();
+    // 체험 모드에서도 공통 닉네임 단계를 거칩니다. (명세 §9.1)
+    setConsentPanelVisible(true);
+    enterNicknameStep();
     return;
   }
 
@@ -744,9 +1169,10 @@ async function handleDemoLogin() {
     });
     state.accessToken = payload.accessToken;
     writeStorageValue(ACCESS_TOKEN_KEY, payload.accessToken);
-    setConsentPanelVisible(false);
     setConsentMessage("");
     await loadInitialData();
+    // 계정 방식을 고른 뒤 모든 사용자가 닉네임을 설정합니다. (명세 §9.4)
+    enterNicknameStep();
   } catch (error) {
     setConsentMessage("로그인 처리에 실패했습니다. 잠시 뒤 다시 시도하세요.");
   }
@@ -768,8 +1194,11 @@ async function handleOAuthLogin(provider) {
   // 위치정보 동의 체크박스입니다.
   const locationInput = select("#location-consent");
 
-  if (!ageInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
-    setConsentMessage("세 항목을 모두 확인해야 로그인할 수 있습니다.");
+  // 서비스 이용약관 동의 체크박스입니다. (명세 §9.5)
+  const termsInput = select("#terms-consent");
+
+  if (!ageInput?.checked || !termsInput?.checked || !privacyInput?.checked || !locationInput?.checked) {
+    setConsentMessage("네 항목을 모두 확인해야 로그인할 수 있습니다.");
     return;
   }
 
@@ -840,16 +1269,54 @@ async function redeemOAuthCode(oauthCode) {
     }
     writeStorageValue(ACCESS_TOKEN_KEY, state.accessToken);
     removeSessionValue(OAUTH_NONCE_KEY);
+
+    // 연결에 성공했으므로 이제 게스트 토큰을 버려도 됩니다. (명세 §9.3)
+    // 승계 대상(퀘스트·완료 기록·뱃지·꿈돌이·대표·XP·기록·설정)은 서버가 합집합으로 병합합니다.
+    const wasLinking = readSessionValue(OAUTH_INTENT_KEY) === "link";
+    removeStorageValue(GUEST_TOKEN_KEY);
+    removeSessionValue(OAUTH_INTENT_KEY);
+    state.accountLinkState = "idle";
+    state.accountMessage = wasLinking ? "계정을 연결했어요. 기록을 그대로 가져왔습니다." : "";
+
     setConsentPanelVisible(false);
     setConsentMessage("");
     await loadInitialData();
   } catch (error) {
+    removeSessionValue(OAUTH_NONCE_KEY);
+    // 승계 시도였다면 게스트 세션을 되살립니다. 연결 성공 전에는 게스트 데이터를 버리지 않습니다. (명세 §9.3)
+    if (restoreGuestSession()) {
+      state.accountLinkState = "failed";
+      state.accountMessage = "계정 연결에 실패했어요. 기록은 그대로 있으니 다시 시도해주세요.";
+      setConsentPanelVisible(false);
+      renderAll();
+      return;
+    }
     state.accessToken = "";
     removeStorageValue(ACCESS_TOKEN_KEY);
-    removeSessionValue(OAUTH_NONCE_KEY);
     setConsentPanelVisible(true);
     setConsentMessage("로그인 검증에 실패했습니다. 다시 시도하세요.");
   }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 게스트 세션을 되살렸는지 여부.
+ * 역할: 소셜 연결이 실패해도 게스트 토큰과 데이터를 유지한다. (명세 §9.3)
+ * 호출 예시: if (restoreGuestSession()) { ... }
+ */
+function restoreGuestSession() {
+  // 연결 시도 전에 보관해 둔 게스트 토큰입니다.
+  const guestToken = readStorageValue(GUEST_TOKEN_KEY) || "";
+
+  if (!guestToken) {
+    return false;
+  }
+
+  state.accessToken = guestToken;
+  writeStorageValue(ACCESS_TOKEN_KEY, guestToken);
+  removeStorageValue(GUEST_TOKEN_KEY);
+  removeSessionValue(OAUTH_INTENT_KEY);
+  return true;
 }
 
 /**
@@ -875,10 +1342,19 @@ function consumeOAuthRedirect() {
   if (hash.startsWith("#oauth_error=")) {
     // fragment에서 꺼낸 오류 코드입니다.
     const reason = decodeFragmentValue(hash.slice("#oauth_error=".length)) || "login_failed";
-    state.accessToken = "";
-    removeStorageValue(ACCESS_TOKEN_KEY);
     removeSessionValue(OAUTH_NONCE_KEY);
     history.replaceState(null, "", window.location.pathname + window.location.search);
+
+    // 승계 시도였다면 게스트 세션을 그대로 되살립니다. (명세 §9.3)
+    if (restoreGuestSession()) {
+      state.accountLinkState = "failed";
+      state.accountMessage = `계정 연결에 실패했어요 (${reason}). 기록은 그대로 있으니 다시 시도해주세요.`;
+      setConsentPanelVisible(false);
+      return false;
+    }
+
+    state.accessToken = "";
+    removeStorageValue(ACCESS_TOKEN_KEY);
     setConsentPanelVisible(true);
     setConsentMessage(`로그인에 실패했습니다 (${reason}). 다시 시도하세요.`);
   }
@@ -897,6 +1373,7 @@ function ensureSessionReady() {
     return true;
   }
 
+  resetLoggedOutNavigation();
   setConsentPanelVisible(true);
   updateSystemStatus(false, "동의 대기");
   return false;
@@ -1030,21 +1507,191 @@ function normalizeRecommendation(rawItem) {
     item.instanceId || quest.instanceId || item.id || item.questInstanceId || item.userQuestInstanceId || "",
   );
 
+  // 퀘스트에 1:1:1 로 연결된 보상 쌍입니다. (명세 §5.1)
+  const rewardPair = item.rewardPair || quest.rewardPair || {};
+
   return {
     instanceId: instanceId || createClientId("recommendation"),
+    questId: String(item.questId || quest.questId || quest.id || ""),
     placeName: item.placeName || item.title || place.name || place.title || quest.placeReference?.placeName || "추천 장소",
+    // 주소 복사에 쓰는 도로명주소입니다. 없으면 사용 가능한 주소로 대체합니다. (명세 §10 S06)
+    roadAddress: String(
+      item.roadAddress || place.roadAddress || item.address || place.address || quest.roadAddress || "",
+    ),
     placeLatitude: toNumber(item.latitude || place.latitude, state.location.lat),
     placeLongitude: toNumber(item.longitude || place.longitude, state.location.lng),
-    category: item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
+    category: normalizeCategory(
+      item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
+    ),
+    // 난이도는 보상 단계가 아니라 예상 복잡도 메타데이터입니다. (명세 §4.2)
+    difficulty: String(item.difficulty || quest.difficulty || "discover"),
+    // 인증 5종 중 하나입니다. (명세 §4.3)
+    questType: normalizeQuestType(item.questType || quest.questType || item.verificationType),
     distanceMeters: toNumber(item.distanceMeters || item.distance || place.distanceMeters, 0),
+    estimatedMinutes: toNumber(item.estimatedMinutes || quest.estimatedMinutes, 0),
     questTitle: item.questTitle || quest.title || item.title || "방문 퀘스트",
     questDescription: item.questDescription || item.description || quest.description || "장소를 방문하고 수첩에 기록을 남깁니다.",
     rewardXp: toNumber(item.rewardXp || quest.rewardXp, 100),
-    badgeName: item.badgeName || item.badge?.name || "탐험 뱃지",
+    badgeName: rewardPair.badgeName || item.badgeName || item.badge?.name || "탐험 뱃지",
+    rewardPair: {
+      badgeName: rewardPair.badgeName || item.badgeName || item.badge?.name || "탐험 뱃지",
+      badgeImageRef: String(rewardPair.badgeImageRef || ""),
+      ggumdoriId: String(rewardPair.ggumdoriId || ""),
+      ggumdoriName: String(rewardPair.ggumdoriName || ""),
+      ggumdoriStillImageRef: String(rewardPair.ggumdoriStillImageRef || ""),
+    },
     verificationType: item.verificationType || quest.verificationType || "GPS 방문",
     score: toNumber(item.score || item.recommendationScore, 0),
     status: item.status || quest.status || "recommended",
+    startedAt: String(item.startedAt || quest.startedAt || ""),
+    // 수행 가능 기간입니다. YYYY-MM-DD 형식이며 없으면 상시 수행으로 봅니다. (명세 §16.1)
+    availableFrom: normalizeDateKey(item.availableFrom || quest.availableFrom),
+    availableUntil: normalizeDateKey(item.availableUntil || quest.availableUntil),
+    // 신뢰 가능한 운영시간입니다. 둘 다 있어야 지금 참여 가능을 판정합니다. (명세 §6.5)
+    openTime: String(item.startTime || quest.startTime || ""),
+    closeTime: String(item.endTime || quest.endTime || ""),
+    // 공통 축제 퀘스트는 목록에서 카드 하나로만 보여 줍니다. (명세 §11.1, §10 S05)
+    isCommonFestival: Boolean(item.isCommonFestival || quest.isCommonFestival),
+    // 지금 참여할 수 있는 행사 타깃 수입니다. 보조 문구로 씁니다. (명세 §10 S05)
+    festivalTargetCount: toNumber(item.festivalTargetCount || quest.festivalTargetCount, 0),
+    // 실제 수행할 수 있는 행사 회차 목록입니다. (명세 §11.1, §16.2)
+    festivalTargets: unwrapList(item.festivalTargets || quest.festivalTargets).map(normalizeFestivalTarget),
   };
+}
+
+/**
+ * 입력: 날짜처럼 쓰일 수 있는 값.
+ * 출력: YYYY-MM-DD 문자열 또는 "".
+ * 역할: 서버가 준 날짜를 비교 가능한 한 가지 형식으로 맞춘다. (명세 §16.1)
+ * 호출 예시: normalizeDateKey("2026-10-03T00:00:00+09:00")
+ */
+function normalizeDateKey(rawDate) {
+  if (!rawDate) {
+    return "";
+  }
+
+  // 이미 YYYY-MM-DD 형식이면 그대로 씁니다.
+  const text = String(rawDate);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+
+  // 그 밖의 표기는 Date로 해석한 뒤 KST 기준 날짜로 바꿉니다.
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? "" : toKstDateKey(parsed);
+}
+
+/**
+ * 입력: Date 객체.
+ * 출력: KST 기준 YYYY-MM-DD 문자열.
+ * 역할: 날짜 비교를 항상 한국 시간 기준으로 한다. (명세 §6.4)
+ * 호출 예시: toKstDateKey(new Date())
+ */
+function toKstDateKey(date) {
+  // KST 로 옮긴 시각입니다. UTC+9 를 더한 뒤 UTC 기준 날짜를 읽습니다.
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+
+  return kst.toISOString().slice(0, 10);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 퀘스트 수행 가능 여부를 판단할 기준 날짜.
+ * 역할: 계획 모드면 선택일을, 현위치 모드면 오늘을 기준으로 쓴다. (명세 §6.2, §6.3)
+ * 호출 예시: const refDate = getQuestReferenceDate()
+ */
+function getQuestReferenceDate() {
+  if (state.explorationMode === "planned" && state.plannedDate) {
+    return state.plannedDate;
+  }
+
+  return toKstDateKey(new Date());
+}
+
+/**
+ * 입력: 정규화된 추천 항목.
+ * 출력: { code, label } 형태의 수행 가능 상태.
+ * 역할: 추천 가능·진행 중·완료·선택일 수행 불가·행사 종료를 한 곳에서 판정한다. (명세 §10 S05)
+ * 호출 예시: const availability = getQuestAvailability(quest)
+ */
+function getQuestAvailability(quest) {
+  // 로컬 저장소까지 반영한 진행 상태입니다. 사용자의 진행이 기간 판정보다 앞섭니다.
+  const questStatus = getQuestStatus(quest.instanceId, quest.status);
+
+  if (questStatus === "completed" || questStatus === "done") {
+    return { code: "completed", label: "완료" };
+  }
+  if (questStatus === "accepted" || questStatus === "in_progress") {
+    return { code: "in_progress", label: "진행 중" };
+  }
+
+  // 오늘 날짜입니다. 행사가 아주 끝났는지 판단합니다.
+  const todayKey = toKstDateKey(new Date());
+
+  if (quest.availableUntil && quest.availableUntil < todayKey) {
+    return { code: "event_ended", label: "행사 종료" };
+  }
+
+  // 계획 모드면 선택일, 아니면 오늘을 기준으로 봅니다.
+  const referenceDate = getQuestReferenceDate();
+
+  if (
+    (quest.availableFrom && referenceDate < quest.availableFrom) ||
+    (quest.availableUntil && referenceDate > quest.availableUntil)
+  ) {
+    return { code: "unavailable_on_date", label: "선택일 수행 불가" };
+  }
+
+  return { code: "recommended", label: "추천 가능" };
+}
+
+/**
+ * 입력: 서버 또는 목업의 카테고리 코드.
+ * 출력: v2 카테고리 8종 중 하나 또는 "all".
+ * 역할: v1 카테고리 값을 v2 값으로 옮긴다. (명세 §4.1)
+ * 호출 예시: normalizeCategory("downtown")
+ */
+function normalizeCategory(rawCategory) {
+  // 소문자로 맞춘 카테고리 코드입니다.
+  const category = String(rawCategory || "").toLowerCase();
+
+  if (CATEGORY_LABELS[category]) {
+    return category;
+  }
+
+  return LEGACY_CATEGORY_MAP[category] || "all";
+}
+
+/**
+ * 입력: 서버의 questType 또는 v1 verificationType 문구.
+ * 출력: 인증 5종 키.
+ * 역할: 인증 방식이 없거나 한국어 문구로만 온 데이터를 v2 키로 맞춘다. (명세 §4.3)
+ * 호출 예시: normalizeQuestType("사진 인증")
+ */
+function normalizeQuestType(rawType) {
+  // 소문자로 맞춘 인증 방식 값입니다.
+  const questType = String(rawType || "").toLowerCase();
+
+  if (QUEST_TYPE_LABELS[questType]) {
+    return questType;
+  }
+
+  // v1 데이터는 인증 방식을 한국어 문구로만 갖고 있습니다.
+  const text = String(rawType || "");
+  if (text.includes("영수증") || text.includes("OCR")) {
+    return "spend";
+  }
+  if (text.includes("사진")) {
+    return "activity";
+  }
+  if (text.includes("이동") || text.includes("타슈")) {
+    return "move";
+  }
+  if (text.includes("체크리스트") || text.includes("테마")) {
+    return "theme";
+  }
+
+  return "visit";
 }
 
 /**
@@ -1076,15 +1723,27 @@ function normalizeBadge(rawBadge) {
 function normalizeNote(rawNote) {
   // 수첩 원본 응답입니다.
   const note = rawNote || {};
+  // 사용자가 작성한 일기 또는 리뷰 원본입니다.
+  const entry = note.entry && typeof note.entry === "object" ? note.entry : {};
+  // 리뷰일 때만 사용할 별점입니다.
+  const rating = toNumber(entry.rating, 0);
 
   return {
     id: String(note.id || note.noteId || createClientId("note")),
-    title: note.title || note.questTitle || "퀘스트 완료 기록",
+    title: note.questTitle || note.title || "퀘스트 완료 기록",
     placeName: note.placeName || note.placeReference?.placeName || "대전 관광지",
     createdAt: note.createdAt || note.completedAt || new Date().toISOString(),
     earnedXp: toNumber(note.earnedXp, 0),
     badges: Array.isArray(note.badges) ? note.badges.map((badge) => badge.name || badge) : [],
     memo: note.memo || note.summary || "완료한 퀘스트가 수첩에 기록되었습니다.",
+    photoRef: String(note.photoRef || note.objectKey || ""),
+    entry: {
+      type: entry.type === "review" ? "review" : "diary",
+      title: String(entry.title || ""),
+      body: String(entry.body || ""),
+      rating: entry.type === "review" && Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : null,
+      updatedAt: entry.updatedAt || "",
+    },
   };
 }
 
@@ -1127,14 +1786,14 @@ function getQuestStatus(instanceId, fallbackStatus) {
 function getQuestStatusLabel(status) {
   // 퀘스트 상태별 한국어 라벨입니다.
   const labels = {
-    recommended: "추천됨",
+    recommended: "추천 가능",
     accepted: "진행 중",
     in_progress: "진행 중",
     completed: "완료",
     done: "완료",
   };
 
-  return labels[status] || "추천됨";
+  return labels[status] || "추천 가능";
 }
 
 /**
@@ -1145,14 +1804,18 @@ function getQuestStatusLabel(status) {
  */
 function getQuestStatusClass(status) {
   if (status === "completed" || status === "done") {
-    return "status-tag status-tag--done";
+    return "status-badge status-badge--done";
   }
 
   if (status === "accepted" || status === "in_progress") {
-    return "status-tag status-tag--accepted";
+    return "status-badge status-badge--active";
   }
 
-  return "status-tag";
+  if (status === "review" || status === "in_review") {
+    return "status-badge status-badge--locked";
+  }
+
+  return "status-badge status-badge--available";
 }
 
 /**
@@ -1301,11 +1964,75 @@ function registerServiceWorker() {
   }
 
   navigator.serviceWorker
-    .register("./service-worker.js?v=20260904-4", { updateViaCache: "none" })
-    .then((registration) => registration.update())
+    .register("./service-worker.js?v=20260910-2", { updateViaCache: "none" })
+    .then((registration) => {
+      // 이미 대기 중인 새 버전이 있으면 바로 알립니다.
+      if (registration.waiting) {
+        showUpdateNotice(registration.waiting);
+      }
+
+      // 새 버전을 발견하면 설치가 끝난 뒤 알립니다. (명세 §14.1)
+      registration.addEventListener("updatefound", () => {
+        // 지금 설치되고 있는 서비스워커입니다.
+        const installing = registration.installing;
+        if (!installing) {
+          return;
+        }
+        installing.addEventListener("statechange", () => {
+          // 기존 워커가 있는 상태에서 설치가 끝나면 새 버전이 대기 중입니다.
+          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+            showUpdateNotice(installing);
+          }
+        });
+      });
+
+      registration.update();
+    })
     .catch(() => {
       updateSystemStatus(false, "서비스워커 등록 실패");
     });
+
+  // 새 워커가 제어를 넘겨받으면 화면을 한 번 새로 불러옵니다.
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (swReloading) {
+      return;
+    }
+    swReloading = true;
+    window.location.reload();
+  });
+}
+
+/**
+ * 입력: 대기 중인 서비스워커.
+ * 출력: 없음.
+ * 역할: 새 버전이 준비됐음을 알리고 사용자가 수락하면 적용한다. (명세 §14.1)
+ * 호출 예시: showUpdateNotice(registration.waiting)
+ */
+function showUpdateNotice(waitingWorker) {
+  // 안내 막대입니다. 이미 떠 있으면 다시 만들지 않습니다.
+  if (select("#update-notice")) {
+    return;
+  }
+
+  const bar = createElement("div", "update-notice");
+  bar.id = "update-notice";
+  bar.setAttribute("role", "status");
+  bar.setAttribute("aria-live", "polite");
+  bar.append(createElement("span", "", "새 버전이 준비됐어요."));
+
+  const applyButton = createElement("button", "px-button px-button--primary", "새로고침");
+  applyButton.type = "button";
+  applyButton.addEventListener("click", () => {
+    // 대기 중인 워커에게 즉시 활성화를 요청합니다. controllerchange 가 새로고침을 맡습니다.
+    waitingWorker.postMessage("SKIP_WAITING");
+  });
+
+  const laterButton = createElement("button", "px-button px-button--ghost", "나중에");
+  laterButton.type = "button";
+  laterButton.addEventListener("click", () => bar.remove());
+
+  bar.append(applyButton, laterButton);
+  document.body.append(bar);
 }
 
 /**
@@ -1408,6 +2135,7 @@ function renderAppHeader() {
   const levelElement = select("#header-level");
 
   if (iconElement) {
+    iconElement.classList.add("px-icon");
     iconElement.textContent = meta.icon;
   }
   if (eyebrowElement) {
@@ -1426,12 +2154,12 @@ function renderAppHeader() {
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 하단 탭 메뉴를 렌더링하고 현재 화면을 강조한다.
- * 호출 예시: renderBottomNavigation()
+ * 역할: 우측 드로어의 다섯 최상위 메뉴를 렌더링하고 현재 화면을 강조한다.
+ * 호출 예시: renderDrawerNavigation()
  */
-function renderBottomNavigation() {
-  // 하단 탭 컨테이너입니다.
-  const navigation = select("#bottom-nav");
+function renderDrawerNavigation() {
+  // 드로어 메뉴 컨테이너입니다.
+  const navigation = select("#drawer-nav");
 
   if (!navigation) {
     return;
@@ -1439,31 +2167,252 @@ function renderBottomNavigation() {
 
   navigation.replaceChildren();
 
-  NAVIGATION_ITEMS.forEach((viewId) => {
-    // 하단 탭 하나의 메타데이터입니다.
+  NAVIGATION_ITEMS.forEach((viewId, index) => {
+    // 메뉴 하나의 메타데이터입니다.
     const meta = VIEW_META[viewId];
-    // 현재 탭이 활성 상태인지 여부입니다.
+    // 현재 메뉴가 활성 상태인지 여부입니다.
     const isActive = state.activeView === viewId;
-    // 하단 탭 버튼입니다.
+    // 카트리지형 메뉴 버튼입니다.
     const button = createElement("button", `nav-link${isActive ? " is-active" : ""}`.trim());
     button.type = "button";
     button.dataset.viewTarget = viewId;
-    button.setAttribute("aria-current", isActive ? "page" : "false");
-    button.append(createElement("span", "", meta.navIcon), createElement("span", "", meta.label));
+    // 현재 메뉴는 aria-current 와 시각 표시를 함께 제공합니다. (명세 §7.2)
+    if (isActive) {
+      button.setAttribute("aria-current", "page");
+    }
+
+    // 메뉴를 구분하는 사각 아이콘입니다.
+    const icon = createElement("span", "px-icon-box");
+    icon.style.setProperty("--cat-color", meta.accent);
+    icon.append(createElement("span", "px-icon px-icon--sm", meta.icon));
+
+    // 메뉴 이름과 설명을 담는 영역입니다.
+    const text = createElement("div", "nav-link__text");
+    // 활성 메뉴는 색 외에 텍스트로도 현재 위치를 알립니다.
+    const label = createElement("span", "nav-link__label", meta.label);
+    if (isActive) {
+      label.append(createElement("span", "px-sr-only", " (현재 화면)"));
+    }
+    text.append(label, createElement("span", "nav-link__desc", meta.description));
+
+    button.append(icon, text, createElement("span", "nav-link__index px-counter", String(index + 1)));
     navigation.append(button);
   });
 }
 
 /**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 드로어 상단의 사용자 요약을 채운다.
+ * 호출 예시: renderDrawerProfile()
+ */
+function renderDrawerProfile() {
+  // 드로어와 마이페이지가 같은 형태의 계정 요약을 공유합니다.
+  const targets = [select("#drawer-profile"), select("#me-account-panel")].filter(Boolean);
+
+  if (targets.length === 0) {
+    return;
+  }
+
+  // 홈 대표로 지정한 꿈돌이입니다.
+  const selected = getSelectedGgumdori();
+
+  targets.forEach((target) => {
+    target.replaceChildren();
+
+    // 대표 꿈돌이 썸네일입니다.
+    const art = createElement("div", "drawer-profile__art");
+    if (selected?.imageRef) {
+      const image = document.createElement("img");
+      image.src = selected.imageRef;
+      image.alt = `${selected.name} 대표 꿈돌이`;
+      art.append(image);
+    }
+
+    // 닉네임과 레벨을 담는 영역입니다.
+    const meta = createElement("div", "drawer-profile__meta");
+    const nameRow = createElement("div", "context-row");
+    nameRow.append(
+      createElement("span", "nav-link__label", state.user.nickname || "모험가"),
+      createElement("span", "level-pill px-counter", `Lv.${toNumber(state.user.level, 1)}`),
+    );
+    meta.append(nameRow, createElement("span", "nav-link__desc", state.user.title || "대전 탐험가"));
+
+    target.append(art, meta);
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 드로어가 열려 있는지 여부.
+ * 역할: 뒤로가기·Esc 처리에서 드로어 상태를 한 곳에서 판단한다.
+ * 호출 예시: if (isDrawerOpen()) closeDrawer()
+ */
+function isDrawerOpen() {
+  return Boolean(select("#app-drawer")?.classList.contains("is-open"));
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 우측 책갈피 드로어를 열고 포커스를 드로어 안에 가둔다. (명세 §7.2)
+ * 호출 예시: openDrawer()
+ */
+function openDrawer() {
+  // 드로어 패널입니다.
+  const drawer = select("#app-drawer");
+  // 배경을 덮는 딤 레이어입니다.
+  const scrim = select("#drawer-scrim");
+  // 드로어를 연 책갈피 손잡이입니다.
+  const handle = select("#bookmark-handle");
+
+  if (!drawer || drawer.classList.contains("is-open")) {
+    return;
+  }
+
+  // 닫을 때 포커스를 되돌릴 요소를 기억합니다.
+  state.drawerReturnFocus = document.activeElement;
+  state.drawerClosing = false;
+
+  drawer.hidden = false;
+  if (scrim) {
+    scrim.hidden = false;
+  }
+  handle?.setAttribute("aria-expanded", "true");
+  // hidden 을 푼 직후 레이아웃을 한 번 읽어야 슬라이드가 시작 위치부터 보입니다.
+  // requestAnimationFrame 은 탭이 백그라운드일 때 멈추므로 쓰지 않습니다.
+  void drawer.offsetWidth;
+  drawer.classList.add("is-open");
+
+  document.body.dataset.drawerOpen = "true";
+  select("#drawer-close")?.focus({ preventScroll: true });
+
+  // 브라우저 뒤로가기로도 닫히도록 히스토리 항목을 하나 쌓습니다. (명세 §7.2)
+  window.history.pushState({ drawerOpen: true }, "", `#view-${state.activeView}`);
+}
+
+/**
+ * 입력: 히스토리 이동으로 닫히는지 여부.
+ * 출력: 없음.
+ * 역할: 드로어를 닫고 포커스를 열기 전 요소로 되돌린다.
+ * 호출 예시: closeDrawer()
+ */
+function closeDrawer(fromHistory = false) {
+  // 드로어 패널입니다.
+  const drawer = select("#app-drawer");
+  // 배경을 덮는 딤 레이어입니다.
+  const scrim = select("#drawer-scrim");
+  // 책갈피 손잡이입니다.
+  const handle = select("#bookmark-handle");
+
+  // 이미 닫혀 있으면 아무것도 하지 않습니다.
+  // 이 검사를 history.back() 보다 먼저 해야 중복 호출이 앱 밖으로 나가지 않습니다.
+  if (!drawer || !drawer.classList.contains("is-open")) {
+    return;
+  }
+
+  // 뒤로가기가 아닌 경로로 닫을 때는 쌓아 둔 히스토리 항목을 먼저 되감습니다.
+  // popstate 가 다시 이 함수를 fromHistory 로 호출해 실제 닫기를 수행합니다.
+  if (!fromHistory && window.history.state?.drawerOpen) {
+    // history.back() 은 비동기라 popstate 전에 다시 불릴 수 있습니다.
+    // 표시를 남겨 두 번 되감아 앱 밖으로 나가는 일을 막습니다.
+    if (state.drawerClosing) {
+      return;
+    }
+    state.drawerClosing = true;
+    window.history.back();
+    return;
+  }
+
+  state.drawerClosing = false;
+
+  drawer.classList.remove("is-open");
+  if (scrim) {
+    scrim.hidden = true;
+  }
+  handle?.setAttribute("aria-expanded", "false");
+  delete document.body.dataset.drawerOpen;
+
+  // 슬라이드가 끝난 뒤에 hidden 을 돌려놓아 보조기기에서 감춥니다.
+  window.setTimeout(() => {
+    if (!drawer.classList.contains("is-open")) {
+      drawer.hidden = true;
+    }
+  }, 200);
+
+  // 포커스는 드로어를 열었던 요소로 되돌립니다.
+  const target =
+    state.drawerReturnFocus instanceof HTMLElement && state.drawerReturnFocus.isConnected
+      ? state.drawerReturnFocus
+      : handle;
+  target?.focus({ preventScroll: true });
+  state.drawerReturnFocus = null;
+}
+
+/**
+ * 입력: Tab 키 이벤트.
+ * 출력: 없음.
+ * 역할: 드로어가 열린 동안 포커스가 드로어 밖으로 나가지 않게 한다. (명세 §7.2)
+ * 호출 예시: trapDrawerFocus(event)
+ */
+function trapDrawerFocus(event) {
+  // 드로어 패널입니다.
+  const drawer = select("#app-drawer");
+
+  if (!drawer || !drawer.classList.contains("is-open")) {
+    return;
+  }
+
+  // 드로어 안에서 포커스를 받을 수 있는 요소들입니다.
+  const focusable = Array.from(
+    drawer.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"),
+  ).filter((element) => !element.hasAttribute("disabled") && element.offsetParent !== null);
+
+  if (focusable.length === 0) {
+    return;
+  }
+
+  // 순환의 양 끝 요소입니다.
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus({ preventScroll: true });
+    return;
+  }
+
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 모션을 줄여야 하면 true.
+ * 역할: OS 설정과 앱 설정 중 하나라도 켜지면 전환 연출을 생략한다. (명세 §7.3)
+ * 호출 예시: if (prefersReducedMotion()) { ... }
+ */
+function prefersReducedMotion() {
+  return (
+    state.reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
  * 입력: 전환할 화면 ID와 URL 해시 갱신 여부.
  * 출력: 없음.
- * 역할: 단일 PWA 안에서 홈, 지도, 퀘스트, 수첩, 뱃지를 페이지처럼 전환한다.
+ * 역할: 단일 PWA 안에서 다섯 최상위 메뉴를 책장 넘김으로 전환한다. (명세 §7.3)
  * 호출 예시: setActiveView("quests")
  */
 function setActiveView(viewId, shouldUpdateHash = true) {
   if (!VIEW_META[viewId]) {
     return;
   }
+
+  // 같은 화면을 다시 고른 경우인지 여부입니다. 연출을 반복하지 않습니다.
+  const isSameView = state.activeView === viewId;
 
   state.activeView = viewId;
 
@@ -1474,10 +2423,24 @@ function setActiveView(viewId, shouldUpdateHash = true) {
     const isActive = panel.dataset.viewPanel === viewId;
     panel.hidden = !isActive;
     panel.classList.toggle("is-active", isActive);
+    panel.classList.remove("is-turning");
   });
 
+  // 활성 패널입니다. 책장 넘김과 포커스 이동의 대상입니다.
+  const activePanel = select(`[data-view-panel="${viewId}"]`);
+
+  // 메뉴 이동에만 짧은 종이 전환을 씁니다. 모션 줄이기에서는 즉시 전환합니다.
+  if (activePanel && !isSameView && !prefersReducedMotion()) {
+    activePanel.classList.add("is-turning");
+    activePanel.addEventListener(
+      "animationend",
+      () => activePanel.classList.remove("is-turning"),
+      { once: true },
+    );
+  }
+
   renderAppHeader();
-  renderBottomNavigation();
+  renderDrawerNavigation();
 
   if (shouldUpdateHash) {
     window.history.replaceState(null, "", `#view-${viewId}`);
@@ -1487,6 +2450,17 @@ function setActiveView(viewId, shouldUpdateHash = true) {
   const main = select("#main-content");
   if (main) {
     main.scrollTop = 0;
+  }
+  window.scrollTo({ top: 0 });
+
+  // 새 화면 도착 후 화면 제목으로 포커스를 옮깁니다. (명세 §7.3)
+  if (!isSameView) {
+    // 화면 제목 요소입니다. 시각적으로 감춘 제목도 포커스 대상이 됩니다.
+    const heading = activePanel?.querySelector("h2");
+    if (heading) {
+      heading.setAttribute("tabindex", "-1");
+      heading.focus({ preventScroll: true });
+    }
   }
 }
 
@@ -1527,9 +2501,9 @@ function renderProfile() {
     "selected-ggumdori-name",
     `${selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이"} 선택 중`,
   );
-  const customizeLink = createElement("button", "profile-customize-link", "꿈돌이 바꾸기 →");
+  const customizeLink = createElement("button", "profile-customize-link", "도감에서 대표 바꾸기 →");
   customizeLink.type = "button";
-  customizeLink.dataset.viewTarget = "customize";
+  customizeLink.dataset.viewTarget = "collection";
 
   profileText.append(name, meta, selectedName, customizeLink);
   main.append(avatar, profileText);
@@ -1543,6 +2517,15 @@ function renderProfile() {
 
   // 레벨 진행 막대입니다.
   const progressTrack = createElement("div", "progress-bar");
+  // 보조기술이 진행률을 읽을 수 있게 실제 의미와 값을 줍니다. (명세 §13.3-10)
+  progressTrack.setAttribute("role", "progressbar");
+  progressTrack.setAttribute("aria-valuemin", "0");
+  progressTrack.setAttribute("aria-valuemax", "100");
+  progressTrack.setAttribute("aria-valuenow", String(Math.round(progressPercent)));
+  progressTrack.setAttribute(
+    "aria-label",
+    `다음 레벨까지 ${Math.round(progressPercent)}퍼센트`,
+  );
   const progressFill = createElement("span", "progress-fill");
   progressFill.style.width = `${progressPercent}%`;
   progressTrack.append(progressFill);
@@ -1828,109 +2811,1152 @@ function createEvidencePanel(recommendation, isActionPending) {
 }
 
 /**
- * 입력: 추천 항목.
+ * 입력: 추천 항목과 표시 옵션.
  * 출력: 추천 카드 HTMLElement.
- * 역할: 추천 관광지와 연결 퀘스트를 카드로 만든다.
- * 호출 예시: createRecommendationCard(recommendation)
+ * 역할: 퀘스트 목록 카드를 만든다. 모험 중 카드는 시작시각과 행동 버튼을 더 붙인다. (명세 §10 S04·S05)
+ * 호출 예시: createRecommendationCard(recommendation, { variant: "adventure" })
  */
-function createRecommendationCard(recommendation) {
+function createRecommendationCard(recommendation, options = {}) {
   // 현재 추천 항목의 진행 상태입니다.
   const questStatus = getQuestStatus(recommendation.instanceId, recommendation.status);
 
-  // 현재 추천 항목에서 처리 중인 액션입니다.
-  const pendingAction = state.pendingQuestActions[recommendation.instanceId] || "";
+  // 모험 중 화면의 카드인지 여부입니다. 주소 복사·완료 인증을 함께 답니다. (명세 §10 S04)
+  const isAdventure = options.variant === "adventure";
 
-  // 현재 추천 항목의 버튼을 잠글지 여부입니다.
-  const isActionPending = Boolean(pendingAction);
+  // 카드 본문입니다. 눌러서 상세 시트를 엽니다. (명세 §10 S04·S05)
+  const body = createElement("button", isAdventure ? "recommendation-card__body" : "px-card recommendation-card");
+  body.type = "button";
+  body.dataset.questTarget = recommendation.instanceId;
 
-  // 추천 카드를 감싸는 요소입니다.
-  const card = createElement("article", "recommendation-card");
+  if (!isAdventure) {
+    body.dataset.category = recommendation.category;
+  }
 
-  // 카드 상단 메타 영역입니다.
+  // 카드에 표시할 상태입니다. 목록에서 넘겨 주면 목록형과 같은 판정을 씁니다. (명세 §10 S05)
+  const availability = options.availability || null;
+
+  // 카드 상단 메타 영역입니다. 카테고리와 상태를 텍스트로 함께 보여 줍니다.
   const topline = createElement("div", "card-topline");
   topline.append(
-    createElement("span", "category-tag", CATEGORY_LABELS[recommendation.category] || "추천"),
-    createElement("span", "distance-tag", formatDistance(recommendation.distanceMeters)),
+    createElement("span", "px-tag", CATEGORY_LABELS[recommendation.category] || "추천"),
+    availability
+      ? createElement("span", getAvailabilityClass(availability.code), availability.label)
+      : createElement("span", getQuestStatusClass(questStatus), getQuestStatusLabel(questStatus)),
   );
 
-  // 카드 제목과 장소 정보입니다.
+  // 퀘스트명과 실제 수행 장소입니다.
   const title = createElement("h3", "card-title", recommendation.questTitle);
   const place = createElement("p", "card-place", recommendation.placeName);
-  const description = createElement("p", "card-description", recommendation.questDescription);
 
-  // 보상과 인증 정보를 표시하는 행입니다.
-  const rewardRow = createElement("div", "reward-row");
-  rewardRow.append(
-    createElement("span", "", `${recommendation.rewardXp} XP`),
-    createElement("span", "", recommendation.badgeName),
-    createElement("span", "", recommendation.verificationType),
-    createElement("span", "", `추천점수 ${Math.round(recommendation.score)}`),
+  // 거리·소요시간·미니 뱃지를 담는 요약 행입니다. 수행법과 긴 설명은 상세에만 둡니다.
+  const summary = createElement("div", "card-summary");
+  summary.append(
+    createElement("span", "px-counter", formatDistance(recommendation.distanceMeters)),
+    createElement("span", "px-counter", formatDuration(recommendation.estimatedMinutes)),
+    createMiniBadge(recommendation),
   );
 
-  // 카드 버튼 영역입니다.
-  const actions = createElement("div", "card-actions");
-  const acceptButton = createElement("button", "card-action card-action--secondary", "수락");
-  const completeButton = createElement("button", "card-action card-action--primary", "완료");
+  body.append(topline, title, place, summary);
 
-  acceptButton.type = "button";
-  completeButton.type = "button";
-  acceptButton.disabled =
-    isActionPending ||
-    questStatus === "accepted" ||
-    questStatus === "in_progress" ||
-    questStatus === "completed" ||
-    questStatus === "done";
-  completeButton.disabled = isActionPending || questStatus === "completed" || questStatus === "done";
-  acceptButton.textContent = pendingAction === "accept" ? "수락 중" : "수락";
-  completeButton.textContent = pendingAction === "complete" ? "확인 중" : "완료";
-  acceptButton.classList.toggle("is-pending", pendingAction === "accept");
-  completeButton.classList.toggle("is-pending", pendingAction === "complete");
-  acceptButton.setAttribute("aria-busy", pendingAction === "accept" ? "true" : "false");
-  completeButton.setAttribute("aria-busy", pendingAction === "complete" ? "true" : "false");
-  acceptButton.addEventListener("click", () => handleQuestAction(recommendation.instanceId, "accept"));
-  completeButton.addEventListener("click", () => handleQuestAction(recommendation.instanceId, "complete"));
-  actions.append(acceptButton, completeButton);
+  // 행사 개최 상태를 함께 알립니다. (명세 §6.5)
+  const cardEventStatus = getEventStatusLabel(recommendation);
+  if (cardEventStatus) {
+    body.append(createElement("p", "card-festival-note event-note", cardEventStatus));
+  }
 
-  // 사진 또는 영수증 증빙 업로드 패널입니다.
-  const evidencePanel = createEvidencePanel(recommendation, isActionPending);
+  if (recommendation.isCommonFestival) {
+    body.append(createElement("p", "card-festival-note", formatFestivalTargetNote(recommendation)));
+  }
 
-  // 현재 상태 태그입니다.
-  const statusTag = createElement("span", getQuestStatusClass(questStatus), getQuestStatusLabel(questStatus));
+  if (!isAdventure) {
+    return body;
+  }
 
-  card.append(topline, statusTag, title, place, description, rewardRow, evidencePanel, actions);
+  // 모험 중 카드는 시작시각을 함께 보여 줍니다. (명세 §10 S04)
+  body.append(createElement("p", "card-started", formatStartTime(recommendation.startedAt)));
+
+  // 본문 버튼과 행동 버튼을 함께 담는 카드입니다. 버튼 중첩을 피하려고 감싸는 요소를 둡니다.
+  const card = createElement("article", "px-card recommendation-card recommendation-card--adventure");
+  card.dataset.category = recommendation.category;
+  card.append(body, createAdventureCardActions(recommendation, questStatus));
+
   return card;
+}
+
+/**
+ * 입력: 추천 항목과 진행 상태.
+ * 출력: 모험 중 카드의 행동 버튼 영역.
+ * 역할: 상세로 들어가지 않아도 주소 복사와 완료 인증을 할 수 있게 한다. (명세 §10 S04)
+ * 호출 예시: createAdventureCardActions(recommendation, "accepted")
+ */
+function createAdventureCardActions(recommendation, questStatus) {
+  // 처리 중인 액션입니다. 있으면 버튼을 잠급니다.
+  const pendingAction = state.pendingQuestActions[recommendation.instanceId] || "";
+
+  // 행동 버튼을 담는 영역입니다.
+  const actions = createElement("div", "card-actions");
+
+  // 주소 복사 버튼입니다. 주소가 없으면 비활성화합니다. (명세 §10 S06 주소 복사)
+  const copyButton = createElement("button", "px-button px-button--ghost");
+  copyButton.type = "button";
+  const copyIcon = createElement("span", "px-icon px-icon--sm", "content_copy");
+  copyIcon.setAttribute("aria-hidden", "true");
+  copyButton.append(copyIcon, createElement("span", "", "주소 복사"));
+  copyButton.disabled = !recommendation.roadAddress;
+  copyButton.addEventListener("click", () => copyQuestAddress(recommendation));
+
+  // 완료 인증 버튼입니다. 상태별 CTA 표를 상세와 공유합니다. (명세 §10 S06)
+  const cta = getQuestCta(questStatus, getQuestAvailability(recommendation), recommendation);
+  const completeButton = createElement("button", "px-button px-button--primary");
+  completeButton.type = "button";
+  completeButton.textContent = pendingAction ? "처리 중" : cta.label;
+  completeButton.disabled = Boolean(pendingAction) || !cta.action;
+  completeButton.setAttribute("aria-busy", pendingAction ? "true" : "false");
+
+  if (cta.action) {
+    completeButton.addEventListener("click", () => handleQuestAction(recommendation.instanceId, cta.action));
+  }
+
+  actions.append(copyButton, completeButton);
+  return actions;
+}
+
+/**
+ * 입력: ISO 8601 시작 시각 문자열.
+ * 출력: 화면 표시용 시작시각 문구.
+ * 역할: 모험 중 카드에 언제 시작한 퀘스트인지 보여 준다. (명세 §10 S04)
+ * 호출 예시: formatStartTime("2026-09-10T09:20:00+09:00")
+ */
+function formatStartTime(startedAt) {
+  if (!startedAt) {
+    return "시작시각 기록 없음";
+  }
+
+  // 시작 시각입니다. 파싱에 실패하면 원문 대신 안내 문구를 씁니다.
+  const started = new Date(startedAt);
+
+  if (Number.isNaN(started.getTime())) {
+    return "시작시각 기록 없음";
+  }
+
+  return `${started.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 시작`;
+}
+
+/**
+ * 입력: 퀘스트 인스턴스 식별자.
+ * 출력: 없음.
+ * 역할: 홈·모험 중·퀘스트가 공유하는 상세 시트를 연다. (명세 §10 S06)
+ * 호출 예시: openQuestSheet("mock-nature-001")
+ */
+function openQuestSheet(instanceId) {
+  if (!instanceId) {
+    return;
+  }
+
+  // 시트를 열기 전 포커스가 있던 요소입니다. 닫을 때 되돌립니다.
+  state.questSheetReturnFocus = document.activeElement;
+  state.questSheetId = instanceId;
+  state.questSheetMessage = "";
+  renderQuestSheet();
 }
 
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 선택한 카테고리에 맞는 추천 목록을 렌더링한다.
+ * 역할: 공용 퀘스트 상세 시트를 닫고 포커스를 되돌린다.
+ * 호출 예시: closeQuestSheet()
+ */
+function closeQuestSheet() {
+  if (!state.questSheetId) {
+    return;
+  }
+
+  state.questSheetId = "";
+  state.questSheetMessage = "";
+  renderQuestSheet();
+
+  // 포커스는 시트를 열었던 카드로 되돌립니다.
+  const target = state.questSheetReturnFocus;
+  if (target instanceof HTMLElement && target.isConnected) {
+    target.focus({ preventScroll: true });
+  }
+  state.questSheetReturnFocus = null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 현재 시트가 보여 주는 추천 항목 또는 null.
+ * 역할: 시트와 CTA 처리가 같은 항목을 보게 한다.
+ * 호출 예시: const quest = getQuestSheetTarget()
+ */
+function getQuestSheetTarget() {
+  return state.recommendations.find((item) => item.instanceId === state.questSheetId) || null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 상단 제목 고정, 가운데 스크롤, 하단 CTA 고정 구조로 퀘스트 상세를 그린다. (명세 §10 S06)
+ * 호출 예시: renderQuestSheet()
+ */
+function renderQuestSheet() {
+  // 시트 컨테이너입니다.
+  const sheet = select("#quest-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  // 현재 시트가 보여 줄 퀘스트입니다.
+  const quest = getQuestSheetTarget();
+
+  if (!quest) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    delete document.body.dataset.questSheetOpen;
+    return;
+  }
+
+  // 이 퀘스트의 현재 진행 상태입니다.
+  const questStatus = getQuestStatus(quest.instanceId, quest.status);
+  // 처리 중인 액션입니다. 있으면 CTA를 잠급니다.
+  const pendingAction = state.pendingQuestActions[quest.instanceId] || "";
+
+  sheet.hidden = false;
+  document.body.dataset.questSheetOpen = "true";
+  sheet.replaceChildren();
+
+  // 배경을 덮는 딤 레이어입니다. 눌러서 닫습니다.
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closeQuestSheet);
+
+  // 시트 본체입니다.
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "quest-sheet-title");
+
+  panel.append(
+    createQuestSheetHead(quest, questStatus),
+    createQuestSheetBody(quest, questStatus),
+    createQuestSheetCta(quest, questStatus, pendingAction),
+  );
+
+  sheet.append(scrim, panel);
+
+  // 열자마자 제목으로 포커스를 옮겨 스크린리더가 시트를 읽게 합니다.
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#quest-sheet-title")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 추천 항목과 진행 상태.
+ * 출력: 시트 상단 고정 영역 요소.
+ * 역할: 스크롤해도 퀘스트명이 고정되도록 머리말을 만든다. (명세 §10 S06)
+ * 호출 예시: createQuestSheetHead(quest, "accepted")
+ */
+function createQuestSheetHead(quest, questStatus) {
+  // 대화창 형태의 고정 머리말입니다.
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+
+  // 퀘스트명을 담는 영역입니다.
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", quest.questTitle);
+  title.id = "quest-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  // 상태와 카테고리를 텍스트로 함께 표시합니다. 목록과 같은 판정을 씁니다. (명세 §10 S05)
+  const availability = getQuestAvailability(quest);
+  const tags = createElement("div", "quest-sheet__tags");
+  const categoryTag = createElement("span", "px-tag", CATEGORY_LABELS[quest.category] || "추천");
+  categoryTag.dataset.category = quest.category;
+  tags.append(
+    categoryTag,
+    createElement("span", getAvailabilityClass(availability.code), availability.label),
+  );
+
+  // 닫기 버튼입니다.
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "상세 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closeQuestSheet);
+
+  head.append(titleGroup, tags, closeButton);
+  return head;
+}
+
+/**
+ * 입력: 추천 항목과 진행 상태.
+ * 출력: 시트 가운데 스크롤 영역 요소.
+ * 역할: 명세 §10 S06 본문 순서대로 상세 내용을 쌓는다.
+ * 호출 예시: createQuestSheetBody(quest, "recommended")
+ */
+function createQuestSheetBody(quest, questStatus) {
+  // 스크롤되는 본문 영역입니다.
+  const body = createElement("div", "quest-sheet__body");
+
+  // 1. 관광지명, 2. 장소명과 도로명주소, 주소 복사
+  body.append(createQuestPlacePanel(quest));
+
+  // 3. 거리·예상 소요시간·난이도
+  const stats = createElement("div", "stat-row");
+  stats.append(
+    createStatCell("직선 거리", formatDistance(quest.distanceMeters)),
+    createStatCell("소요 시간", formatDuration(quest.estimatedMinutes)),
+    createStatCell("난이도", DIFFICULTY_LABELS[quest.difficulty] || "발견"),
+  );
+  body.append(stats);
+
+  // 4. 고유 미니 뱃지와 꿈돌이 미리보기
+  body.append(createRewardPairPanel(quest, questStatus));
+
+  // 5. 퀘스트 수행 방법
+  const guide = createElement("section", "px-panel");
+  guide.append(
+    createElement("h3", "section-title", "퀘스트 수행 방법"),
+    createElement("p", "px-body", quest.questDescription),
+  );
+  body.append(guide);
+
+  // 6. 완료 인증 조건과 개인정보 안내
+  body.append(createVerificationPanel(quest));
+
+  // 7. 행사형이면 개최일·운영시간·타깃 선택 (명세 §10 S06 본문 7항)
+  if (quest.isCommonFestival) {
+    body.append(createFestivalTargetPanel(quest));
+  }
+
+  // 시트 안에서 알릴 메시지입니다. 주소 복사 결과 등을 여기서 보여 줍니다.
+  const message = createElement("p", "data-note quest-sheet__message", state.questSheetMessage);
+  message.setAttribute("aria-live", "polite");
+  body.append(message);
+
+  return body;
+}
+
+/**
+ * 입력: 추천 항목.
+ * 출력: 장소와 주소 복사 패널 요소.
+ * 역할: 관광지명과 도로명주소를 보여 주고 둘을 함께 복사한다. (명세 §10 S06 주소 복사)
+ * 호출 예시: createQuestPlacePanel(quest)
+ */
+function createQuestPlacePanel(quest) {
+  // 장소 정보를 담는 패널입니다.
+  const panel = createElement("section", "px-panel px-panel--inset");
+
+  panel.append(createElement("span", "px-label quest-sheet__eyebrow", "LOCATION"));
+  panel.append(createElement("h3", "page-title", quest.placeName));
+
+  // 주소 줄과 복사 버튼입니다.
+  const addressRow = createElement("div", "quest-sheet__address");
+  addressRow.append(createElement("p", "px-body", quest.roadAddress || "주소 정보가 없습니다."));
+
+  // 주소 복사 버튼입니다. 주소가 없으면 비활성화합니다.
+  const copyButton = createElement("button", "px-button px-button--ghost");
+  copyButton.type = "button";
+  const copyIcon = createElement("span", "px-icon px-icon--sm", "content_copy");
+  copyIcon.setAttribute("aria-hidden", "true");
+  copyButton.append(copyIcon, createElement("span", "", "주소 복사"));
+  copyButton.disabled = !quest.roadAddress;
+  copyButton.addEventListener("click", () => copyQuestAddress(quest));
+  addressRow.append(copyButton);
+
+  panel.append(addressRow);
+
+  // Clipboard API가 막힌 환경에서는 선택 가능한 텍스트를 대신 보여 줍니다.
+  if (state.questSheetFallbackText) {
+    const fallback = createElement("pre", "quest-sheet__fallback", state.questSheetFallbackText);
+    fallback.tabIndex = 0;
+    panel.append(fallback);
+  }
+
+  // 외부 길찾기는 제공하지 않습니다. (명세 §1.4, §19)
+  panel.append(createElement("p", "data-note", "장소명과 도로명주소를 함께 복사합니다."));
+
+  return panel;
+}
+
+/**
+ * 입력: 추천 항목.
+ * 출력: 없음.
+ * 역할: 관광지명과 도로명주소를 클립보드에 복사하고 결과를 알린다. (명세 §10 S06)
+ * 호출 예시: copyQuestAddress(quest)
+ */
+async function copyQuestAddress(quest) {
+  if (!quest.roadAddress) {
+    return;
+  }
+
+  // 복사할 내용은 관광지명 + 줄바꿈 + 도로명주소입니다.
+  const text = `${quest.placeName}\n${quest.roadAddress}`;
+
+  // 복사에 성공했는지 여부입니다.
+  let isCopied = false;
+
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error("clipboard-unavailable");
+    }
+    await navigator.clipboard.writeText(text);
+    isCopied = true;
+    state.questSheetFallbackText = "";
+    state.questSheetMessage = "주소를 복사했어요";
+  } catch (error) {
+    // Clipboard API가 없거나 막힌 환경에서는 선택 가능한 텍스트로 대체합니다.
+    state.questSheetFallbackText = text;
+    state.questSheetMessage = "주소를 복사하지 못했어요. 다시 시도해주세요.";
+  }
+
+  // 모험 중 카드에서 부른 경우입니다. 시트가 닫혀 있으면 결과를 알릴 곳이 없습니다.
+  if (state.questSheetId !== quest.instanceId) {
+    updateSystemStatus(isCopied, state.questSheetMessage);
+
+    // 복사에 실패했으면 선택 가능한 폴백을 보여 주려고 상세 시트를 엽니다. (명세 §10 S06 주소 복사)
+    if (!isCopied) {
+      openQuestSheet(quest.instanceId);
+      state.questSheetMessage = "주소를 복사하지 못했어요. 다시 시도해주세요.";
+      renderQuestSheet();
+    }
+    return;
+  }
+
+  renderQuestSheet();
+}
+
+/**
+ * 입력: 라벨과 값 문자열.
+ * 출력: 수치 셀 요소.
+ * 역할: 거리·시간·난이도를 같은 규격의 HUD 칸으로 보여 준다.
+ * 호출 예시: createStatCell("직선 거리", "480m")
+ */
+function createStatCell(label, value) {
+  // 수치 한 칸입니다.
+  const cell = createElement("div", "stat-cell");
+  cell.append(
+    createElement("span", "stat-cell__label", label),
+    createElement("span", "stat-cell__value", value),
+  );
+  return cell;
+}
+
+/**
+ * 입력: 추천 항목과 진행 상태.
+ * 출력: 보상 쌍 패널 요소.
+ * 역할: 퀘스트에 1:1:1 로 연결된 뱃지와 꿈돌이를 보여 준다. (명세 §5.1, §10 S06)
+ * 호출 예시: createRewardPairPanel(quest, "recommended")
+ */
+function createRewardPairPanel(quest, questStatus) {
+  // 완료한 퀘스트인지 여부입니다. 완료 전에는 꿈돌이를 무채색으로 보여 줍니다.
+  const isEarned = questStatus === "completed" || questStatus === "done";
+
+  // 보상 패널입니다.
+  const panel = createElement("section", "px-panel");
+  const heading = createElement("div", "context-row");
+  heading.append(
+    createElement("h3", "section-title", "클리어 보상"),
+    createElement("span", "px-tag px-tag--ink", `+${quest.rewardXp} XP`),
+  );
+  panel.append(heading);
+
+  // 뱃지와 꿈돌이를 나란히 두는 영역입니다.
+  const pair = createElement("div", "reward-pair");
+  pair.append(
+    createRewardSlot("미니 뱃지", quest.badgeName, quest.rewardPair?.badgeImageRef, isEarned, quest.category),
+    createRewardSlot(
+      "꿈돌이",
+      quest.rewardPair?.ggumdoriName || "고유 꿈돌이",
+      quest.rewardPair?.ggumdoriStillImageRef,
+      isEarned,
+      quest.category,
+    ),
+  );
+  panel.append(pair);
+
+  return panel;
+}
+
+/**
+ * 입력: 슬롯 이름, 보상 이름, 이미지 경로, 획득 여부, 카테고리.
+ * 출력: 보상 슬롯 요소.
+ * 역할: 미획득 보상을 무채색과 잠금 텍스트로 함께 표시한다. (명세 §5.3)
+ * 호출 예시: createRewardSlot("꿈돌이", "산책 꿈돌이", ref, false, "nature")
+ */
+function createRewardSlot(slotLabel, rewardName, imageRef, isEarned, category) {
+  // 보상 한 칸입니다.
+  const slot = createElement("div", `reward-slot${isEarned ? "" : " is-locked"}`);
+  slot.dataset.category = category;
+
+  // 보상 이미지 자리입니다.
+  const art = createElement("div", "reward-slot__art");
+  if (imageRef) {
+    const image = document.createElement("img");
+    image.src = imageRef;
+    image.alt = "";
+    image.dataset.pixelArt = "true";
+    image.loading = "lazy";
+    art.append(image);
+  }
+  if (!isEarned) {
+    // 색만으로 잠금을 구분하지 않도록 자물쇠 아이콘을 함께 얹습니다.
+    const lock = createElement("span", "reward-slot__lock");
+    const lockIcon = createElement("span", "px-icon px-icon--sm", "lock");
+    lockIcon.setAttribute("aria-hidden", "true");
+    lock.append(lockIcon);
+    art.append(lock);
+  }
+  slot.append(art);
+
+  // 보상 이름과 상태 문구입니다.
+  const meta = createElement("div", "reward-slot__meta");
+  meta.append(
+    createElement("span", "stat-cell__label", slotLabel),
+    createElement("span", "px-label", rewardName),
+    createElement("span", "px-body", isEarned ? "획득함" : "미획득"),
+  );
+  slot.append(meta);
+
+  return slot;
+}
+
+/**
+ * 입력: 추천 항목.
+ * 출력: 완료 인증 패널 요소.
+ * 역할: 인증 5종별 조건과 개인정보 안내를 상세에 표시한다. (명세 §10 S06·S07)
+ * 호출 예시: createVerificationPanel(quest)
+ */
+function createVerificationPanel(quest) {
+  // 인증 안내 패널입니다.
+  const panel = createElement("section", "px-panel");
+  panel.append(
+    createElement("h3", "section-title", "완료 인증 조건"),
+    createElement(
+      "p",
+      "px-body",
+      `${QUEST_TYPE_LABELS[quest.questType] || "방문형"} · ${getVerificationGuide(quest.questType)}`,
+    ),
+  );
+
+  // 이동형은 경로를 저장하지 않는다는 사실을 명시합니다. (명세 §10 S07 이동형)
+  if (quest.questType === "move") {
+    panel.append(createElement("p", "data-note", "이동 중 위치를 계속 추적하지 않아요."));
+  }
+
+  // 소비형은 영수증 개인정보 고지가 필수입니다. (명세 §10 S07 소비형)
+  if (quest.questType === "spend") {
+    panel.append(createElement("p", "data-note", "금액·카드번호·승인번호는 저장하지 않습니다."));
+  }
+
+  // 계획 좌표로는 완료할 수 없다는 점을 알립니다. (명세 §19)
+  if (state.explorationMode === "planned") {
+    panel.append(
+      createElement("p", "data-note", "계획 모드입니다. 완료 인증은 현장의 실제 위치에서만 할 수 있어요."),
+    );
+  }
+
+  // 사진·영수증 업로드 패널을 상세 안으로 옮겼습니다. (마이그레이션 M6)
+  panel.append(createEvidencePanel(quest, Boolean(state.pendingQuestActions[quest.instanceId])));
+
+  return panel;
+}
+
+/**
+ * 입력: 인증 5종 키.
+ * 출력: 인증 방법 안내 문장.
+ * 역할: 인증 방식별로 사용자가 무엇을 해야 하는지 한 줄로 설명한다. (명세 §4.3)
+ * 호출 예시: getVerificationGuide("spend")
+ */
+function getVerificationGuide(questType) {
+  // 인증 5종별 안내 문구입니다.
+  const guides = {
+    visit: "지정 반경 안에서 현재 위치로 인증합니다.",
+    move: "출발지와 도착지에서 각각 위치를 확인합니다.",
+    activity: "현장에서 사진을 촬영하거나 파일을 선택합니다.",
+    spend: "영수증 또는 간판 사진에서 상호명을 확인합니다.",
+    theme: "연결된 하위 퀘스트를 모두 완료합니다.",
+  };
+
+  return guides[questType] || guides.visit;
+}
+
+/**
+ * 입력: 추천 항목, 진행 상태, 처리 중인 액션.
+ * 출력: 하단 고정 CTA 영역 요소.
+ * 역할: 상태별 CTA 한 개만 고정 노출한다. (명세 §10 S06 상태별 CTA)
+ * 호출 예시: createQuestSheetCta(quest, "accepted", "")
+ */
+function createQuestSheetCta(quest, questStatus, pendingAction) {
+  // 하단 고정 버튼 영역입니다.
+  const footer = createElement("div", "quest-sheet__cta");
+
+  // 상태와 수행 가능 여부에 맞는 CTA 정의입니다.
+  const cta = getQuestCta(questStatus, getQuestAvailability(quest), quest);
+
+  // 주 행동 버튼입니다.
+  const button = createElement("button", "px-button px-button--primary");
+  button.type = "button";
+  button.textContent = pendingAction ? "처리 중" : cta.label;
+  button.disabled = Boolean(pendingAction) || !cta.action;
+  button.setAttribute("aria-busy", pendingAction ? "true" : "false");
+
+  if (cta.action) {
+    button.addEventListener("click", () => handleQuestAction(quest.instanceId, cta.action));
+  }
+
+  footer.append(button);
+  return footer;
+}
+
+/**
+ * 입력: 퀘스트 진행 상태와 수행 가능 상태.
+ * 출력: CTA 라벨과 액션 이름.
+ * 역할: 상태별 CTA 표를 한 곳에서 관리한다. (명세 §10 S06)
+ * 호출 예시: getQuestCta("accepted", getQuestAvailability(quest))
+ */
+function getQuestCta(questStatus, availability = null, quest = null) {
+  // 공통 축제 보상을 이미 받았다면 다른 행사는 추가 방문으로 기록합니다. (명세 §10 S06, §11.2)
+  if (quest?.isCommonFestival && isAdditionalFestivalVisit(quest)) {
+    // 아직 기록하지 않은 유효 타깃이 있어야 추가 방문을 제안합니다.
+    const remaining = getValidFestivalTargets(quest).filter((target) => !hasVisitedFestivalTarget(quest, target));
+    if (remaining.length > 0) {
+      return { label: "추가 방문 기록", action: "complete" };
+    }
+    return { label: "완료됨", action: "" };
+  }
+
+  if (questStatus === "accepted" || questStatus === "in_progress") {
+    return { label: "완료 인증", action: "complete" };
+  }
+
+  // 아직 시작하지 않았는데 기간을 벗어난 퀘스트는 시작할 수 없습니다. (명세 §10 S05)
+  if (availability?.code === "event_ended") {
+    return { label: "행사가 끝났어요", action: "" };
+  }
+  if (availability?.code === "unavailable_on_date") {
+    return { label: "선택일에는 할 수 없어요", action: "" };
+  }
+  if (questStatus === "review" || questStatus === "in_review") {
+    return { label: "인증 검토 중", action: "" };
+  }
+  if (questStatus === "completed" || questStatus === "done") {
+    return { label: "완료됨", action: "" };
+  }
+
+  return { label: "모험 시작", action: "accept" };
+}
+
+/**
+ * 입력: 추천 항목.
+ * 출력: 미니 뱃지 요소.
+ * 역할: 퀘스트에 연결된 고유 미니 뱃지를 목록과 상세에서 같은 모양으로 보여 준다. (명세 §5.1)
+ * 호출 예시: createMiniBadge(recommendation, { compact: true })
+ */
+function createMiniBadge(recommendation, options = {}) {
+  // 뱃지 이미지와 이름을 담는 요소입니다. 목록형은 이름 없이 그림만 씁니다.
+  const wrapper = createElement("span", options.compact ? "mini-badge mini-badge--compact" : "mini-badge");
+  wrapper.dataset.category = recommendation.category;
+
+  // 서버가 준 명시적 뱃지 이미지 경로입니다. 클라이언트가 경로를 계산하지 않습니다. (명세 §5.1)
+  const imageRef = recommendation.rewardPair?.badgeImageRef || "";
+
+  if (imageRef) {
+    const image = document.createElement("img");
+    image.src = imageRef;
+    image.alt = "";
+    image.dataset.pixelArt = "true";
+    image.loading = "lazy";
+    wrapper.append(image);
+  }
+
+  if (options.compact) {
+    // 목록형은 자리가 좁아 이름을 접근성 텍스트로만 남깁니다.
+    wrapper.append(createElement("span", "px-sr-only", recommendation.badgeName));
+    return wrapper;
+  }
+
+  wrapper.append(createElement("span", "mini-badge__name", recommendation.badgeName));
+  return wrapper;
+}
+
+/**
+ * 입력: 예상 소요 분.
+ * 출력: 화면 표시용 소요시간 문자열.
+ * 역할: 분 단위를 사람이 읽기 쉬운 표기로 바꾼다.
+ * 호출 예시: formatDuration(95)
+ */
+function formatDuration(minutes) {
+  // 0 이하이거나 값이 없으면 표시하지 않습니다.
+  const total = Math.round(toNumber(minutes, 0));
+
+  if (total <= 0) {
+    return "소요시간 미정";
+  }
+  if (total < 60) {
+    return `약 ${total}분`;
+  }
+
+  // 시간과 남은 분입니다.
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+
+  return rest === 0 ? `약 ${hours}시간` : `약 ${hours}시간 ${rest}분`;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 수락한 퀘스트만 모아 모험 중 화면에 정렬해 표시한다. (명세 §10 S04)
+ * 호출 예시: renderAdventure()
+ */
+function renderAdventure() {
+  // 진행 중 퀘스트 목록 컨테이너입니다.
+  const list = select("#adventure-list");
+
+  if (!list) {
+    return;
+  }
+
+  // 수락했거나 수행 중인 퀘스트만 모은 목록입니다. (명세 §10 S04)
+  const activeQuests = state.recommendations.filter((item) => {
+    // 로컬 저장소까지 반영한 현재 상태입니다.
+    const status = getQuestStatus(item.instanceId, item.status);
+    return status === "accepted" || status === "in_progress";
+  });
+
+  // 실제로 적용할 정렬 기준입니다. 위치 권한이 없으면 시작 순이 기본값입니다. (명세 §10 S04)
+  const activeSort = getAdventureSort();
+
+  // 가까운 순 또는 시작 순으로 정렬한 목록입니다. (명세 §19)
+  const sortedQuests = [...activeQuests].sort((left, right) => {
+    if (activeSort === "started") {
+      // 최근에 시작한 퀘스트를 위에 둡니다.
+      return String(right.startedAt || "").localeCompare(String(left.startedAt || ""));
+    }
+    return toNumber(left.distanceMeters, Infinity) - toNumber(right.distanceMeters, Infinity);
+  });
+
+  // 정렬 칩은 실제로 적용된 기준을 그대로 보여 줍니다.
+  // 날씨 칩을 눌러 상세를 엽니다. (명세 §6.4)
+  const weatherPill = select("#home-weather-pill");
+  weatherPill?.addEventListener("click", openWeatherSheet);
+  weatherPill?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openWeatherSheet();
+    }
+  });
+
+  // 계획 위치·날짜 설정 시트를 엽니다. (명세 §10 S15)
+  select("#home-plan-search")?.addEventListener("click", openPlanSheet);
+
+  // S02 닉네임 단계 컨트롤입니다. (명세 §9.4, §10 S02)
+  select("#nickname-input")?.addEventListener("input", (event) => {
+    state.nicknameDraft = event.target.value || "";
+  });
+  select("#nickname-suggest")?.addEventListener("click", () => {
+    state.nicknameDraft = suggestNickname();
+    renderAccountStep();
+  });
+  select("#nickname-confirm")?.addEventListener("click", confirmNickname);
+
+  // S09 도감 검색입니다. 꿈돌이와 퀘스트 이름을 함께 찾습니다. (명세 §10 S09)
+  select("#collection-search")?.addEventListener("input", (event) => {
+    state.catalogSearch = event.target.value || "";
+    renderCollection();
+  });
+
+  // S09 획득 상태 필터입니다. (명세 §10 S09)
+  document.querySelectorAll("[data-collection-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.catalogStatusFilter = button.dataset.collectionFilter || "all";
+      renderCollection();
+    });
+  });
+
+  // S09 카테고리 필터입니다. (명세 §10 S09)
+  document.querySelectorAll("[data-collection-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.catalogCategory = button.dataset.collectionCategory || "all";
+      renderCollection();
+    });
+  });
+
+  // S05 목록형·카드형 전환입니다. (명세 §10 S05)
+  document.querySelectorAll("[data-quests-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.questsViewMode = button.dataset.questsView === "list" ? "list" : "card";
+      renderRecommendations();
+    });
+  });
+
+  // S05 난이도 필터입니다. 난이도는 보상 단계가 아니라 예상 복잡도입니다. (명세 §4.2)
+  document.querySelectorAll("[data-quests-difficulty]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.questsDifficulty = button.dataset.questsDifficulty || "all";
+      renderRecommendations();
+    });
+  });
+
+  // S05 정렬 기준입니다. (명세 §10 S05)
+  select("#quests-sort")?.addEventListener("change", (event) => {
+    state.questsSort = QUEST_SORT_LABELS[event.target.value] ? event.target.value : "distance";
+    renderRecommendations();
+  });
+
+  // 연결 상태가 바뀌면 퀘스트 목록의 오프라인 안내를 갱신합니다. (명세 §13.2)
+  window.addEventListener("online", () => {
+    state.isOnline = true;
+    renderRecommendations();
+  });
+  window.addEventListener("offline", () => {
+    state.isOnline = false;
+    renderRecommendations();
+  });
+
+  document.querySelectorAll("[data-adventure-sort]").forEach((button) => {
+    // 이 버튼이 나타내는 정렬 기준입니다.
+    const buttonSort = button.dataset.adventureSort === "started" ? "started" : "distance";
+    button.classList.toggle("is-active", buttonSort === activeSort);
+    button.setAttribute("aria-pressed", buttonSort === activeSort ? "true" : "false");
+    // 위치 권한이 없으면 가까운 순을 고를 수 없습니다. (명세 §10 S04)
+    button.disabled = buttonSort === "distance" && !state.location.measured;
+  });
+
+  list.replaceChildren();
+
+  if (sortedQuests.length === 0) {
+    list.append(createAdventureEmptyState());
+    return;
+  }
+
+  sortedQuests.forEach((recommendation) => {
+    list.append(createRecommendationCard(recommendation, { variant: "adventure" }));
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 실제로 적용할 모험 중 정렬 기준.
+ * 역할: 위치 권한이 없으면 시작 순을 기본값으로 쓴다. 사용자가 직접 고른 뒤에는 그 선택을 지킨다. (명세 §10 S04)
+ * 호출 예시: const activeSort = getAdventureSort()
+ */
+function getAdventureSort() {
+  // 가까운 순은 실제 현위치를 기준으로 하므로 실측 좌표가 있어야 합니다.
+  if (!state.location.measured) {
+    return "started";
+  }
+
+  return state.adventureSortPinned ? state.adventureSort : "distance";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 모험 중 빈 상태 요소.
+ * 역할: 진행 중 퀘스트가 없을 때 퀘스트 찾아보기로 넘어갈 길을 준다. (명세 §10 S04)
+ * 호출 예시: list.append(createAdventureEmptyState())
+ */
+function createAdventureEmptyState() {
+  // 빈 상태를 담는 영역입니다.
+  const empty = createElement("div", "empty-state");
+  empty.append(createElement("p", "empty-message", "진행 중인 퀘스트가 없습니다."));
+
+  // 퀘스트 탐색 화면으로 넘기는 버튼입니다. 화면 전환은 위임 처리기가 맡습니다.
+  const browseButton = createElement("button", "px-button px-button--primary", "퀘스트 찾아보기");
+  browseButton.type = "button";
+  browseButton.dataset.viewTarget = "quests";
+  empty.append(browseButton);
+
+  return empty;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 현재 필터와 정렬을 적용한 퀘스트 목록.
+ * 역할: 목록형과 카드형이 완전히 같은 데이터를 쓰게 한다. (명세 §10 S05)
+ * 호출 예시: const quests = getVisibleQuests()
+ */
+function getVisibleQuests() {
+  // 공통 축제 퀘스트는 타깃이 여러 개여도 목록에서는 하나로만 보여 줍니다. (명세 §11.1)
+  const deduped = [];
+  // 이미 담은 공통 축제 퀘스트의 questId 모음입니다.
+  const seenFestivalIds = new Set();
+
+  state.recommendations.forEach((item) => {
+    if (!item.isCommonFestival) {
+      deduped.push(item);
+      return;
+    }
+    if (seenFestivalIds.has(item.questId)) {
+      return;
+    }
+    seenFestivalIds.add(item.questId);
+    deduped.push(item);
+  });
+
+  // 카테고리와 난이도를 모두 통과한 목록입니다.
+  const filtered = deduped.filter((item) => {
+    if (state.selectedCategory !== "all" && item.category !== state.selectedCategory) {
+      return false;
+    }
+    if (state.questsDifficulty !== "all" && item.difficulty !== state.questsDifficulty) {
+      return false;
+    }
+    return true;
+  });
+
+  return [...filtered].sort(compareQuestsForSort);
+}
+
+/**
+ * 입력: 비교할 퀘스트 두 개.
+ * 출력: 정렬 비교값.
+ * 역할: 선택한 정렬 기준대로 퀘스트 순서를 정한다. (명세 §10 S05)
+ * 호출 예시: quests.sort(compareQuestsForSort)
+ */
+function compareQuestsForSort(left, right) {
+  if (state.questsSort === "duration") {
+    // 소요시간 미정은 뒤로 보냅니다.
+    return toNumber(left.estimatedMinutes, Infinity) - toNumber(right.estimatedMinutes, Infinity);
+  }
+  if (state.questsSort === "reward") {
+    return toNumber(right.rewardXp, 0) - toNumber(left.rewardXp, 0);
+  }
+
+  return toNumber(left.distanceMeters, Infinity) - toNumber(right.distanceMeters, Infinity);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 탐색 컨텍스트, 필터, 목록형·카드형 보기를 함께 갱신한다. (명세 §10 S05)
  * 호출 예시: renderRecommendations()
  */
 function renderRecommendations() {
-  // 추천 카드 목록 컨테이너입니다.
+  // 퀘스트 목록 컨테이너입니다.
   const list = select("#recommendation-list");
 
   if (!list) {
     return;
   }
 
-  // 현재 카테고리로 필터링한 추천 목록입니다.
-  const filteredRecommendations =
-    state.selectedCategory === "all"
-      ? state.recommendations
-      : state.recommendations.filter((item) => item.category === state.selectedCategory);
+  renderQuestsContext();
+  renderQuestsControls();
 
+  // 현재 필터와 정렬을 적용한 목록입니다.
+  const quests = getVisibleQuests();
+
+  // 목록형인지 여부입니다. 두 보기는 같은 항목을 다른 밀도로 보여 줍니다.
+  const isListView = state.questsViewMode === "list";
+
+  list.className = isListView ? "quest-list" : "card-list";
   list.replaceChildren();
 
-  if (filteredRecommendations.length === 0) {
-    list.append(createElement("p", "empty-message", "이 카테고리의 추천 퀘스트가 아직 없습니다."));
+  // 오프라인이면 목록 위에 먼저 알립니다. 캐시된 목록은 그대로 보여 줍니다. (명세 §13.2)
+  if (!state.isOnline) {
+    list.append(
+      createElement("p", "data-note quest-offline-note", "오프라인입니다. 마지막으로 받은 퀘스트를 보여 줍니다."),
+    );
+  }
+
+  if (quests.length === 0) {
+    list.append(createElement("p", "empty-message", getQuestEmptyMessage()));
     return;
   }
 
-  filteredRecommendations.forEach((recommendation) => {
-    list.append(createRecommendationCard(recommendation));
+  quests.forEach((quest) => {
+    // 이 퀘스트의 수행 가능 상태입니다.
+    const availability = getQuestAvailability(quest);
+    list.append(
+      isListView ? createQuestListRow(quest, availability) : createRecommendationCard(quest, { availability }),
+    );
   });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 현재 필터에 맞는 빈 결과 문구.
+ * 역할: 왜 결과가 없는지 필터별로 다르게 알린다. (명세 §10 S05)
+ * 호출 예시: const message = getQuestEmptyMessage()
+ */
+function getQuestEmptyMessage() {
+  if (state.selectedCategory !== "all" && state.questsDifficulty !== "all") {
+    return "이 카테고리와 난이도에 맞는 퀘스트가 없습니다. 필터를 넓혀 보세요.";
+  }
+  if (state.selectedCategory !== "all") {
+    return "이 카테고리의 퀘스트가 아직 없습니다.";
+  }
+  if (state.questsDifficulty !== "all") {
+    return "이 난이도의 퀘스트가 아직 없습니다.";
+  }
+
+  return "표시할 퀘스트가 없습니다.";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 퀘스트 목록 상단에 현위치 또는 계획 위치·날짜 컨텍스트를 표시한다. (명세 §10 S05, §6)
+ * 호출 예시: renderQuestsContext()
+ */
+function renderQuestsContext() {
+  // 컨텍스트 문구를 담는 요소입니다.
+  const contextText = select("#quests-context-text");
+
+  if (!contextText) {
+    return;
+  }
+
+  // 계획 모드인지 여부입니다.
+  const isPlanned = state.explorationMode === "planned";
+
+  // 기준 위치 이름입니다.
+  const placeLabel = state.location.label || "대전광역시청";
+
+  if (isPlanned) {
+    contextText.textContent = `계획 중 · ${placeLabel} · ${formatContextDate(getQuestReferenceDate())} 기준`;
+  } else {
+    contextText.textContent = `현위치 · ${placeLabel} · 오늘 기준`;
+  }
+
+  // 계획 모드에서는 거리에 계획 위치 기준임을 덧붙입니다. (명세 §6.3)
+  const distanceNote = select("#quests-distance-note");
+  if (distanceNote) {
+    distanceNote.hidden = !isPlanned;
+  }
+}
+
+/**
+ * 입력: YYYY-MM-DD 날짜 문자열.
+ * 출력: 화면 표시용 날짜 문구.
+ * 역할: 계획 날짜를 짧은 한국어 표기로 보여 준다.
+ * 호출 예시: formatContextDate("2026-10-03")
+ */
+function formatContextDate(dateKey) {
+  if (!dateKey) {
+    return "오늘";
+  }
+
+  // 표시할 날짜입니다. 파싱에 실패하면 원문을 그대로 씁니다.
+  const parsed = new Date(`${dateKey}T00:00:00+09:00`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return dateKey;
+  }
+
+  return parsed.toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 보기 전환·난이도·정렬 컨트롤의 현재 선택을 화면에 반영한다. (명세 §10 S05)
+ * 호출 예시: renderQuestsControls()
+ */
+function renderQuestsControls() {
+  document.querySelectorAll("[data-quests-view]").forEach((button) => {
+    // 이 버튼이 나타내는 보기 방식입니다.
+    const buttonView = button.dataset.questsView === "list" ? "list" : "card";
+    button.classList.toggle("is-active", buttonView === state.questsViewMode);
+    button.setAttribute("aria-pressed", buttonView === state.questsViewMode ? "true" : "false");
+  });
+
+  document.querySelectorAll("[data-quests-difficulty]").forEach((button) => {
+    // 이 버튼이 나타내는 난이도입니다.
+    const buttonDifficulty = button.dataset.questsDifficulty || "all";
+    button.classList.toggle("is-active", buttonDifficulty === state.questsDifficulty);
+    button.setAttribute("aria-pressed", buttonDifficulty === state.questsDifficulty ? "true" : "false");
+  });
+
+  // 정렬 선택 요소입니다.
+  const sortSelect = select("#quests-sort");
+  if (sortSelect instanceof HTMLSelectElement && sortSelect.value !== state.questsSort) {
+    sortSelect.value = state.questsSort;
+  }
+}
+
+/**
+ * 입력: 퀘스트 항목과 수행 가능 상태.
+ * 출력: 목록형 한 줄 요소.
+ * 역할: 카드형과 같은 정보를 더 높은 밀도로 보여 준다. (명세 §10 S05)
+ * 호출 예시: createQuestListRow(quest, availability)
+ */
+function createQuestListRow(quest, availability) {
+  // 목록 한 줄 전체가 상세 시트를 여는 버튼입니다.
+  const row = createElement("button", "quest-line");
+  row.type = "button";
+  row.dataset.category = quest.category;
+  row.dataset.questTarget = quest.instanceId;
+
+  // 왼쪽의 미니 뱃지입니다. 카드형과 같은 컴포넌트를 씁니다.
+  row.append(createMiniBadge(quest, { compact: true }));
+
+  // 가운데의 글 영역입니다.
+  const main = createElement("div", "quest-line__main");
+  main.append(createElement("span", "quest-line__title", quest.questTitle));
+  main.append(createElement("span", "quest-line__place", quest.placeName));
+
+  // 거리와 소요시간입니다.
+  const meta = createElement("span", "quest-line__meta");
+  meta.append(
+    createElement("span", "px-counter", formatDistance(quest.distanceMeters)),
+    createElement("span", "px-counter", formatDuration(quest.estimatedMinutes)),
+  );
+  main.append(meta);
+
+  // 행사 개최 상태를 함께 알립니다. (명세 §6.5)
+  const eventStatus = getEventStatusLabel(quest);
+  if (eventStatus) {
+    main.append(createElement("span", "quest-line__note event-note", eventStatus));
+  }
+
+  // 공통 축제 퀘스트는 참여 가능한 행사 수를 보조 문구로 덧붙입니다. (명세 §10 S05, §11.1)
+  if (quest.isCommonFestival) {
+    main.append(createElement("span", "quest-line__note", formatFestivalTargetNote(quest)));
+  }
+
+  row.append(main);
+
+  // 오른쪽의 상태 표시입니다.
+  row.append(createElement("span", getAvailabilityClass(availability.code), availability.label));
+
+  return row;
+}
+
+/**
+ * 입력: 공통 축제 퀘스트 항목.
+ * 출력: 참여 가능한 행사 수 보조 문구.
+ * 역할: 타깃이 여러 개인 공통 퀘스트를 한 장으로 보여 주면서 규모를 알린다. (명세 §10 S05, §11.1)
+ * 호출 예시: formatFestivalTargetNote(quest)
+ */
+function formatFestivalTargetNote(quest) {
+  // 참여할 수 있는 행사 타깃 수입니다.
+  const count = toNumber(quest.festivalTargetCount, 0);
+
+  return count > 0 ? `참여 가능한 행사 ${count}곳` : "참여 가능한 행사를 확인하세요";
+}
+
+/**
+ * 입력: 수행 가능 상태 코드.
+ * 출력: 상태 표시에 쓸 클래스 이름.
+ * 역할: 색만으로 구분하지 않도록 상태별 태그 모양을 정한다. (명세 §3.2, §10 S05)
+ * 호출 예시: getAvailabilityClass("event_ended")
+ */
+function getAvailabilityClass(availabilityCode) {
+  if (availabilityCode === "completed") {
+    return "status-badge status-badge--done";
+  }
+  if (availabilityCode === "in_progress") {
+    return "status-badge status-badge--active";
+  }
+  if (availabilityCode === "event_ended" || availabilityCode === "unavailable_on_date") {
+    return "status-badge status-badge--locked";
+  }
+
+  return "status-badge status-badge--available";
 }
 
 /**
@@ -2304,63 +4330,491 @@ function createMapDetailCard(place) {
 }
 
 /**
- * 입력: 없음.
- * 출력: 없음.
- * 역할: 뱃지 진행도를 카드 그리드로 렌더링한다.
- * 호출 예시: renderBadges()
+ * 입력: 수첩 기록.
+ * 출력: 화면 입력 상태 객체.
+ * 역할: 서버 기록을 일기·리뷰 편집 폼의 초기 상태로 변환한다.
+ * 호출 예시: const draft = createNoteDraft(note)
  */
-function renderBadges() {
-  // 뱃지 그리드 컨테이너입니다.
-  const grid = select("#badge-grid");
+function createNoteDraft(note) {
+  // 편집 폼의 기준이 되는 서버 기록입니다.
+  const entry = note.entry || {};
 
-  if (!grid) {
+  return {
+    type: entry.type === "review" ? "review" : "diary",
+    title: String(entry.title || ""),
+    body: String(entry.body || ""),
+    rating: entry.type === "review" ? toNumber(entry.rating, 0) || "" : "",
+    dirty: false,
+    pending: false,
+    isOpen: false,
+    message: "",
+    tone: "",
+  };
+}
+
+/**
+ * 입력: 수첩 기록.
+ * 출력: 해당 기록의 현재 편집 상태.
+ * 역할: 전체 화면 재렌더링 뒤에도 작성 중인 값을 잃지 않게 편집 상태를 보존한다.
+ * 호출 예시: const draft = getNoteDraft(note)
+ */
+function getNoteDraft(note) {
+  if (!state.noteDrafts[note.id]) {
+    state.noteDrafts[note.id] = createNoteDraft(note);
+  }
+
+  return state.noteDrafts[note.id];
+}
+
+/**
+ * 입력: 사진이 연결된 수첩 기록과 즉시 렌더링 여부.
+ * 출력: 다운로드 URL 발급 완료 Promise.
+ * 역할: 현재 사용자 사진의 짧은 presigned GET URL을 발급받아 카드 상태에 저장한다.
+ * 호출 예시: await requestNotePhoto(note, true)
+ */
+async function requestNotePhoto(note, shouldRender = false) {
+  if (!note.photoRef) {
+    delete state.notePhotos[note.id];
     return;
   }
 
-  grid.replaceChildren();
+  // 동시에 진행된 요청 중 최신 응답만 반영하기 위한 요청 식별자입니다.
+  const requestId = createClientId("note-photo");
+  state.notePhotos[note.id] = {
+    status: "loading",
+    url: "",
+    objectKey: note.photoRef,
+    requestId,
+    error: "",
+  };
 
-  // 대표 뱃지 아이콘 요소입니다.
-  const featuredIcon = select("#featured-badge-icon");
-  // 대표 뱃지 설명 요소입니다.
-  const featuredCopy = select("#featured-badge-copy");
-  // 대표로 표시할 최근 획득 뱃지입니다.
-  const featuredBadge = getEarnedBadges()[0] || state.badges[0];
-
-  if (featuredIcon && featuredBadge) {
-    featuredIcon.textContent = getCategoryIcon(featuredBadge.category);
+  if (shouldRender) {
+    renderNotes();
   }
 
-  if (featuredCopy && featuredBadge) {
-    featuredCopy.textContent = `${featuredBadge.name} Lv.${featuredBadge.tier} · ${featuredBadge.progressXp} XP`;
+  try {
+    // Object Storage 다운로드 URL 발급 응답입니다.
+    const payload = await fetchJson("/api/object-storage/download-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objectKey: note.photoRef }),
+    });
+    // 응답을 반영할 현재 사진 요청 상태입니다.
+    const currentPhoto = state.notePhotos[note.id];
+
+    if (currentPhoto?.requestId !== requestId) {
+      return;
+    }
+    if (!payload.url) {
+      throw new Error("missing download url");
+    }
+
+    state.notePhotos[note.id] = {
+      status: "ready",
+      url: String(payload.url),
+      objectKey: String(payload.objectKey || note.photoRef),
+      expiresInSeconds: toNumber(payload.expiresInSeconds, 0),
+      requestId,
+      error: "",
+    };
+  } catch (error) {
+    // 실패 응답을 반영할 현재 사진 요청 상태입니다.
+    const currentPhoto = state.notePhotos[note.id];
+    if (isUnauthorizedError(error) || currentPhoto?.requestId !== requestId) {
+      return;
+    }
+
+    state.notePhotos[note.id] = {
+      status: "failed",
+      url: "",
+      objectKey: note.photoRef,
+      requestId,
+      error: "사진을 불러오지 못했습니다.",
+    };
+  } finally {
+    if (shouldRender && state.accessToken) {
+      renderNotes();
+    }
+  }
+}
+
+/**
+ * 입력: 이미지 표시가 실패한 수첩 기록.
+ * 출력: 없음.
+ * 역할: 만료되거나 읽을 수 없는 사진 URL을 재발급 가능한 실패 상태로 바꾼다.
+ * 호출 예시: markNotePhotoFailed(note)
+ */
+function markNotePhotoFailed(note) {
+  // 브라우저가 표시하지 못한 현재 사진 상태입니다.
+  const currentPhoto = state.notePhotos[note.id];
+  if (!currentPhoto || currentPhoto.status !== "ready") {
+    return;
   }
 
-  state.badges.forEach((badge) => {
-    // 뱃지 진행률입니다.
-    const progressPercent = getProgressPercent(badge.progressXp, badge.requiredXp);
+  state.notePhotos[note.id] = {
+    ...currentPhoto,
+    status: "failed",
+    error: "사진 주소가 만료되었거나 이미지를 표시할 수 없습니다.",
+  };
+  renderNotes();
+}
 
-    // 뱃지 카드 요소입니다.
-    const card = createElement("article", "badge-card");
-    const topline = createElement("div", "badge-topline");
-    topline.append(
-      createElement("span", "category-tag", CATEGORY_LABELS[badge.category] || "기타"),
-      createElement("span", badge.earnedAt ? "status-tag status-tag--done" : "status-tag", badge.earnedAt ? "획득" : "진행"),
-    );
+/**
+ * 입력: 수첩 기록.
+ * 출력: 사진 표시 HTMLElement.
+ * 역할: 사진 로딩, 원본 열기, 실패 재시도 상태를 접근 가능한 한 영역으로 만든다.
+ * 호출 예시: const photo = createNotePhoto(note)
+ */
+function createNotePhoto(note) {
+  // 수첩 기록의 사진 조회 상태입니다.
+  const photoState = state.notePhotos[note.id] || { status: "loading" };
+  // 사진과 상태 문구를 감싸는 영역입니다.
+  const panel = createElement("section", "note-photo-panel");
+  panel.setAttribute("aria-label", "퀘스트 인증 사진");
 
-    const title = createElement("h3", "", `${getCategoryIcon(badge.category)} ${badge.name} Lv.${badge.tier}`);
-    const label = createElement("div", "badge-progress-label");
-    label.append(
-      createElement("span", "", `${badge.progressXp} XP`),
-      createElement("span", "", `${badge.requiredXp} XP`),
-    );
+  if (photoState.status === "ready" && photoState.url) {
+    // 인증 사진과 설명을 묶는 요소입니다.
+    const figure = createElement("figure", "note-photo-figure");
+    // Object Storage에서 불러온 인증 사진입니다.
+    const image = document.createElement("img");
+    image.className = "note-photo-image";
+    image.src = photoState.url;
+    image.alt = `${note.placeName}에서 완료한 ${note.title} 인증 사진`;
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => markNotePhotoFailed(note), { once: true });
 
-    const track = createElement("div", "progress-track");
-    const fill = createElement("span", "progress-fill");
-    fill.style.width = `${progressPercent}%`;
-    track.append(fill);
+    // 사진의 용도를 알려주는 설명입니다.
+    const caption = createElement("figcaption", "note-photo-caption", "퀘스트 완료 시 첨부한 인증 사진");
+    figure.append(image, caption);
 
-    card.append(topline, title, label, track);
-    grid.append(card);
+    // 별도 탭에서 원본 사진을 확인하는 링크입니다.
+    const originalLink = createElement("a", "card-action card-action--secondary note-photo-link", "원본 사진 열기");
+    originalLink.href = photoState.url;
+    originalLink.target = "_blank";
+    originalLink.rel = "noopener noreferrer";
+    originalLink.referrerPolicy = "no-referrer";
+    originalLink.setAttribute("aria-label", `${note.title} 인증 사진 원본을 새 탭에서 열기`);
+    panel.append(figure, originalLink);
+    return panel;
+  }
+
+  if (photoState.status === "failed") {
+    // 사진 조회 실패 안내 문구입니다.
+    const errorMessage = createElement("p", "note-photo-status note-photo-status--error", photoState.error || "사진을 불러오지 못했습니다.");
+    // 새 presigned URL을 요청하는 재시도 버튼입니다.
+    const retryButton = createElement("button", "card-action card-action--secondary", "사진 다시 불러오기");
+    retryButton.type = "button";
+    retryButton.addEventListener("click", () => requestNotePhoto(note, true));
+    panel.append(errorMessage, retryButton);
+    if (photoState.url) {
+      // 브라우저 미지원 이미지도 별도 탭에서 확인할 수 있는 원본 링크입니다.
+      const originalLink = createElement("a", "card-action card-action--secondary note-photo-link", "원본 사진 열기");
+      originalLink.href = photoState.url;
+      originalLink.target = "_blank";
+      originalLink.rel = "noopener noreferrer";
+      originalLink.referrerPolicy = "no-referrer";
+      originalLink.setAttribute("aria-label", `${note.title} 인증 사진 원본을 새 탭에서 열기`);
+      panel.append(originalLink);
+    }
+    return panel;
+  }
+
+  panel.setAttribute("aria-busy", "true");
+  panel.append(createElement("p", "note-photo-status", "인증 사진을 불러오는 중입니다…"));
+  return panel;
+}
+
+/**
+ * 입력: 수첩 기록.
+ * 출력: 사용자 일기·리뷰 표시 HTMLElement.
+ * 역할: 시스템 완료 요약과 사용자가 작성한 기록을 구분해 읽기 화면에 표시한다.
+ * 호출 예시: const entry = createNoteEntryDisplay(note)
+ */
+function createNoteEntryDisplay(note) {
+  // 화면에 표시할 사용자 작성 기록입니다.
+  const entry = note.entry || {};
+  // 작성된 제목 또는 본문이 있는지 여부입니다.
+  const hasEntry = Boolean(String(entry.title || "").trim() || String(entry.body || "").trim());
+
+  if (!hasEntry) {
+    return createElement("p", "note-entry-empty", "아직 작성한 일기나 리뷰가 없습니다.");
+  }
+
+  // 사용자 기록 전체 영역입니다.
+  const section = createElement("section", "note-entry-display");
+  section.setAttribute("aria-label", entry.type === "review" ? "나의 리뷰" : "나의 일기");
+  // 기록 유형과 리뷰 별점을 표시하는 머리글입니다.
+  const header = createElement("div", "note-entry-header");
+  header.append(createElement("span", "type-chip", entry.type === "review" ? "리뷰" : "일기"));
+
+  if (entry.type === "review" && entry.rating) {
+    // 숫자 평점을 별 문자로 표현한 읽기 전용 요소입니다.
+    const rating = createElement("span", "note-entry-rating", `${"★".repeat(entry.rating)}${"☆".repeat(5 - entry.rating)}`);
+    rating.setAttribute("aria-label", `별점 5점 만점에 ${entry.rating}점`);
+    header.append(rating);
+  }
+
+  section.append(header);
+  if (entry.title) {
+    section.append(createElement("h4", "note-entry-title", entry.title));
+  }
+  section.append(createElement("p", "note-entry-body", entry.body));
+  if (entry.updatedAt) {
+    section.append(createElement("p", "note-entry-updated", `마지막 수정 ${formatDate(entry.updatedAt)}`));
+  }
+  return section;
+}
+
+/**
+ * 입력: 저장할 수첩 기록 ID.
+ * 출력: 기록 저장 완료 Promise.
+ * 역할: 편집 상태를 검증해 현재 사용자의 수첩 기록을 PATCH로 갱신한다.
+ * 호출 예시: await saveNoteEntry("note_x")
+ */
+async function saveNoteEntry(noteId) {
+  // 저장 대상 수첩 기록입니다.
+  const note = state.notes.find((item) => item.id === noteId);
+  // 저장 대상의 현재 편집 상태입니다.
+  const draft = note ? getNoteDraft(note) : null;
+  if (!note || !draft || draft.pending) {
+    return;
+  }
+
+  // 앞뒤 공백을 제거한 기록 제목입니다.
+  const title = String(draft.title || "").trim();
+  // 앞뒤 공백을 제거한 기록 본문입니다.
+  const body = String(draft.body || "").trim();
+  // 서버에 저장할 기록 유형입니다.
+  const entryType = draft.type === "review" ? "review" : "diary";
+  // 리뷰에만 저장할 숫자 평점입니다.
+  const rating = entryType === "review" ? Number(draft.rating) : null;
+
+  draft.isOpen = true;
+  draft.tone = "error";
+  if (title.length > NOTE_ENTRY_TITLE_MAX_LENGTH) {
+    draft.message = `제목은 ${NOTE_ENTRY_TITLE_MAX_LENGTH}자 이내로 작성하세요.`;
+    renderNotes();
+    return;
+  }
+  if (!body) {
+    draft.message = "일기 또는 리뷰 본문을 작성하세요.";
+    renderNotes();
+    return;
+  }
+  if (body.length > NOTE_ENTRY_BODY_MAX_LENGTH) {
+    draft.message = `본문은 ${NOTE_ENTRY_BODY_MAX_LENGTH}자 이내로 작성하세요.`;
+    renderNotes();
+    return;
+  }
+  if (entryType === "review" && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
+    draft.message = "리뷰 별점을 1점부터 5점 사이에서 선택하세요.";
+    renderNotes();
+    return;
+  }
+  if (!ensureSessionReady()) {
+    return;
+  }
+
+  draft.pending = true;
+  draft.message = "기록을 저장하는 중입니다…";
+  draft.tone = "pending";
+  renderNotes();
+
+  try {
+    // 수첩 기록 갱신 API 응답입니다.
+    const payload = await fetchJson(`/api/notes/${encodeURIComponent(noteId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryType, title, body, rating }),
+    });
+    // 서버가 반환한 최신 수첩 기록입니다.
+    const updatedRawNote = payload.note || payload.data;
+    if (!updatedRawNote || typeof updatedRawNote !== "object") {
+      throw new Error("missing updated note");
+    }
+    // 화면 구조로 정규화한 최신 수첩 기록입니다.
+    const updatedNote = normalizeNote(updatedRawNote);
+    state.notes = state.notes.map((item) => (item.id === noteId ? updatedNote : item));
+    state.noteDrafts[noteId] = {
+      ...createNoteDraft(updatedNote),
+      isOpen: true,
+      message: "일기·리뷰 기록을 저장했습니다.",
+      tone: "success",
+    };
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return;
+    }
+
+    draft.pending = false;
+    draft.message = Number(error?.status) === 404
+      ? "이 수첩 기록을 찾을 수 없습니다. 목록을 새로고침하세요."
+      : "기록을 저장하지 못했습니다. 잠시 뒤 다시 시도하세요.";
+    draft.tone = "error";
+  } finally {
+    if (state.accessToken) {
+      renderNotes();
+    }
+  }
+}
+
+/**
+ * 입력: 수첩 기록과 목록 순번.
+ * 출력: 일기·리뷰 편집 details HTMLElement.
+ * 역할: 기록 종류, 제목, 본문, 리뷰 별점을 모바일 입력 폼으로 제공한다.
+ * 호출 예시: const editor = createNoteEditor(note, 0)
+ */
+function createNoteEditor(note, noteIndex) {
+  // 재렌더링 사이에 보존되는 현재 편집 상태입니다.
+  const draft = getNoteDraft(note);
+  // 입력 요소 ID 중복을 피하기 위한 접두사입니다.
+  const fieldPrefix = `note-entry-${noteIndex}`;
+  // 접고 펼칠 수 있는 편집 영역입니다.
+  const details = createElement("details", "note-editor");
+  details.open = Boolean(draft.isOpen);
+  details.append(createElement("summary", "note-editor-summary", "일기·리뷰 작성 또는 수정"));
+
+  // 기록 입력을 묶는 폼입니다.
+  const form = createElement("form", "note-entry-form");
+  form.setAttribute("aria-busy", draft.pending ? "true" : "false");
+
+  // 기록 종류 선택 필드입니다.
+  const typeField = createElement("label", "note-field");
+  const typeLabel = createElement("span", "note-field-label", "기록 종류");
+  const typeSelect = document.createElement("select");
+  typeSelect.id = `${fieldPrefix}-type`;
+  typeSelect.name = "entryType";
+  [
+    ["diary", "일기"],
+    ["review", "리뷰"],
+  ].forEach(([value, label]) => {
+    // 기록 종류 선택지입니다.
+    const option = createElement("option", "", label);
+    option.value = value;
+    option.selected = draft.type === value;
+    typeSelect.append(option);
   });
+  typeSelect.disabled = draft.pending;
+  typeField.append(typeLabel, typeSelect);
+
+  // 제목 입력 필드입니다.
+  const titleField = createElement("label", "note-field");
+  const titleLabel = createElement("span", "note-field-label", "제목 (선택)");
+  const titleInput = document.createElement("input");
+  titleInput.id = `${fieldPrefix}-title`;
+  titleInput.name = "title";
+  titleInput.type = "text";
+  titleInput.maxLength = NOTE_ENTRY_TITLE_MAX_LENGTH;
+  titleInput.value = draft.title;
+  titleInput.placeholder = "탐험에서 기억하고 싶은 제목";
+  titleInput.disabled = draft.pending;
+  // 제목 글자 수 표시입니다.
+  const titleCount = createElement("span", "note-character-count", `${draft.title.length}/${NOTE_ENTRY_TITLE_MAX_LENGTH}`);
+  titleCount.id = `${fieldPrefix}-title-count`;
+  titleInput.setAttribute("aria-describedby", titleCount.id);
+  titleField.append(titleLabel, titleInput, titleCount);
+
+  // 본문 입력 필드입니다.
+  const bodyField = createElement("label", "note-field");
+  const bodyLabel = createElement("span", "note-field-label", "본문 (필수)");
+  const bodyInput = document.createElement("textarea");
+  bodyInput.id = `${fieldPrefix}-body`;
+  bodyInput.name = "body";
+  bodyInput.rows = 6;
+  bodyInput.required = true;
+  bodyInput.maxLength = NOTE_ENTRY_BODY_MAX_LENGTH;
+  bodyInput.value = draft.body;
+  bodyInput.placeholder = "오늘의 탐험, 느낀 점, 다시 찾고 싶은 이유를 남겨보세요.";
+  bodyInput.disabled = draft.pending;
+  // 본문 글자 수 표시입니다.
+  const bodyCount = createElement("span", "note-character-count", `${draft.body.length}/${NOTE_ENTRY_BODY_MAX_LENGTH}`);
+  bodyCount.id = `${fieldPrefix}-body-count`;
+  bodyInput.setAttribute("aria-describedby", bodyCount.id);
+  bodyField.append(bodyLabel, bodyInput, bodyCount);
+
+  // 리뷰일 때만 표시하는 별점 필드입니다.
+  const ratingField = createElement("label", "note-field note-rating-field");
+  const ratingLabel = createElement("span", "note-field-label", "별점 (필수)");
+  const ratingSelect = document.createElement("select");
+  ratingSelect.id = `${fieldPrefix}-rating`;
+  ratingSelect.name = "rating";
+  // 아직 별점을 선택하지 않은 상태를 위한 안내 선택지입니다.
+  const emptyRatingOption = createElement("option", "", "별점을 선택하세요");
+  emptyRatingOption.value = "";
+  ratingSelect.append(emptyRatingOption);
+  [1, 2, 3, 4, 5].forEach((value) => {
+    // 1점부터 5점까지의 별점 선택지입니다.
+    const option = createElement("option", "", `${value}점 ${"★".repeat(value)}`);
+    option.value = String(value);
+    option.selected = Number(draft.rating) === value;
+    ratingSelect.append(option);
+  });
+  ratingField.append(ratingLabel, ratingSelect);
+
+  // 저장 처리 결과를 스크린리더에도 알리는 상태 문구입니다.
+  const status = createElement("p", `note-editor-status${draft.tone ? ` note-editor-status--${draft.tone}` : ""}`, draft.message);
+  status.setAttribute("role", "status");
+  // 수첩 기록 저장 버튼입니다.
+  const saveButton = createElement("button", "card-action card-action--primary note-save-button", draft.pending ? "저장 중…" : "기록 저장");
+  saveButton.type = "submit";
+  saveButton.disabled = draft.pending;
+  saveButton.setAttribute("aria-busy", draft.pending ? "true" : "false");
+
+  /**
+   * 입력: 없음.
+   * 출력: 없음.
+   * 역할: 기록 종류에 맞춰 별점 입력의 노출과 필수 상태를 갱신한다.
+   * 호출 예시: updateRatingField()
+   */
+  function updateRatingField() {
+    // 현재 선택된 기록이 리뷰인지 여부입니다.
+    const isReview = typeSelect.value === "review";
+    ratingField.hidden = !isReview;
+    ratingSelect.disabled = !isReview || draft.pending;
+    ratingSelect.required = isReview;
+  }
+
+  updateRatingField();
+  typeSelect.addEventListener("change", () => {
+    draft.type = typeSelect.value === "review" ? "review" : "diary";
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+    updateRatingField();
+  });
+  titleInput.addEventListener("input", () => {
+    draft.title = titleInput.value;
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+    titleCount.textContent = `${titleInput.value.length}/${NOTE_ENTRY_TITLE_MAX_LENGTH}`;
+  });
+  bodyInput.addEventListener("input", () => {
+    draft.body = bodyInput.value;
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+    bodyCount.textContent = `${bodyInput.value.length}/${NOTE_ENTRY_BODY_MAX_LENGTH}`;
+  });
+  ratingSelect.addEventListener("change", () => {
+    draft.rating = ratingSelect.value;
+    draft.dirty = true;
+    draft.message = "";
+    draft.tone = "";
+  });
+  details.addEventListener("toggle", () => {
+    draft.isOpen = details.open;
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveNoteEntry(note.id);
+  });
+
+  form.append(typeField, titleField, bodyField, ratingField, status, saveButton);
+  details.append(form);
+  return details;
 }
 
 /**
@@ -2378,27 +4832,54 @@ function renderNotes() {
   }
 
   list.replaceChildren();
+  if (state.notes.length === 0) {
+    // API가 정상 반환한 빈 수첩 상태입니다.
+    const emptyState = createElement("section", "note-empty-state");
+    emptyState.append(
+      createElement("h3", "", "아직 탐험 기록이 없습니다"),
+      createElement("p", "empty-message", "퀘스트를 완료하면 인증 사진과 일기·리뷰를 이곳에 차곡차곡 남길 수 있습니다."),
+    );
+    list.append(emptyState);
+    return;
+  }
 
-  state.notes.forEach((note) => {
+  state.notes.forEach((note, noteIndex) => {
     // 수첩 기록 카드 요소입니다.
     const card = createElement("article", "note-card");
     // 수첩 아이콘 요소입니다.
     const icon = createElement("span", "note-icon", "▤");
+    icon.setAttribute("aria-hidden", "true");
     // 수첩 텍스트 묶음입니다.
     const copy = createElement("div", "note-copy");
+    // 날짜와 획득 경험치를 묶는 상단 행입니다.
     const topline = createElement("div", "note-topline");
     topline.append(createElement("span", "note-date", formatDate(note.createdAt)), createElement("span", "category-tag", `${note.earnedXp} XP`));
 
+    // 완료한 퀘스트 제목입니다.
     const title = createElement("h3", "", note.title);
+    // 완료 장소 이름입니다.
     const place = createElement("p", "card-place", note.placeName);
+    // 시스템이 만든 퀘스트 완료 요약입니다.
     const memo = createElement("p", "card-description", note.memo);
+    // 완료로 획득한 뱃지 목록입니다.
     const badges = createElement("div", "note-badges");
 
     note.badges.forEach((badge) => {
       badges.append(createElement("span", "", String(badge)));
     });
 
-    copy.append(topline, title, place, memo, badges);
+    copy.append(topline, title, place, memo);
+    if (note.badges.length > 0) {
+      copy.append(badges);
+    }
+    if (note.photoRef) {
+      copy.append(createNotePhoto(note));
+    }
+    if (state.notesSource === "api") {
+      copy.append(createNoteEntryDisplay(note), createNoteEditor(note, noteIndex));
+    } else {
+      copy.append(createElement("p", "note-entry-empty", "API에 연결하면 실제 탐험 기록에 일기와 리뷰를 남길 수 있습니다."));
+    }
     card.append(icon, copy);
     list.append(card);
   });
@@ -2430,59 +4911,248 @@ function configureGgumdoriArtwork(image, contextClass) {
   }
 }
 
+/* ──────────────────────────────────────────────
+   S09 꿈돌이 도감 · S10 도감 상세 (명세 §5.2, §5.3, §5.4, §10 S09·S10)
+   ────────────────────────────────────────────── */
+
 /**
- * 입력: 꿈돌이 항목.
- * 출력: 도감 카드 HTMLElement.
- * 역할: 해금 여부와 선택 버튼을 가진 꿈돌이 카드를 만든다.
- * 호출 예시: createGgumdoriCard(item)
+ * 입력: 도감 API 원본 항목.
+ * 출력: 화면에서 사용하는 도감 항목.
+ * 역할: 서버 CatalogEntry 를 한 가지 모양으로 맞춘다. (명세 §16.3)
+ * 호출 예시: normalizeCatalogEntry(rawEntry)
  */
-function createGgumdoriCard(item) {
-  // 꿈돌이 카드 요소입니다.
-  const card = createElement("article", `ggumdori-card ${item.unlocked ? "" : "is-locked"}`.trim());
+function normalizeCatalogEntry(rawEntry) {
+  // 도감 항목 원본입니다.
+  const entry = rawEntry || {};
+  // 퀘스트에 1:1:1 로 묶인 보상 쌍입니다. (명세 §5.1)
+  const rewardPair = entry.rewardPair || {};
 
-  // 꿈돌이 카드 상단 영역입니다.
-  const topline = createElement("div", "ggumdori-topline");
-  topline.append(
-    createElement("span", "category-tag", CATEGORY_LABELS[item.themeCategory] || "테마"),
-    createElement("span", item.unlocked ? "status-tag status-tag--done" : "status-tag", item.unlocked ? "해금" : "잠김"),
-  );
+  return {
+    questId: String(entry.questId || ""),
+    // 도감의 식별자는 꿈돌이 id 입니다. 대표 설정과 홈 표시가 이 값을 씁니다.
+    ggumdoriId: String(rewardPair.ggumdoriId || entry.ggumdoriId || ""),
+    ggumdoriName: String(rewardPair.ggumdoriName || entry.ggumdoriName || "꿈돌이"),
+    ggumdoriImageRef: String(rewardPair.ggumdoriStillImageRef || entry.ggumdoriStillImageRef || ""),
+    badgeName: String(rewardPair.badgeName || entry.badgeName || "탐험 뱃지"),
+    badgeImageRef: String(rewardPair.badgeImageRef || entry.badgeImageRef || ""),
+    category: normalizeCategory(entry.category || rewardPair.category || "all"),
+    // locked | earned | unavailable. 종료된 퀘스트도 슬롯을 유지합니다. (명세 §5.2)
+    state: normalizeCatalogState(entry.state),
+    unlockedAt: String(entry.unlockedAt || ""),
+    equipped: Boolean(entry.equipped),
+    questTitle: String(entry.questTitle || ""),
+    placeName: String(entry.placeName || ""),
+    unlockDescription: String(entry.unlockDescription || "연결된 퀘스트를 완료하면 얻을 수 있어요."),
+    catalogOrder: toNumber(entry.catalogOrder, 0),
+    // 이 도감 항목으로 이동할 수 있는 퀘스트 인스턴스입니다. "이 퀘스트 보기"에 씁니다.
+    instanceId: String(entry.instanceId || ""),
+  };
+}
 
-  const figure = createElement("div", "ggumdori-figure");
-  if (item.imageRef) {
-    // 꿈돌이 완성 이미지를 표시하는 요소입니다.
-    const image = document.createElement("img");
-    image.src = item.imageRef;
-    image.alt = item.unlocked ? item.name : `${item.name} 잠김`;
-    image.loading = "lazy";
-    configureGgumdoriArtwork(image, "ggumdori-card-art");
-    figure.append(image);
-  } else {
-    figure.textContent = item.unlocked ? item.name.slice(0, 1) : "?";
+/**
+ * 입력: 서버가 준 도감 상태 값.
+ * 출력: locked | earned | unavailable 중 하나.
+ * 역할: 상태 값을 세 가지로 좁힌다. (명세 §16.3)
+ * 호출 예시: normalizeCatalogState("earned")
+ */
+function normalizeCatalogState(rawState) {
+  // 소문자로 맞춘 상태 값입니다.
+  const value = String(rawState || "").toLowerCase();
+
+  if (value === "earned" || value === "unavailable") {
+    return value;
   }
-  const title = createElement("h3", "", item.name);
-  const condition = createElement("p", "card-description", `조건: ${item.condition}`);
-  const button = createElement("button", "ggumdori-select", state.selectedGgumdoriId === item.id ? "선택됨" : "표시 꿈돌이로 선택");
 
-  button.type = "button";
-  button.disabled = !item.unlocked || state.selectedGgumdoriId === item.id;
-  button.addEventListener("click", () => {
-    state.selectedGgumdoriId = item.id;
-    state.customizerPreviewId = item.id;
-    writeStorageValue(SELECTED_GGUMDORI_KEY, item.id);
-    renderAll();
+  return "locked";
+}
+
+/**
+ * 입력: 도감 API 응답 본문.
+ * 출력: 화면에서 사용하는 CatalogPage.
+ * 역할: 전체 수를 클라이언트가 세지 않고 서버값을 그대로 쓴다. (명세 §5.2)
+ * 호출 예시: normalizeCatalogPage(payload)
+ */
+function normalizeCatalogPage(payload) {
+  // 응답이 data 로 감싸여 온 경우의 실제 본문입니다.
+  const body = payload?.data || payload || {};
+  // 정규화한 도감 항목 목록입니다.
+  const entries = unwrapList(body.entries || body).map(normalizeCatalogEntry);
+
+  return {
+    earnedCount: toNumber(body.earnedCount, entries.filter((item) => item.state === "earned").length),
+    totalCount: toNumber(body.totalCount, entries.length),
+    entries,
+    nextCursor: String(body.nextCursor || ""),
+  };
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 목업 도감 페이지.
+ * 역할: 서버가 없을 때 퀘스트의 rewardPair 로 도감을 만든다. 도감은 퀘스트에서 파생된다. (명세 §5.1, §5.2)
+ * 호출 예시: state.catalog = buildFallbackCatalog()
+ */
+function buildFallbackCatalog() {
+  // 도감 항목 목록입니다. 등록 순서를 안정적으로 유지합니다. (명세 §10 S09)
+  const entries = [];
+  // 이미 담은 꿈돌이 id 모음입니다. 같은 꿈돌이를 두 번 넣지 않습니다.
+  const seen = new Set();
+
+  // 1. 퀘스트에 묶인 보상 쌍을 먼저 등록합니다. 1:1:1 이 도감의 정본입니다.
+  state.recommendations.forEach((quest) => {
+    // 이 퀘스트의 보상 쌍입니다.
+    const rewardPair = quest.rewardPair || {};
+    if (!rewardPair.ggumdoriId || seen.has(rewardPair.ggumdoriId)) {
+      return;
+    }
+    seen.add(rewardPair.ggumdoriId);
+
+    // 이 퀘스트의 현재 진행 상태입니다.
+    const questStatus = getQuestStatus(quest.instanceId, quest.status);
+    // 완료한 퀘스트의 보상만 획득 상태입니다.
+    const isEarned = questStatus === "completed" || questStatus === "done";
+
+    entries.push(
+      normalizeCatalogEntry({
+        questId: quest.questId,
+        instanceId: quest.instanceId,
+        rewardPair,
+        category: quest.category,
+        state: isEarned ? "earned" : "locked",
+        questTitle: quest.questTitle,
+        placeName: quest.placeName,
+        unlockDescription: `${quest.placeName}에서 ${quest.questTitle}을 완료하면 얻어요.`,
+        catalogOrder: entries.length,
+      }),
+    );
   });
 
-  card.append(topline, figure, title, condition, button);
-  return card;
+  // 2. 퀘스트에 아직 연결되지 않은 기존 꿈돌이 에셋도 슬롯을 유지합니다. (명세 §5.2)
+  FALLBACK_GGUMDORI.forEach((item) => {
+    if (seen.has(item.id)) {
+      return;
+    }
+    seen.add(item.id);
+
+    entries.push(
+      normalizeCatalogEntry({
+        questId: `legacy-${item.id}`,
+        rewardPair: {
+          ggumdoriId: item.id,
+          ggumdoriName: item.name,
+          ggumdoriStillImageRef: item.imageRef,
+          badgeName: item.name,
+        },
+        category: item.themeCategory,
+        state: item.unlocked ? "earned" : "locked",
+        questTitle: "",
+        placeName: "",
+        unlockDescription: item.condition,
+        catalogOrder: entries.length,
+      }),
+    );
+  });
+
+  return {
+    earnedCount: entries.filter((item) => item.state === "earned").length,
+    totalCount: entries.length,
+    entries,
+    nextCursor: "",
+  };
+}
+
+/**
+ * 입력: 이어 받을 커서. 비우면 첫 페이지입니다.
+ * 출력: 도감 로드 Promise.
+ * 역할: /api/catalog 를 호출하고 실패하면 퀘스트에서 파생한 도감을 쓴다. (명세 §5.2)
+ * 호출 예시: await loadCatalog()
+ */
+async function loadCatalog(cursor = "") {
+  try {
+    // 도감 API 응답입니다. 커서가 있으면 이어서 받습니다. (명세 §10 S09)
+    const payload = await fetchJson(`/api/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
+    // 정규화한 도감 페이지입니다.
+    const page = normalizeCatalogPage(payload);
+
+    if (page.entries.length === 0 && !cursor) {
+      state.catalog = buildFallbackCatalog();
+      return;
+    }
+
+    state.catalog = cursor
+      ? { ...page, entries: [...state.catalog.entries, ...page.entries] }
+      : page;
+  } catch (error) {
+    // 이어 받기에 실패하면 이미 받은 목록을 그대로 둡니다.
+    if (!cursor) {
+      state.catalog = buildFallbackCatalog();
+    }
+  }
+
+  syncGgumdoriFromCatalog();
 }
 
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 꿈돌이 도감 그리드를 렌더링한다.
- * 호출 예시: renderGgumdori()
+ * 역할: 홈 대표 꿈돌이 표시가 도감과 같은 목록을 보게 맞춘다. (명세 §5.4)
+ * 호출 예시: syncGgumdoriFromCatalog()
  */
-function renderGgumdori() {
+function syncGgumdoriFromCatalog() {
+  if (state.catalog.entries.length === 0) {
+    return;
+  }
+
+  state.ggumdori = state.catalog.entries.map((entry) => ({
+    id: entry.ggumdoriId,
+    name: entry.ggumdoriName,
+    themeCategory: entry.category,
+    unlocked: entry.state === "earned",
+    condition: entry.unlockDescription,
+    imageRef: entry.ggumdoriImageRef,
+  }));
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 검색·상태·카테고리 필터를 통과한 도감 항목.
+ * 역할: 정렬은 서버의 등록 순서를 기본값으로 유지한다. (명세 §10 S09)
+ * 호출 예시: const entries = getVisibleCatalogEntries()
+ */
+function getVisibleCatalogEntries() {
+  // 소문자로 맞춘 검색어입니다.
+  const keyword = state.catalogSearch.trim().toLowerCase();
+
+  return state.catalog.entries.filter((entry) => {
+    if (state.catalogStatusFilter === "earned" && entry.state !== "earned") {
+      return false;
+    }
+    if (state.catalogStatusFilter === "locked" && entry.state === "earned") {
+      return false;
+    }
+    if (state.catalogCategory !== "all" && entry.category !== state.catalogCategory) {
+      return false;
+    }
+    if (!keyword) {
+      return true;
+    }
+
+    // 꿈돌이 이름과 퀘스트 이름을 함께 검색합니다. (명세 §10 S09)
+    return (
+      entry.ggumdoriName.toLowerCase().includes(keyword) ||
+      entry.questTitle.toLowerCase().includes(keyword) ||
+      entry.placeName.toLowerCase().includes(keyword)
+    );
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 획득 수·전체 수, 필터, 3열 그리드를 그린다. (명세 §10 S09)
+ * 호출 예시: renderCollection()
+ */
+function renderCollection() {
   // 꿈돌이 그리드 컨테이너입니다.
   const grid = select("#ggumdori-grid");
 
@@ -2490,93 +5160,3000 @@ function renderGgumdori() {
     return;
   }
 
+  // 획득 수와 전체 수 표시입니다. 전체 수는 서버값을 그대로 씁니다. (명세 §5.2)
+  const countElement = select("#collection-count");
+  if (countElement) {
+    countElement.textContent = `${state.catalog.earnedCount} / ${state.catalog.totalCount}`;
+  }
+
+  // 현재 홈 대표 꿈돌이 표시입니다. (명세 §5.4)
+  const featuredElement = select("#collection-featured");
+  if (featuredElement) {
+    // 대표로 설정된 도감 항목입니다.
+    const featured = state.catalog.entries.find(
+      (item) => item.ggumdoriId === state.selectedGgumdoriId && item.state === "earned",
+    );
+    featuredElement.textContent = featured ? `대표 ${featured.ggumdoriName}` : "대표 미설정";
+  }
+
+  // 필터 버튼의 현재 선택을 반영합니다.
+  document.querySelectorAll("[data-collection-filter]").forEach((button) => {
+    // 이 버튼이 나타내는 상태 필터입니다.
+    const buttonFilter = button.dataset.collectionFilter || "all";
+    button.classList.toggle("is-active", buttonFilter === state.catalogStatusFilter);
+    button.setAttribute("aria-pressed", buttonFilter === state.catalogStatusFilter ? "true" : "false");
+  });
+
+  document.querySelectorAll("[data-collection-category]").forEach((button) => {
+    // 이 버튼이 나타내는 카테고리입니다.
+    const buttonCategory = button.dataset.collectionCategory || "all";
+    button.classList.toggle("is-active", buttonCategory === state.catalogCategory);
+    button.setAttribute("aria-pressed", buttonCategory === state.catalogCategory ? "true" : "false");
+  });
+
+  // 현재 필터를 통과한 도감 항목입니다.
+  const entries = getVisibleCatalogEntries();
+
   grid.replaceChildren();
-  state.ggumdori.forEach((item) => grid.append(createGgumdoriCard(item)));
+
+  if (entries.length === 0) {
+    grid.append(createElement("p", "empty-message", "조건에 맞는 꿈돌이가 없습니다."));
+    return;
+  }
+
+  entries.forEach((entry) => grid.append(createCatalogCard(entry)));
+
+  // 서버가 다음 커서를 주면 이어서 받을 수 있게 합니다. (명세 §10 S09)
+  if (state.catalog.nextCursor) {
+    const moreButton = createElement("button", "px-button px-button--ghost catalog-more", "더 보기");
+    moreButton.type = "button";
+    moreButton.addEventListener("click", async () => {
+      moreButton.disabled = true;
+      moreButton.textContent = "불러오는 중";
+      await loadCatalog(state.catalog.nextCursor);
+      renderCollection();
+    });
+    grid.append(moreButton);
+  }
+}
+
+/**
+ * 입력: 도감 항목.
+ * 출력: 도감 카드 요소.
+ * 역할: 꿈돌이, 미니 뱃지, 짧은 이름, 획득 상태를 한 칸에 담는다. (명세 §10 S09)
+ * 호출 예시: createCatalogCard(entry)
+ */
+function createCatalogCard(entry) {
+  // 획득한 항목인지 여부입니다.
+  const isEarned = entry.state === "earned";
+  // 현재 홈 대표로 설정된 항목인지 여부입니다. (명세 §5.4)
+  const isFeatured = isEarned && state.selectedGgumdoriId === entry.ggumdoriId;
+
+  // 카드 전체가 상세를 여는 버튼입니다. (명세 §5.3)
+  const card = createElement("button", `catalog-card${isEarned ? "" : " is-locked"}`);
+  card.type = "button";
+  card.dataset.category = entry.category;
+  card.dataset.catalogTarget = entry.ggumdoriId;
+
+  // 꿈돌이 그림 자리입니다.
+  const art = createElement("div", "catalog-card__art");
+  if (entry.ggumdoriImageRef) {
+    const image = document.createElement("img");
+    image.src = entry.ggumdoriImageRef;
+    image.alt = "";
+    image.loading = "lazy";
+    art.append(image);
+  } else {
+    art.append(createElement("span", "catalog-card__placeholder", isEarned ? entry.ggumdoriName.slice(0, 1) : "?"));
+  }
+
+  // 잠금 표시는 무채색·딤·자물쇠·물음표·미획득을 함께 씁니다. (명세 §5.3)
+  if (!isEarned) {
+    const lock = createElement("div", "catalog-card__lock");
+    const lockIcon = createElement("span", "px-icon px-icon--sm", "lock");
+    lockIcon.setAttribute("aria-hidden", "true");
+    lock.append(lockIcon, createElement("span", "catalog-card__question", "?"));
+    art.append(lock);
+  }
+
+  // 대표 꿈돌이는 별표와 대표 텍스트를 함께 표시합니다. (명세 §10 S09)
+  if (isFeatured) {
+    const featured = createElement("span", "catalog-card__featured");
+    const star = createElement("span", "px-icon px-icon--sm", "star");
+    star.setAttribute("aria-hidden", "true");
+    featured.append(star, createElement("span", "", "대표"));
+    art.append(featured);
+  }
+
+  card.append(art);
+
+  // 미니 뱃지와 짧은 이름입니다.
+  const meta = createElement("div", "catalog-card__meta");
+  if (entry.badgeImageRef) {
+    const badge = document.createElement("img");
+    badge.className = "catalog-card__badge";
+    badge.src = entry.badgeImageRef;
+    badge.alt = "";
+    badge.loading = "lazy";
+    meta.append(badge);
+  }
+  meta.append(createElement("span", "catalog-card__name", entry.ggumdoriName));
+  card.append(meta);
+
+  // 획득 상태를 텍스트로도 표시합니다. 색만으로 구분하지 않습니다. (명세 §3.2)
+  card.append(createElement("span", "catalog-card__state", getCatalogStateLabel(entry.state)));
+
+  return card;
+}
+
+/**
+ * 입력: 도감 상태 값.
+ * 출력: 화면에 표시할 상태 문구.
+ * 역할: 획득·미획득·획득 불가를 한국어로 알린다. (명세 §5.2, §5.3)
+ * 호출 예시: getCatalogStateLabel("unavailable")
+ */
+function getCatalogStateLabel(catalogState) {
+  if (catalogState === "earned") {
+    return "획득";
+  }
+  if (catalogState === "unavailable") {
+    return "현재 획득 불가";
+  }
+
+  return "미획득";
+}
+
+/**
+ * 입력: 꿈돌이 식별자.
+ * 출력: 없음.
+ * 역할: 도감 상세 시트를 연다. (명세 §10 S10)
+ * 호출 예시: openCatalogSheet("science-1")
+ */
+function openCatalogSheet(ggumdoriId) {
+  if (!ggumdoriId) {
+    return;
+  }
+
+  // 시트를 열기 전 포커스가 있던 요소입니다. 닫을 때 되돌립니다.
+  state.catalogSheetReturnFocus = document.activeElement;
+  state.catalogSheetId = ggumdoriId;
+  state.catalogMessage = "";
+  renderCatalogSheet();
+  renderPhotoSheet();
+  renderSettings();
+  renderRecordSheet();
 }
 
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 보유한 꿈돌이 테마를 미리 보고 장착하는 게임형 꾸미기 화면을 그린다.
- * 호출 예시: renderCustomizer()
+ * 역할: 도감 상세 시트를 닫고 포커스를 되돌린다.
+ * 호출 예시: closeCatalogSheet()
  */
-function renderCustomizer() {
-  const character = select("#customizer-character");
-  const grid = select("#customizer-item-grid");
-  const equipButton = select("#customizer-equip-button");
-
-  if (!character || !grid || !equipButton) {
+function closeCatalogSheet() {
+  if (!state.catalogSheetId) {
     return;
   }
 
-  let previewItem = state.ggumdori.find((item) => item.id === state.customizerPreviewId);
-  if (!previewItem) {
-    previewItem = getSelectedGgumdori();
-    state.customizerPreviewId = previewItem?.id || "";
+  state.catalogSheetId = "";
+  state.catalogMessage = "";
+  renderCatalogSheet();
+
+  // 포커스는 시트를 열었던 카드로 되돌립니다.
+  const target = state.catalogSheetReturnFocus;
+  if (target instanceof HTMLElement && target.isConnected) {
+    target.focus({ preventScroll: true });
+  }
+  state.catalogSheetReturnFocus = null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 현재 시트가 보여 주는 도감 항목 또는 null.
+ * 역할: 시트와 버튼 처리가 같은 항목을 보게 한다.
+ * 호출 예시: const entry = getCatalogSheetTarget()
+ */
+function getCatalogSheetTarget() {
+  return state.catalog.entries.find((item) => item.ggumdoriId === state.catalogSheetId) || null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 미획득과 획득을 다르게 보여 주는 도감 상세를 그린다. (명세 §10 S10)
+ * 호출 예시: renderCatalogSheet()
+ */
+function renderCatalogSheet() {
+  // 시트 컨테이너입니다.
+  const sheet = select("#catalog-sheet");
+
+  if (!sheet) {
+    return;
   }
 
-  character.replaceChildren();
-  if (previewItem?.imageRef) {
-    const image = document.createElement("img");
-    image.src = previewItem.imageRef;
-    image.alt = `${previewItem.name} 미리보기`;
-    character.append(image);
+  // 현재 시트가 보여 줄 도감 항목입니다.
+  const entry = getCatalogSheetTarget();
+
+  if (!entry) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    delete document.body.dataset.catalogSheetOpen;
+    return;
   }
 
-  const stageLabel = select("#customizer-stage-label");
-  const itemName = select("#customizer-item-name");
-  const itemCondition = select("#customizer-item-condition");
-  const collectionCount = select("#customizer-collection-count");
-  const unlockedCount = state.ggumdori.filter((item) => item.unlocked).length;
+  // 획득한 항목인지 여부입니다.
+  const isEarned = entry.state === "earned";
 
-  if (stageLabel) stageLabel.textContent = previewItem?.name || "꿈돌이";
-  if (itemName) itemName.textContent = previewItem?.name || "꿈돌이";
-  if (itemCondition) itemCondition.textContent = previewItem?.condition || "획득 조건 확인";
-  if (collectionCount) collectionCount.textContent = `획득 ${unlockedCount}/${state.ggumdori.length}`;
+  sheet.hidden = false;
+  document.body.dataset.catalogSheetOpen = "true";
+  sheet.replaceChildren();
 
-  const filteredItems = state.ggumdori.filter(
-    (item) => state.customizerCategory === "all" || item.themeCategory === state.customizerCategory,
+  // 배경을 덮는 딤 레이어입니다. 눌러서 닫습니다.
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closeCatalogSheet);
+
+  // 시트 본체입니다. 퀘스트 상세와 같은 구조를 씁니다.
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "catalog-sheet-title");
+
+  // 상단 고정 머리말입니다.
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", entry.ggumdoriName);
+  title.id = "catalog-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  const tags = createElement("div", "quest-sheet__tags");
+  const categoryTag = createElement("span", "px-tag", CATEGORY_LABELS[entry.category] || "테마");
+  categoryTag.dataset.category = entry.category;
+  tags.append(
+    categoryTag,
+    createElement(
+      "span",
+      isEarned ? "status-badge status-badge--done" : "status-badge status-badge--locked",
+      getCatalogStateLabel(entry.state),
+    ),
   );
 
-  grid.replaceChildren();
-  filteredItems.forEach((item) => {
-    const tile = createElement("button", `customizer-item${item.id === previewItem?.id ? " is-previewing" : ""}${item.id === state.selectedGgumdoriId ? " is-equipped" : ""}${item.unlocked ? "" : " is-locked"}`);
-    tile.type = "button";
-    tile.setAttribute("role", "listitem");
-    tile.setAttribute("aria-label", item.unlocked ? `${item.name} 미리보기` : `${item.name}, ${item.condition} 달성 시 해금`);
-    tile.disabled = !item.unlocked;
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "도감 상세 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closeCatalogSheet);
 
-    const thumb = createElement("span", "customizer-item-thumb");
-    if (item.imageRef) {
-      const image = document.createElement("img");
-      image.src = item.imageRef;
-      image.alt = "";
-      image.loading = "lazy";
-      configureGgumdoriArtwork(image, "customizer-item-art");
-      thumb.append(image);
+  head.append(titleGroup, tags, closeButton);
+
+  // 가운데 스크롤 영역입니다.
+  const body = createElement("div", "quest-sheet__body");
+
+  // 큰 꿈돌이 그림입니다. 미획득은 무채색으로 보여 줍니다. (명세 §5.3, §10 S10)
+  const figure = createElement("div", `catalog-detail__art${isEarned ? "" : " is-locked"}`);
+  if (entry.ggumdoriImageRef) {
+    const image = document.createElement("img");
+    image.src = entry.ggumdoriImageRef;
+    image.alt = isEarned ? entry.ggumdoriName : `${entry.ggumdoriName} 미획득`;
+    figure.append(image);
+  }
+  if (!isEarned) {
+    const lock = createElement("span", "catalog-detail__lock");
+    const lockIcon = createElement("span", "px-icon", "lock");
+    lockIcon.setAttribute("aria-hidden", "true");
+    lock.append(lockIcon);
+    figure.append(lock);
+  }
+  body.append(figure);
+
+  // 미니 뱃지와 획득일입니다.
+  const badgeRow = createElement("section", "px-panel px-panel--inset catalog-detail__badge-row");
+  if (entry.badgeImageRef) {
+    const badge = document.createElement("img");
+    badge.className = "catalog-detail__badge";
+    badge.src = entry.badgeImageRef;
+    badge.alt = "";
+    badgeRow.append(badge);
+  }
+  const badgeMeta = createElement("div", "catalog-detail__badge-meta");
+  badgeMeta.append(createElement("span", "px-label", entry.badgeName));
+  badgeMeta.append(
+    createElement(
+      "span",
+      "px-body",
+      isEarned ? (entry.unlockedAt ? `${formatDate(entry.unlockedAt)} 획득` : "획득함") : "미획득",
+    ),
+  );
+  badgeRow.append(badgeMeta);
+  body.append(badgeRow);
+
+  // 연결 퀘스트와 관광지입니다.
+  if (entry.questTitle || entry.placeName) {
+    const questPanel = createElement("section", "px-panel");
+    questPanel.append(createElement("h3", "section-title", "연결 퀘스트"));
+    if (entry.questTitle) {
+      questPanel.append(createElement("p", "px-label", entry.questTitle));
+    }
+    if (entry.placeName) {
+      questPanel.append(createElement("p", "px-body", entry.placeName));
+    }
+    body.append(questPanel);
+  }
+
+  // 미획득은 정확한 해금 조건을, 획득은 완료 기록을 보여 줍니다. (명세 §10 S10)
+  const conditionPanel = createElement("section", "px-panel");
+  conditionPanel.append(createElement("h3", "section-title", isEarned ? "완료 기록" : "해금 조건"));
+  conditionPanel.append(
+    createElement(
+      "p",
+      "px-body",
+      isEarned
+        ? entry.unlockedAt
+          ? `${formatDate(entry.unlockedAt)}에 이 퀘스트를 완료했어요.`
+          : "이 퀘스트를 완료해 얻었어요."
+        : entry.unlockDescription,
+    ),
+  );
+  body.append(conditionPanel);
+
+  // 대표 설정 결과 등을 알리는 문구입니다.
+  const message = createElement("p", "data-note quest-sheet__message", state.catalogMessage);
+  message.setAttribute("aria-live", "polite");
+  body.append(message);
+
+  // 하단 고정 버튼 영역입니다.
+  const footer = createElement("div", "quest-sheet__cta catalog-detail__cta");
+
+  if (isEarned) {
+    // 현재 대표인지 여부입니다. 현재 대표에서는 버튼을 상태 표시로 바꿉니다. (명세 §10 S10)
+    const isFeatured = state.selectedGgumdoriId === entry.ggumdoriId;
+    const featureButton = createElement(
+      "button",
+      "px-button px-button--primary",
+      isFeatured ? "현재 홈 대표" : "홈 대표 꿈돌이로 설정",
+    );
+    featureButton.type = "button";
+    featureButton.disabled = isFeatured;
+    featureButton.addEventListener("click", () => setFeaturedGgumdori(entry));
+
+    // 획득한 꿈돌이만 2D 촬영을 할 수 있습니다. (명세 §10 S10·S11)
+    const photoButton = createElement("button", "px-button px-button--ghost", "사진 찍기");
+    photoButton.type = "button";
+    photoButton.addEventListener("click", () => {
+      // 도감 상세를 닫고 촬영 화면으로 넘어갑니다.
+      const targetId = entry.ggumdoriId;
+      closeCatalogSheet();
+      openPhotoSheet(targetId);
+    });
+
+    footer.append(featureButton, photoButton);
+  } else if (entry.instanceId) {
+    // 미획득은 연결 퀘스트로 보냅니다. (명세 §5.3, §10 S10)
+    const questButton = createElement("button", "px-button px-button--primary", "이 퀘스트 보기");
+    questButton.type = "button";
+    questButton.addEventListener("click", () => {
+      // 도감 상세를 닫고 퀘스트 상세를 엽니다.
+      const targetInstanceId = entry.instanceId;
+      closeCatalogSheet();
+      setActiveView("quests");
+      openQuestSheet(targetInstanceId);
+    });
+    footer.append(questButton);
+  } else {
+    footer.append(createElement("p", "data-note", "아직 연결된 퀘스트가 없어요."));
+  }
+
+  panel.append(head, body, footer);
+  sheet.append(scrim, panel);
+
+  // 열자마자 제목으로 포커스를 옮겨 스크린리더가 시트를 읽게 합니다.
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#catalog-sheet-title")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 도감 항목.
+ * 출력: 없음.
+ * 역할: 홈 대표 꿈돌이를 바꾸고 즉시 반영한다. (명세 §5.4, §10 S10)
+ * 호출 예시: setFeaturedGgumdori(entry)
+ */
+function setFeaturedGgumdori(entry) {
+  if (entry.state !== "earned") {
+    return;
+  }
+
+  state.selectedGgumdoriId = entry.ggumdoriId;
+  writeStorageValue(SELECTED_GGUMDORI_KEY, entry.ggumdoriId);
+
+  // 도감 항목의 대표 표시도 함께 맞춥니다.
+  state.catalog.entries.forEach((item) => {
+    item.equipped = item.ggumdoriId === entry.ggumdoriId;
+  });
+
+  state.catalogMessage = "홈 대표 꿈돌이를 바꿨어요";
+
+  // 서버에도 저장합니다. 실패해도 화면은 이미 바뀐 상태를 유지합니다. (명세 §5.4)
+  saveFeaturedGgumdori(entry.ggumdoriId);
+
+  renderAll();
+}
+
+/**
+ * 입력: 꿈돌이 식별자.
+ * 출력: 저장 Promise.
+ * 역할: 대표 꿈돌이를 서버에 저장한다. (명세 §5.4)
+ * 호출 예시: saveFeaturedGgumdori("science-1")
+ */
+async function saveFeaturedGgumdori(ggumdoriId) {
+  try {
+    await fetchJson("/api/me/ggumdori", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectedGgumdoriId: ggumdoriId }),
+    });
+  } catch (error) {
+    // 저장에 실패해도 로컬 선택은 유지합니다. 다음 로드에서 서버값으로 덮어씁니다.
+    updateSystemStatus(state.apiHealthy, "대표 꿈돌이를 서버에 저장하지 못했어요");
+  }
+}
+
+/* ──────────────────────────────────────────────
+   게스트 계정과 소셜 승계 (명세 §9.3, §9.4, §10 S02·S12)
+   ────────────────────────────────────────────── */
+
+/**
+ * 입력: 없음.
+ * 출력: 추천 닉네임 문자열.
+ * 역할: 중복을 허용하므로 확인 API 없이 즉석에서 이름을 제안한다. (명세 §9.4)
+ * 호출 예시: const nickname = suggestNickname()
+ */
+function suggestNickname() {
+  // 앞뒤 조각을 하나씩 골라 붙입니다.
+  const prefix = NICKNAME_PREFIXES[Math.floor(Math.random() * NICKNAME_PREFIXES.length)];
+  const noun = NICKNAME_NOUNS[Math.floor(Math.random() * NICKNAME_NOUNS.length)];
+
+  return `${prefix} ${noun}`;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 동의를 마친 뒤 공통 닉네임 설정 단계로 넘어간다. (명세 §10 S02 3단계)
+ * 호출 예시: enterNicknameStep()
+ */
+function enterNicknameStep() {
+  state.accountStep = "nickname";
+  state.nicknameDraft = state.nicknameDraft || suggestNickname();
+  renderAccountStep();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 동의 단계와 닉네임 단계 중 하나만 보여 준다. (명세 §10 S02)
+ * 호출 예시: renderAccountStep()
+ */
+function renderAccountStep() {
+  // 동의 항목과 계정 선택을 담은 영역입니다.
+  const consentStep = select("#consent-step");
+  // 닉네임 설정 영역입니다.
+  const nicknameStep = select("#nickname-step");
+
+  if (!consentStep || !nicknameStep) {
+    return;
+  }
+
+  // 닉네임 단계인지 여부입니다.
+  const isNicknameStep = state.accountStep === "nickname";
+
+  consentStep.hidden = isNicknameStep;
+  nicknameStep.hidden = !isNicknameStep;
+
+  // 닉네임 입력 칸입니다.
+  const input = select("#nickname-input");
+  if (input instanceof HTMLInputElement && input.value !== state.nicknameDraft) {
+    input.value = state.nicknameDraft;
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 닉네임 저장 Promise.
+ * 역할: 닉네임을 확정하고 홈으로 들어간다. 중복은 허용한다. (명세 §9.4)
+ * 호출 예시: await confirmNickname()
+ */
+async function confirmNickname() {
+  // 사용자가 확정한 닉네임입니다.
+  const nickname = (state.nicknameDraft || "").trim();
+
+  if (!nickname) {
+    setConsentMessage("닉네임을 입력하거나 추천을 받아주세요.");
+    return;
+  }
+
+  state.user = { ...state.user, nickname };
+  state.accountStep = "consent";
+  setConsentPanelVisible(false);
+  setConsentMessage("");
+  renderAll();
+
+  // 서버에도 남깁니다. 실패해도 로컬 표시는 유지합니다.
+  await saveNickname(nickname);
+}
+
+/**
+ * 입력: 닉네임 문자열.
+ * 출력: 저장 Promise.
+ * 역할: 닉네임을 서버에 기록한다. (명세 §9.4)
+ * 호출 예시: await saveNickname("씩씩한 꿈돌이")
+ */
+async function saveNickname(nickname) {
+  try {
+    await fetchJson("/api/me/nickname", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nickname }),
+    });
+  } catch (error) {
+    // 닉네임은 중복을 허용하므로 실패해도 화면을 되돌리지 않습니다.
+    updateSystemStatus(state.apiHealthy, "닉네임을 서버에 저장하지 못했어요");
+  }
+}
+
+/**
+ * 입력: provider 이름("naver" 또는 "google").
+ * 출력: 연결 시작 Promise.
+ * 역할: 게스트 토큰을 보관한 채 소셜 계정 연결을 시작한다. (명세 §9.3)
+ * 호출 예시: await startAccountLink("naver")
+ */
+async function startAccountLink(provider) {
+  if (state.user.accountType === "social") {
+    return;
+  }
+
+  // 연결이 실패해도 되돌아갈 현재 게스트 토큰입니다. 성공해야만 지웁니다. (명세 §9.3)
+  if (state.accessToken) {
+    writeStorageValue(GUEST_TOKEN_KEY, state.accessToken);
+  }
+  writeSessionValue(OAUTH_INTENT_KEY, "link");
+
+  state.accountLinkState = "pending";
+  state.accountMessage = "계정을 연결하는 중입니다. 기록은 그대로 유지됩니다.";
+  renderAccountPanel();
+
+  await handleOAuthLogin(provider);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 마이페이지 계정 영역을 현재 계정 종류에 맞게 그린다. (명세 §10 S12 계정)
+ * 호출 예시: renderAccountPanel()
+ */
+function renderAccountPanel() {
+  // 계정 영역 컨테이너입니다.
+  const panel = select("#me-account-details");
+
+  if (!panel) {
+    return;
+  }
+
+  // 게스트 계정인지 여부입니다.
+  const isGuest = state.user.accountType !== "social";
+
+  panel.replaceChildren();
+
+  // 닉네임 변경 줄입니다. 중복을 허용한다는 점을 함께 알립니다. (명세 §9.4)
+  const nicknameRow = createElement("div", "account-field");
+  nicknameRow.append(createElement("span", "account-field__label", "닉네임"));
+
+  const nicknameControls = createElement("div", "account-field__controls");
+  const nicknameInput = document.createElement("input");
+  nicknameInput.type = "text";
+  nicknameInput.id = "me-nickname-input";
+  nicknameInput.value = state.user.nickname || "";
+  nicknameInput.maxLength = 20;
+  nicknameInput.setAttribute("aria-label", "닉네임");
+
+  const nicknameSave = createElement("button", "px-button px-button--ghost", "변경");
+  nicknameSave.type = "button";
+  nicknameSave.addEventListener("click", async () => {
+    // 사용자가 입력한 새 닉네임입니다.
+    const next = nicknameInput.value.trim();
+    if (!next) {
+      state.accountMessage = "닉네임을 입력해주세요.";
+      renderAccountPanel();
+      return;
+    }
+    state.user = { ...state.user, nickname: next };
+    state.accountMessage = "닉네임을 바꿨어요.";
+    renderAll();
+    await saveNickname(next);
+  });
+
+  nicknameControls.append(nicknameInput, nicknameSave);
+  nicknameRow.append(nicknameControls);
+  nicknameRow.append(createElement("p", "data-note", "같은 닉네임을 여러 명이 써도 괜찮아요."));
+  panel.append(nicknameRow);
+
+  // 계정 연결 상태입니다. 소셜과 게스트를 다르게 보여 줍니다. (명세 §9.4, §10 S12)
+  const accountRow = createElement("div", "account-field");
+  accountRow.append(createElement("span", "account-field__label", "계정"));
+
+  if (isGuest) {
+    accountRow.append(createElement("p", "px-body", "연결된 계정 없음"));
+
+    // 게스트 승계 안내입니다. (명세 §9.3)
+    accountRow.append(
+      createElement(
+        "p",
+        "data-note",
+        "지금은 비회원이에요. 계정을 연결하면 지금까지의 퀘스트·도감·기록을 그대로 가져갑니다.",
+      ),
+    );
+    accountRow.append(
+      createElement(
+        "p",
+        "data-note account-warning",
+        "계정을 연결하기 전에 브라우저 데이터를 지우면 기록을 되살리기 어려울 수 있어요.",
+      ),
+    );
+
+    // 연결 버튼입니다. 처리 중에는 잠급니다.
+    const linkRow = createElement("div", "account-field__controls");
+    ["naver", "google"].forEach((provider) => {
+      const button = createElement(
+        "button",
+        "px-button px-button--primary",
+        provider === "naver" ? "네이버로 연결" : "구글로 연결",
+      );
+      button.type = "button";
+      button.disabled = state.accountLinkState === "pending";
+      button.addEventListener("click", () => startAccountLink(provider));
+      linkRow.append(button);
+    });
+    accountRow.append(linkRow);
+  } else {
+    accountRow.append(createElement("p", "px-body", state.user.email || "이메일 없음"));
+    accountRow.append(
+      createElement("p", "data-note", `${getProviderLabel(state.user.provider)}(으)로 로그인했어요.`),
+    );
+  }
+
+  panel.append(accountRow);
+
+  // 연결 결과 등을 알리는 문구입니다.
+  const message = createElement("p", "data-note account-message", state.accountMessage);
+  message.setAttribute("aria-live", "polite");
+  panel.append(message);
+
+  // 로그아웃과 회원 탈퇴입니다. (명세 §10 S12)
+  const dangerRow = createElement("div", "account-field__controls");
+  const logoutButton = createElement("button", "px-button px-button--ghost", "로그아웃");
+  logoutButton.type = "button";
+  logoutButton.addEventListener("click", handleLogout);
+
+  const withdrawButton = createElement("button", "px-button px-button--danger", "회원 탈퇴");
+  withdrawButton.type = "button";
+  withdrawButton.addEventListener("click", handleWithdraw);
+
+  dangerRow.append(logoutButton, withdrawButton);
+  panel.append(dangerRow);
+}
+
+/**
+ * 입력: 제공자 코드.
+ * 출력: 화면에 표시할 제공자 이름.
+ * 역할: 로그인 제공자를 한국어로 보여 준다. (명세 §9.4)
+ * 호출 예시: getProviderLabel("naver")
+ */
+function getProviderLabel(provider) {
+  // 제공자별 표시 이름입니다.
+  const labels = { naver: "네이버", google: "구글" };
+
+  return labels[String(provider).toLowerCase()] || "소셜 계정";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 세션을 지우고 동의 화면으로 되돌린다. (명세 §10 S12)
+ * 호출 예시: handleLogout()
+ */
+function handleLogout() {
+  state.accessToken = "";
+  removeStorageValue(ACCESS_TOKEN_KEY);
+  // 로그아웃은 연결 대기 중인 게스트 토큰까지 정리합니다.
+  removeStorageValue(GUEST_TOKEN_KEY);
+  removeSessionValue(OAUTH_INTENT_KEY);
+  state.accountStep = "consent";
+  state.accountLinkState = "idle";
+  state.accountMessage = "";
+  ensureSessionReady();
+  renderAll();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 탈퇴 처리 Promise.
+ * 역할: 되돌릴 수 없는 탈퇴를 한 번 더 확인한 뒤 처리한다. (명세 §10 S12)
+ * 호출 예시: await handleWithdraw()
+ */
+async function handleWithdraw() {
+  // 되돌릴 수 없는 동작이므로 명시적으로 확인받습니다.
+  if (!window.confirm("탈퇴하면 퀘스트 기록과 도감이 모두 사라지고 되돌릴 수 없어요. 계속할까요?")) {
+    return;
+  }
+
+  try {
+    await fetchJson("/api/me", { method: "DELETE" });
+  } catch (error) {
+    state.accountMessage = "탈퇴 처리에 실패했어요. 잠시 뒤 다시 시도해주세요.";
+    renderAccountPanel();
+    return;
+  }
+
+  handleLogout();
+}
+
+/* ──────────────────────────────────────────────
+   날씨 (명세 §6.4, §10 S14)
+   데이터가 없을 때 0℃ 또는 맑음으로 대체하지 않는다.
+   ────────────────────────────────────────────── */
+
+/**
+ * 입력: 없음.
+ * 출력: 위치·선택일·조회시각을 담은 캐시 키.
+ * 역할: 같은 위치·같은 날짜의 조회를 KST 시간 단위로 재사용한다. (명세 §6.4)
+ * 호출 예시: const key = buildWeatherCacheKey()
+ */
+function buildWeatherCacheKey() {
+  // 소수 셋째 자리까지 자른 기준 좌표입니다. 미세한 GPS 흔들림으로 키가 바뀌지 않게 합니다.
+  const lat = toNumber(state.location.lat, 0).toFixed(3);
+  const lng = toNumber(state.location.lng, 0).toFixed(3);
+  // 조회 기준 날짜입니다. 계획 모드면 선택일입니다.
+  const date = getQuestReferenceDate();
+  // KST 기준 조회 시각입니다. 시간이 바뀌면 다시 받습니다.
+  const hour = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 13);
+
+  return `${lat},${lng}|${date}|${hour}`;
+}
+
+/**
+ * 입력: 날씨 API 원본 응답.
+ * 출력: 화면에서 사용하는 날씨 정보.
+ * 역할: 없는 값을 임의로 채우지 않고 비운 채로 넘긴다. (명세 §6.4)
+ * 호출 예시: normalizeWeather(payload)
+ */
+function normalizeWeather(payload) {
+  // 응답이 data 로 감싸여 온 경우의 실제 본문입니다.
+  const body = payload?.data || payload || {};
+
+  // 기온과 강수확률은 값이 없으면 null 로 둡니다. 0 으로 대체하지 않습니다.
+  const temperature = body.temperatureC ?? body.temperature ?? null;
+  const precipitation = body.precipitationProbability ?? body.pop ?? null;
+
+  return {
+    temperatureC: temperature === null || temperature === "" ? null : Number(temperature),
+    precipitationProbability:
+      precipitation === null || precipitation === "" ? null : Number(precipitation),
+    condition: String(body.condition || body.summary || ""),
+    // 시간대별 예보입니다. S14 상세에서 씁니다.
+    hourly: unwrapList(body.hourly || body.forecast).map((slot) => ({
+      time: String(slot.time || slot.hour || ""),
+      temperatureC: slot.temperatureC ?? slot.temperature ?? null,
+      precipitationProbability: slot.precipitationProbability ?? slot.pop ?? null,
+    })),
+    // 야외활동 참고 문구입니다. (명세 §10 S14)
+    outdoorNote: String(body.outdoorNote || body.advisory || ""),
+    // 서버가 예보 제공 범위 밖이라고 알린 경우입니다. (명세 §6.4)
+    unavailable: Boolean(body.unavailable || body.outOfRange),
+  };
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 날씨 로드 Promise.
+ * 역할: 현위치·오늘 또는 계획 위치·선택일의 날씨를 받는다. 실패해도 지도와 추천은 건드리지 않는다. (명세 §6.4)
+ * 호출 예시: await loadWeather()
+ */
+async function loadWeather(forceRefresh = false) {
+  // 이번 조회의 캐시 키입니다.
+  const cacheKey = buildWeatherCacheKey();
+
+  if (!forceRefresh && state.weather.cacheKey === cacheKey && state.weather.status === "ready") {
+    return;
+  }
+
+  state.weather = { ...state.weather, status: "loading", cacheKey };
+  renderWeather();
+
+  try {
+    // 날씨 API 응답입니다. 기준 좌표와 기준 날짜를 함께 보냅니다.
+    const payload = await fetchJson(
+      `/api/weather?lat=${encodeURIComponent(state.location.lat)}&lng=${encodeURIComponent(
+        state.location.lng,
+      )}&date=${encodeURIComponent(getQuestReferenceDate())}`,
+    );
+    // 정규화한 날씨 정보입니다.
+    const weather = normalizeWeather(payload);
+
+    state.weather = {
+      ...weather,
+      cacheKey,
+      // 예보 범위 밖이거나 값이 하나도 없으면 미제공으로 다룹니다. (명세 §6.4)
+      status:
+        weather.unavailable || (weather.temperatureC === null && weather.hourly.length === 0)
+          ? "unavailable"
+          : "ready",
+    };
+  } catch (error) {
+    // 날씨만 실패 상태로 두고 지도·추천은 그대로 둡니다. (명세 §6.4)
+    state.weather = { ...createEmptyWeather(), cacheKey, status: "failed" };
+  }
+
+  renderWeather();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 빈 날씨 상태 객체.
+ * 역할: 값이 없는 상태를 한 곳에서 정의한다.
+ * 호출 예시: state.weather = createEmptyWeather()
+ */
+function createEmptyWeather() {
+  return {
+    status: "idle",
+    temperatureC: null,
+    precipitationProbability: null,
+    condition: "",
+    hourly: [],
+    outdoorNote: "",
+    unavailable: false,
+    cacheKey: "",
+  };
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 상단 날씨 칩에 아이콘·대표 기온·강수확률만 표시한다. (명세 §6.4)
+ * 호출 예시: renderWeather()
+ */
+function renderWeather() {
+  // 날씨 칩과 문구 요소입니다.
+  const pill = select("#home-weather-pill");
+  const text = select("#home-weather-text");
+
+  if (!pill || !text) {
+    return;
+  }
+
+  // 칩을 눌러 상세를 열 수 있게 버튼 역할을 줍니다. (명세 §6.4)
+  pill.setAttribute("role", "button");
+  pill.setAttribute("tabindex", "0");
+  pill.setAttribute("aria-label", "날씨 상세 보기");
+
+  // 아이콘 요소입니다. 상태에 따라 리거처를 바꿉니다.
+  const icon = pill.querySelector(".px-icon");
+  if (icon) {
+    icon.textContent = getWeatherIcon();
+  }
+
+  if (state.weather.status === "loading") {
+    text.textContent = "날씨 확인 중";
+    return;
+  }
+  if (state.weather.status === "failed") {
+    text.textContent = "날씨 불러오기 실패";
+    return;
+  }
+  if (state.weather.status === "unavailable") {
+    text.textContent = "예보 없음";
+    return;
+  }
+
+  // 표시할 조각들입니다. 값이 없으면 넣지 않습니다. (명세 §6.4)
+  const parts = [];
+  if (state.weather.temperatureC !== null) {
+    parts.push(`${Math.round(state.weather.temperatureC)}℃`);
+  }
+  if (state.weather.precipitationProbability !== null) {
+    parts.push(`강수 ${Math.round(state.weather.precipitationProbability)}%`);
+  }
+
+  text.textContent = parts.length > 0 ? parts.join(" · ") : "날씨 정보 없음";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: Material Symbols 리거처 이름.
+ * 역할: 날씨 상태를 아이콘으로 보여 준다. 값이 없으면 물음표 아이콘을 쓴다.
+ * 호출 예시: getWeatherIcon()
+ */
+function getWeatherIcon() {
+  if (state.weather.status !== "ready") {
+    return "help";
+  }
+
+  // 서버가 준 상태 문구입니다.
+  const condition = state.weather.condition.toLowerCase();
+
+  if (condition.includes("rain") || condition.includes("비")) return "rainy";
+  if (condition.includes("snow") || condition.includes("눈")) return "weather_snowy";
+  if (condition.includes("cloud") || condition.includes("흐")) return "cloud";
+
+  return "wb_sunny";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 시간대별 예보와 야외활동 참고를 작은 시트로 보여 준다. (명세 §6.4, §10 S14)
+ * 호출 예시: renderWeatherSheet()
+ */
+function renderWeatherSheet() {
+  // 날씨 상세 시트 컨테이너입니다.
+  const sheet = select("#weather-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  if (!state.weatherSheetOpen) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    return;
+  }
+
+  sheet.hidden = false;
+  sheet.replaceChildren();
+
+  // 배경 딤입니다. 눌러서 닫습니다.
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closeWeatherSheet);
+
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "weather-sheet-title");
+
+  // 상단 고정 머리말입니다.
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", "날씨");
+  title.id = "weather-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "날씨 상세 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closeWeatherSheet);
+
+  head.append(titleGroup, closeButton);
+
+  // 본문입니다.
+  const body = createElement("div", "quest-sheet__body");
+
+  // 어느 위치·어느 날짜의 예보인지 먼저 밝힙니다. (명세 §10 S14)
+  const contextPanel = createElement("section", "px-panel px-panel--inset");
+  contextPanel.append(
+    createElement("span", "px-label quest-sheet__eyebrow", state.explorationMode === "planned" ? "계획 위치" : "현위치"),
+    createElement("p", "px-body", `${state.location.label || "대전광역시청"} · ${formatContextDate(getQuestReferenceDate())}`),
+  );
+  body.append(contextPanel);
+
+  if (state.weather.status === "unavailable") {
+    body.append(createElement("p", "empty-message", "아직 예보가 제공되지 않아요"));
+  } else if (state.weather.status === "failed") {
+    // 실패는 날씨 영역만 재시도합니다. (명세 §6.4)
+    const failPanel = createElement("section", "px-panel");
+    failPanel.append(createElement("p", "px-body", "날씨를 불러오지 못했어요."));
+    const retryButton = createElement("button", "px-button px-button--primary", "다시 시도");
+    retryButton.type = "button";
+    retryButton.addEventListener("click", () => loadWeather(true).then(renderWeatherSheet));
+    failPanel.append(retryButton);
+    body.append(failPanel);
+  } else if (state.weather.status === "loading") {
+    body.append(createElement("p", "empty-message", "날씨를 불러오는 중이에요."));
+  } else {
+    // 대표 값입니다.
+    const stats = createElement("div", "stat-row");
+    stats.append(
+      createStatCell("기온", state.weather.temperatureC === null ? "정보 없음" : `${Math.round(state.weather.temperatureC)}℃`),
+      createStatCell(
+        "강수확률",
+        state.weather.precipitationProbability === null
+          ? "정보 없음"
+          : `${Math.round(state.weather.precipitationProbability)}%`,
+      ),
+      createStatCell("상태", state.weather.condition || "정보 없음"),
+    );
+    body.append(stats);
+
+    // 시간대별 예보입니다. (명세 §10 S14)
+    const hourlyPanel = createElement("section", "px-panel");
+    hourlyPanel.append(createElement("h3", "section-title", "시간대별"));
+    if (state.weather.hourly.length === 0) {
+      hourlyPanel.append(createElement("p", "data-note", "시간대별 예보가 없어요."));
+    } else {
+      const list = createElement("div", "weather-hourly");
+      state.weather.hourly.forEach((slot) => {
+        const cell = createElement("div", "weather-hourly__cell");
+        cell.append(
+          createElement("span", "weather-hourly__time", slot.time || "-"),
+          createElement(
+            "span",
+            "weather-hourly__temp",
+            slot.temperatureC === null || slot.temperatureC === undefined
+              ? "-"
+              : `${Math.round(slot.temperatureC)}℃`,
+          ),
+          createElement(
+            "span",
+            "weather-hourly__pop",
+            slot.precipitationProbability === null || slot.precipitationProbability === undefined
+              ? "-"
+              : `${Math.round(slot.precipitationProbability)}%`,
+          ),
+        );
+        list.append(cell);
+      });
+      hourlyPanel.append(list);
+    }
+    body.append(hourlyPanel);
+
+    // 야외활동 참고입니다. (명세 §10 S14)
+    if (state.weather.outdoorNote) {
+      const notePanel = createElement("section", "px-panel");
+      notePanel.append(
+        createElement("h3", "section-title", "야외활동 참고"),
+        createElement("p", "px-body", state.weather.outdoorNote),
+      );
+      body.append(notePanel);
+    }
+  }
+
+  panel.append(head, body);
+  sheet.append(scrim, panel);
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#weather-sheet-title")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 날씨 상세 시트를 연다. (명세 §6.4)
+ * 호출 예시: openWeatherSheet()
+ */
+function openWeatherSheet() {
+  state.weatherSheetOpen = true;
+  renderWeatherSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 날씨 상세 시트를 닫는다.
+ * 호출 예시: closeWeatherSheet()
+ */
+function closeWeatherSheet() {
+  state.weatherSheetOpen = false;
+  renderWeatherSheet();
+  select("#home-weather-pill")?.focus({ preventScroll: true });
+}
+
+/* ──────────────────────────────────────────────
+   행사 상태 문구 (명세 §6.5) · 계획 위치·날짜 (명세 §6.3, §10 S15)
+   ────────────────────────────────────────────── */
+
+/**
+ * 입력: 정규화된 퀘스트 항목.
+ * 출력: 행사 상태 문구 또는 "".
+ * 역할: 운영시간을 신뢰할 수 있을 때만 지금 참여 가능을 쓴다. (명세 §6.5)
+ * 호출 예시: getEventStatusLabel(quest)
+ */
+function getEventStatusLabel(quest) {
+  if (!quest.availableFrom && !quest.availableUntil) {
+    return "";
+  }
+
+  // 오늘 날짜입니다. 종료일은 포함해 판정합니다. (명세 §6.5)
+  const todayKey = toKstDateKey(new Date());
+  // 기간 안인지 여부입니다.
+  const isTodayInRange =
+    (!quest.availableFrom || quest.availableFrom <= todayKey) &&
+    (!quest.availableUntil || quest.availableUntil >= todayKey);
+
+  // 계획 모드에서는 선택일 기준으로 알립니다. (명세 §6.5)
+  if (state.explorationMode === "planned") {
+    // 계획 기준 날짜입니다.
+    const referenceDate = getQuestReferenceDate();
+    const isPlannedInRange =
+      (!quest.availableFrom || quest.availableFrom <= referenceDate) &&
+      (!quest.availableUntil || quest.availableUntil >= referenceDate);
+
+    return isPlannedInRange ? "선택일 개최" : "";
+  }
+
+  if (!isTodayInRange) {
+    return "";
+  }
+
+  // 오프라인의 오래된 캐시로는 지금 참여 가능을 쓰지 않습니다. (명세 §6.5)
+  if (!state.isOnline) {
+    return "오늘 개최 중";
+  }
+
+  // 운영시간이 신뢰 가능하고 지금이 그 안일 때만 지금 참여 가능입니다. (명세 §6.5)
+  if (quest.openTime && quest.closeTime && isNowWithinOperatingHours(quest)) {
+    return "지금 참여 가능";
+  }
+
+  return "오늘 개최 중";
+}
+
+/**
+ * 입력: 운영시간을 가진 퀘스트 항목.
+ * 출력: 현재가 운영시간 안인지 여부.
+ * 역할: KST 기준 현재 시각과 운영시간을 비교한다. (명세 §6.5)
+ * 호출 예시: isNowWithinOperatingHours(quest)
+ */
+function isNowWithinOperatingHours(quest) {
+  // KST 기준 현재 시각을 HH:MM 으로 만든 값입니다.
+  const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(11, 16);
+
+  return quest.openTime <= nowKst && nowKst <= quest.closeTime;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 계획 위치·날짜 설정 시트를 연다. (명세 §10 S15)
+ * 호출 예시: openPlanSheet()
+ */
+function openPlanSheet() {
+  state.planSheetOpen = true;
+  state.planSearchQuery = "";
+  state.planSearchResults = [];
+  state.planMessage = "";
+  renderPlanSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 계획 설정 시트를 닫는다.
+ * 호출 예시: closePlanSheet()
+ */
+function closePlanSheet() {
+  state.planSheetOpen = false;
+  renderPlanSheet();
+  select("#home-plan-search")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 검색어.
+ * 출력: 검색 Promise.
+ * 역할: 장소·주소·행정구역으로 계획 위치 후보를 찾는다. (명세 §6.3, §10 S15)
+ * 호출 예시: await searchPlanLocation("유성구")
+ */
+async function searchPlanLocation(keyword) {
+  // 앞뒤 공백을 지운 검색어입니다.
+  const query = String(keyword || "").trim();
+
+  if (!query) {
+    state.planSearchResults = [];
+    state.planMessage = "찾을 장소나 지역을 입력해주세요.";
+    renderPlanSheet();
+    return;
+  }
+
+  state.planMessage = "검색 중입니다.";
+  renderPlanSheet();
+
+  try {
+    // 위치 검색 API 응답입니다.
+    const payload = await fetchJson(`/api/places/search?query=${encodeURIComponent(query)}`);
+
+    state.planSearchResults = unwrapList(payload.items || payload).map((item) => ({
+      label: String(item.label || item.name || item.placeName || query),
+      address: String(item.roadAddress || item.address || ""),
+      lat: toNumber(item.latitude ?? item.lat, FALLBACK_LOCATION.lat),
+      lng: toNumber(item.longitude ?? item.lng, FALLBACK_LOCATION.lng),
+    }));
+    state.planMessage = state.planSearchResults.length === 0 ? "검색 결과가 없어요." : "";
+  } catch (error) {
+    state.planSearchResults = [];
+    state.planMessage = "위치를 검색하지 못했어요. 다시 시도해주세요.";
+  }
+
+  renderPlanSheet();
+}
+
+/**
+ * 입력: 선택한 위치 후보.
+ * 출력: 없음.
+ * 역할: 계획 좌표를 확정한다. 완료 인증에는 절대 쓰지 않는다. (명세 §6.3, §19)
+ * 호출 예시: applyPlanLocation(candidate)
+ */
+function applyPlanLocation(candidate) {
+  state.location = {
+    lat: candidate.lat,
+    lng: candidate.lng,
+    label: candidate.label,
+    // 계획 좌표는 실측이 아닙니다. 완료 인증에 쓰이지 않도록 표시합니다. (명세 §19)
+    measured: false,
+  };
+
+  persistPlanContext();
+  closePlanSheet();
+
+  // 기준 위치가 바뀌었으므로 추천과 날씨를 다시 받습니다. (명세 §6.3)
+  renderAll();
+  loadRecommendations(true);
+  loadWeather(true);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 마지막 계획 위치와 날짜를 저장한다. (명세 §6.3)
+ * 호출 예시: persistPlanContext()
+ */
+function persistPlanContext() {
+  writeStorageValue(
+    PLAN_CONTEXT_KEY,
+    JSON.stringify({
+      lat: state.location.lat,
+      lng: state.location.lng,
+      label: state.location.label,
+      date: state.plannedDate,
+    }),
+  );
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 저장된 계획 컨텍스트 또는 null.
+ * 역할: 마지막 계획 위치와 날짜를 복원한다. (명세 §6.3)
+ * 호출 예시: const saved = readPlanContext()
+ */
+function readPlanContext() {
+  try {
+    return JSON.parse(readStorageValue(PLAN_CONTEXT_KEY) || "null");
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 계획 위치 검색과 날짜 선택 시트를 그린다. (명세 §10 S15)
+ * 호출 예시: renderPlanSheet()
+ */
+function renderPlanSheet() {
+  // 계획 설정 시트 컨테이너입니다.
+  const sheet = select("#plan-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  if (!state.planSheetOpen) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    return;
+  }
+
+  sheet.hidden = false;
+  sheet.replaceChildren();
+
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closePlanSheet);
+
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "plan-sheet-title");
+
+  // 상단 고정 머리말입니다.
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", "계획 위치와 날짜");
+  title.id = "plan-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "계획 설정 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closePlanSheet);
+
+  head.append(titleGroup, closeButton);
+
+  const body = createElement("div", "quest-sheet__body");
+
+  // 검색 줄입니다. 장소·주소·행정구역을 함께 찾습니다. (명세 §6.3)
+  const searchPanel = createElement("section", "px-panel");
+  searchPanel.append(createElement("h3", "section-title", "위치 검색"));
+
+  const searchRow = createElement("div", "account-field__controls");
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.id = "plan-search-input";
+  searchInput.placeholder = "장소, 주소, 지역";
+  searchInput.value = state.planSearchQuery;
+  searchInput.setAttribute("aria-label", "계획 위치 검색");
+  searchInput.addEventListener("input", (event) => {
+    state.planSearchQuery = event.target.value || "";
+  });
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchPlanLocation(state.planSearchQuery);
+    }
+  });
+
+  const searchButton = createElement("button", "px-button px-button--primary", "검색");
+  searchButton.type = "button";
+  searchButton.addEventListener("click", () => searchPlanLocation(state.planSearchQuery));
+
+  searchRow.append(searchInput, searchButton);
+  searchPanel.append(searchRow);
+
+  if (state.planMessage) {
+    searchPanel.append(createElement("p", "data-note", state.planMessage));
+  }
+
+  // 검색 결과 목록입니다.
+  if (state.planSearchResults.length > 0) {
+    const list = createElement("div", "plan-result-list");
+    state.planSearchResults.forEach((candidate) => {
+      const row = createElement("button", "quest-line");
+      row.type = "button";
+      const main = createElement("div", "quest-line__main");
+      main.append(createElement("span", "quest-line__title", candidate.label));
+      if (candidate.address) {
+        main.append(createElement("span", "quest-line__place", candidate.address));
+      }
+      row.append(main);
+      row.addEventListener("click", () => applyPlanLocation(candidate));
+      list.append(row);
+    });
+    searchPanel.append(list);
+  }
+
+  body.append(searchPanel);
+
+  // 단일 날짜 선택입니다. 기간·시간대·일정표는 제공하지 않습니다. (명세 §6.3)
+  const datePanel = createElement("section", "px-panel");
+  datePanel.append(createElement("h3", "section-title", "날짜"));
+
+  const dateRow = createElement("div", "account-field__controls");
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.id = "plan-date-input";
+  dateInput.value = state.plannedDate || toKstDateKey(new Date());
+  dateInput.setAttribute("aria-label", "계획 날짜");
+  dateInput.addEventListener("change", (event) => {
+    state.plannedDate = event.target.value || "";
+    persistPlanContext();
+    renderHomeContext();
+    renderRecommendations();
+    loadWeather(true);
+  });
+
+  // 오늘 바로가기입니다. (명세 §10 S15)
+  const todayButton = createElement("button", "px-button px-button--ghost", "오늘");
+  todayButton.type = "button";
+  todayButton.addEventListener("click", () => {
+    state.plannedDate = toKstDateKey(new Date());
+    persistPlanContext();
+    renderPlanSheet();
+    renderHomeContext();
+    renderRecommendations();
+    loadWeather(true);
+  });
+
+  dateRow.append(dateInput, todayButton);
+  datePanel.append(dateRow);
+  datePanel.append(
+    createElement("p", "data-note", "계획 위치와 날짜는 추천·날씨·행사 조회에만 씁니다. 완료 인증은 항상 현장의 실제 위치와 현재 시각으로 처리해요."),
+  );
+  body.append(datePanel);
+
+  panel.append(head, body);
+  sheet.append(scrim, panel);
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#plan-sheet-title")?.focus({ preventScroll: true });
+}
+
+/* ──────────────────────────────────────────────
+   공통 축제 퀘스트와 추가 방문 (명세 §11, §10 S06·S07·S08)
+   ────────────────────────────────────────────── */
+
+/**
+ * 입력: 행사 타깃 원본 항목.
+ * 출력: 화면에서 사용하는 행사 타깃.
+ * 역할: 서버 FestivalTarget 을 한 가지 모양으로 맞춘다. (명세 §16.2)
+ * 호출 예시: normalizeFestivalTarget(rawTarget)
+ */
+function normalizeFestivalTarget(rawTarget) {
+  // 행사 타깃 원본입니다.
+  const target = rawTarget || {};
+
+  return {
+    eventId: String(target.eventId || ""),
+    // 같은 축제의 연도·회차를 구분합니다. (명세 §16.2)
+    editionId: String(target.editionId || ""),
+    title: String(target.title || "행사"),
+    venueName: String(target.venueName || ""),
+    roadAddress: String(target.roadAddress || ""),
+    latitude: toNumber(target.latitude, 0),
+    longitude: toNumber(target.longitude, 0),
+    startDate: normalizeDateKey(target.startDate),
+    endDate: normalizeDateKey(target.endDate),
+    startTime: String(target.startTime || ""),
+    endTime: String(target.endTime || ""),
+    availabilityLabel: String(target.availabilityLabel || ""),
+    sourceContentId: String(target.sourceContentId || ""),
+  };
+}
+
+/**
+ * 입력: 행사 타깃.
+ * 출력: 이 타깃을 구분하는 고유 키.
+ * 역할: 같은 축제의 다른 회차를 별개로 다룬다. (명세 §11.1)
+ * 호출 예시: getFestivalTargetKey(target)
+ */
+function getFestivalTargetKey(target) {
+  return `${target.eventId}#${target.editionId}`;
+}
+
+/**
+ * 입력: 공통 축제 퀘스트.
+ * 출력: 기준 날짜에 유효한 타깃 목록.
+ * 역할: 취소·종료된 행사를 빼고 지금 또는 선택일에 참여 가능한 타깃만 남긴다. (명세 §6.5, §11.1)
+ * 호출 예시: getValidFestivalTargets(quest)
+ */
+function getValidFestivalTargets(quest) {
+  // 계획 모드면 선택일, 아니면 오늘입니다.
+  const referenceDate = getQuestReferenceDate();
+
+  return (quest.festivalTargets || []).filter((target) => {
+    // 종료일은 포함해 판정합니다. (명세 §6.5)
+    if (target.startDate && referenceDate < target.startDate) {
+      return false;
+    }
+    if (target.endDate && referenceDate > target.endDate) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * 입력: 퀘스트 인스턴스 식별자.
+ * 출력: 선택된 행사 타깃 또는 null.
+ * 역할: 사용자가 실제 수행할 행사 하나를 기억한다. (명세 §11.1)
+ * 호출 예시: getSelectedFestivalTarget(quest)
+ */
+function getSelectedFestivalTarget(quest) {
+  // 이 퀘스트에서 사용자가 고른 타깃 키입니다.
+  const selectedKey = state.selectedFestivalTargets[quest.instanceId] || "";
+
+  return (quest.festivalTargets || []).find((target) => getFestivalTargetKey(target) === selectedKey) || null;
+}
+
+/**
+ * 입력: 공통 축제 퀘스트와 행사 타깃.
+ * 출력: 이 회차를 이미 방문 기록했는지 여부.
+ * 역할: 동일 사용자·동일 행사 회차의 중복 기록을 막는다. (명세 §11.1)
+ * 호출 예시: hasVisitedFestivalTarget(quest, target)
+ */
+function hasVisitedFestivalTarget(quest, target) {
+  // 이 퀘스트에 기록된 방문 목록입니다.
+  return state.festivalVisits.some(
+    (visit) => visit.questId === quest.questId && visit.targetKey === getFestivalTargetKey(target),
+  );
+}
+
+/**
+ * 입력: 공통 축제 퀘스트.
+ * 출력: 공통 보상을 이미 받았는지 여부.
+ * 역할: 첫 완료와 추가 방문을 가른다. (명세 §11.2)
+ * 호출 예시: hasEarnedCommonFestivalReward(quest)
+ */
+function hasEarnedCommonFestivalReward(quest) {
+  // 로컬 저장소까지 반영한 진행 상태입니다.
+  const questStatus = getQuestStatus(quest.instanceId, quest.status);
+
+  return questStatus === "completed" || questStatus === "done";
+}
+
+/**
+ * 입력: 공통 축제 퀘스트와 진행 상태.
+ * 출력: 행사 타깃 선택 패널 요소.
+ * 역할: 개최일·신뢰 가능한 운영시간·타깃 선택을 상세에 보여 준다. (명세 §10 S06 본문 7항)
+ * 호출 예시: createFestivalTargetPanel(quest)
+ */
+function createFestivalTargetPanel(quest) {
+  // 타깃 선택 패널입니다.
+  const panel = createElement("section", "px-panel");
+  panel.append(createElement("h3", "section-title", "참여할 행사 고르기"));
+
+  // 이미 공통 보상을 받았다면 시작 전에 알립니다. (명세 §11.2)
+  if (hasEarnedCommonFestivalReward(quest)) {
+    panel.append(
+      createElement(
+        "p",
+        "data-note account-warning",
+        "공통 보상은 이미 받았어요. 다른 행사는 추가 방문으로 기록되고 새 뱃지·꿈돌이·XP는 지급되지 않아요.",
+      ),
+    );
+  }
+
+  // 기준 날짜에 참여할 수 있는 타깃 목록입니다.
+  const targets = getValidFestivalTargets(quest);
+
+  if (targets.length === 0) {
+    panel.append(createElement("p", "empty-message", "선택한 날짜에 참여할 수 있는 행사가 없어요."));
+    return panel;
+  }
+
+  // 현재 선택된 타깃 키입니다.
+  const selectedKey = state.selectedFestivalTargets[quest.instanceId] || "";
+
+  // 라디오 목록입니다. 하나만 고를 수 있습니다. (명세 §11.1)
+  const list = createElement("div", "festival-target-list");
+  list.setAttribute("role", "radiogroup");
+  list.setAttribute("aria-label", "참여할 행사 선택");
+
+  targets.forEach((target) => {
+    // 이 타깃의 고유 키입니다.
+    const key = getFestivalTargetKey(target);
+    // 이미 방문 기록이 있는 회차인지 여부입니다. (명세 §11.1)
+    const isVisited = hasVisitedFestivalTarget(quest, target);
+
+    const option = createElement("button", `festival-target${key === selectedKey ? " is-selected" : ""}`);
+    option.type = "button";
+    option.setAttribute("role", "radio");
+    option.setAttribute("aria-checked", key === selectedKey ? "true" : "false");
+    // 이미 기록한 회차는 다시 고를 수 없습니다.
+    option.disabled = isVisited;
+
+    const main = createElement("div", "festival-target__main");
+    main.append(createElement("span", "festival-target__title", target.title));
+    if (target.venueName) {
+      main.append(createElement("span", "festival-target__venue", target.venueName));
     }
 
-    const status = createElement("span", "customizer-item-status", item.unlocked ? (item.id === state.selectedGgumdoriId ? "장착" : "보유") : "잠김");
-    const name = createElement("span", "customizer-item-label", item.name.replace(" 꿈돌이", ""));
-    tile.append(thumb, status, name);
-    tile.addEventListener("click", () => {
-      state.customizerPreviewId = item.id;
-      renderCustomizer();
-      const feedback = select("#customizer-feedback");
-      if (feedback) feedback.textContent = `${item.name} 모습을 미리 보는 중이에요.`;
+    // 개최일과 신뢰 가능한 운영시간입니다. (명세 §10 S06 본문 7항)
+    main.append(createElement("span", "festival-target__when", formatFestivalPeriod(target)));
+
+    option.append(main);
+    option.append(
+      createElement(
+        "span",
+        isVisited ? "status-badge status-badge--done" : "status-badge status-badge--available",
+        isVisited ? "방문함" : target.availabilityLabel || "참여 가능",
+      ),
+    );
+
+    option.addEventListener("click", () => {
+      state.selectedFestivalTargets[quest.instanceId] = key;
+      persistFestivalSelections();
+      renderQuestSheet();
     });
-    grid.append(tile);
+
+    list.append(option);
   });
 
-  const isEquipped = previewItem?.id === state.selectedGgumdoriId;
-  equipButton.disabled = !previewItem?.unlocked || isEquipped;
-  equipButton.textContent = isEquipped ? "현재 장착 중" : "이 모습으로 장착";
+  panel.append(list);
 
-  document.querySelectorAll("[data-customize-category]").forEach((button) => {
-    const isActive = button.dataset.customizeCategory === state.customizerCategory;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  // 선택한 행사의 좌표를 실제 GPS 와 확인한다는 점을 알립니다. (명세 §10 S07 행사형)
+  panel.append(
+    createElement("p", "data-note", "선택한 행사의 개최 기간·운영시간·위치를 현장의 실제 GPS와 확인해요."),
+  );
+
+  return panel;
+}
+
+/**
+ * 입력: 행사 타깃.
+ * 출력: 개최 기간과 운영시간 문구.
+ * 역할: 언제 열리는 행사인지 한 줄로 보여 준다. (명세 §10 S06)
+ * 호출 예시: formatFestivalPeriod(target)
+ */
+function formatFestivalPeriod(target) {
+  // 개최 기간 문구입니다.
+  const period =
+    target.startDate && target.endDate
+      ? `${formatContextDate(target.startDate)} ~ ${formatContextDate(target.endDate)}`
+      : target.startDate
+        ? `${formatContextDate(target.startDate)}부터`
+        : "개최일 미정";
+
+  // 운영시간은 둘 다 있을 때만 신뢰합니다. (명세 §6.5)
+  const hours = target.startTime && target.endTime ? ` · ${target.startTime}~${target.endTime}` : "";
+
+  return period + hours;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 고른 행사 타깃을 브라우저에 저장한다.
+ * 호출 예시: persistFestivalSelections()
+ */
+function persistFestivalSelections() {
+  writeStorageValue(FESTIVAL_SELECTION_KEY, JSON.stringify(state.selectedFestivalTargets));
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 저장된 행사 선택 객체.
+ * 역할: 새로고침해도 고른 행사를 유지한다.
+ * 호출 예시: state.selectedFestivalTargets = readFestivalSelections()
+ */
+function readFestivalSelections() {
+  try {
+    return JSON.parse(readStorageValue(FESTIVAL_SELECTION_KEY) || "{}") || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 저장된 행사 방문 기록 배열.
+ * 역할: 어떤 회차를 이미 방문했는지 기억한다. (명세 §11.1, §11.2)
+ * 호출 예시: state.festivalVisits = readFestivalVisits()
+ */
+function readFestivalVisits() {
+  try {
+    // 저장된 방문 기록입니다.
+    const parsed = JSON.parse(readStorageValue(FESTIVAL_VISIT_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * 입력: 공통 축제 퀘스트와 방문한 행사 타깃.
+ * 출력: 없음.
+ * 역할: 실제 방문한 행사만 기록한다. 중복 회차는 담지 않는다. (명세 §11.1, §11.2)
+ * 호출 예시: recordFestivalVisit(quest, target)
+ */
+function recordFestivalVisit(quest, target) {
+  if (!target || hasVisitedFestivalTarget(quest, target)) {
+    return;
+  }
+
+  state.festivalVisits = [
+    ...state.festivalVisits,
+    {
+      // 완료에는 canonicalQuestId 와 실제 행사 정보를 함께 남깁니다. (명세 §11.1)
+      canonicalQuestId: quest.questId,
+      questId: quest.questId,
+      targetKey: getFestivalTargetKey(target),
+      eventId: target.eventId,
+      editionId: target.editionId,
+      title: target.title,
+      venueName: target.venueName,
+      visitedAt: new Date().toISOString(),
+    },
+  ];
+
+  writeStorageValue(FESTIVAL_VISIT_KEY, JSON.stringify(state.festivalVisits));
+}
+
+/**
+ * 입력: 공통 축제 퀘스트.
+ * 출력: 이번 완료가 추가 방문인지 여부.
+ * 역할: 공통 보상을 이미 받은 뒤의 완료는 추가 방문으로 다룬다. (명세 §11.2)
+ * 호출 예시: if (isAdditionalFestivalVisit(quest)) { ... }
+ */
+function isAdditionalFestivalVisit(quest) {
+  if (!quest?.isCommonFestival) {
+    return false;
+  }
+
+  return hasEarnedCommonFestivalReward(quest);
+}
+
+/* ──────────────────────────────────────────────
+   꿈돌이 2D 촬영 (명세 §10 S11)
+   합성은 기기 안 Canvas 에서 하고, 인증 사진은 절대 자동으로 불러오지 않는다. (§15.2)
+   ────────────────────────────────────────────── */
+
+/**
+ * 입력: 꿈돌이 식별자.
+ * 출력: 없음.
+ * 역할: 획득한 꿈돌이만 촬영 화면을 연다. (명세 §10 S11)
+ * 호출 예시: openPhotoSheet("science-1")
+ */
+function openPhotoSheet(ggumdoriId) {
+  // 촬영에 쓸 도감 항목입니다.
+  const entry = state.catalog.entries.find((item) => item.ggumdoriId === ggumdoriId);
+
+  if (!entry || entry.state !== "earned") {
+    return;
+  }
+
+  state.photo = {
+    ...createEmptyPhotoState(),
+    open: true,
+    ggumdoriId,
+    returnFocus: document.activeElement,
+  };
+
+  renderPhotoSheet();
+  startPhotoCamera();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 초기 촬영 상태.
+ * 역할: 촬영 상태를 한 곳에서 정의한다.
+ * 호출 예시: state.photo = createEmptyPhotoState()
+ */
+function createEmptyPhotoState() {
+  return {
+    open: false,
+    ggumdoriId: "",
+    // idle | camera | file | denied
+    source: "idle",
+    // 캐릭터 크기 배율과 좌우 위치(0~100%)입니다. (명세 §10 S11)
+    scale: 40,
+    offsetX: 50,
+    // 셔터를 누른 뒤 만들어진 정지 PNG 입니다.
+    resultDataUrl: "",
+    message: "",
+    // 사용자가 고른 사진입니다. 카메라를 못 쓸 때 배경으로 씁니다.
+    pickedImageUrl: "",
+    returnFocus: null,
+  };
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 카메라 시작 Promise.
+ * 역할: 실제 카메라를 켜고, 거부되면 권한 안내와 파일 선택 폴백을 제공한다. (명세 §10 S11)
+ * 호출 예시: await startPhotoCamera()
+ */
+async function startPhotoCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    state.photo = { ...state.photo, source: "denied", message: "이 브라우저에서는 카메라를 쓸 수 없어요. 사진을 골라 합성할 수 있어요." };
+    renderPhotoSheet();
+    return;
+  }
+
+  try {
+    // 후면 카메라를 우선 요청합니다.
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+
+    // 시트가 이미 닫혔으면 스트림을 바로 정리합니다.
+    if (!state.photo.open) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    photoStream = stream;
+    state.photo = { ...state.photo, source: "camera", message: "" };
+    renderPhotoSheet();
+
+    // 미리보기 영상에 스트림을 연결합니다.
+    const video = select("#photo-video");
+    if (video) {
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+    }
+  } catch (error) {
+    // 카메라 거부 시 권한 안내와 파일 선택 폴백입니다. (명세 §10 S11)
+    state.photo = {
+      ...state.photo,
+      source: "denied",
+      message: "카메라 권한이 없어요. 설정에서 권한을 허용하거나 사진을 골라 합성할 수 있어요.",
+    };
+    renderPhotoSheet();
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 카메라 스트림을 끈다. 시트를 닫거나 결과를 만든 뒤 호출한다.
+ * 호출 예시: stopPhotoCamera()
+ */
+function stopPhotoCamera() {
+  if (!photoStream) {
+    return;
+  }
+
+  photoStream.getTracks().forEach((track) => track.stop());
+  photoStream = null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 촬영 화면을 닫고 카메라와 임시 URL 을 정리한다.
+ * 호출 예시: closePhotoSheet()
+ */
+function closePhotoSheet() {
+  if (!state.photo.open) {
+    return;
+  }
+
+  stopPhotoCamera();
+
+  // 파일 선택으로 만든 임시 URL 을 해제합니다.
+  if (state.photo.pickedImageUrl) {
+    URL.revokeObjectURL(state.photo.pickedImageUrl);
+  }
+
+  // 시트를 열기 전 포커스가 있던 요소입니다.
+  const target = state.photo.returnFocus;
+
+  state.photo = createEmptyPhotoState();
+  renderPhotoSheet();
+
+  if (target instanceof HTMLElement && target.isConnected) {
+    target.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * 입력: 사용자가 고른 이미지 파일.
+ * 출력: 없음.
+ * 역할: 카메라 대신 사용자가 고른 사진을 배경으로 쓴다. (명세 §10 S11)
+ * 호출 예시: usePickedPhoto(file)
+ */
+function usePickedPhoto(file) {
+  if (!file) {
+    return;
+  }
+
+  stopPhotoCamera();
+
+  if (state.photo.pickedImageUrl) {
+    URL.revokeObjectURL(state.photo.pickedImageUrl);
+  }
+
+  state.photo = {
+    ...state.photo,
+    source: "file",
+    pickedImageUrl: URL.createObjectURL(file),
+    resultDataUrl: "",
+    message: "",
+  };
+  renderPhotoSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 합성 Promise.
+ * 역할: 셔터 순간의 배경과 꿈돌이를 Canvas 로 합쳐 정지 PNG 를 만든다. (명세 §10 S11)
+ * 호출 예시: await capturePhoto()
+ */
+async function capturePhoto() {
+  // 배경으로 쓸 요소입니다. 카메라면 video, 아니면 고른 사진입니다.
+  const video = select("#photo-video");
+  const picked = select("#photo-picked");
+  const source = state.photo.source === "camera" && video?.videoWidth ? video : picked;
+
+  if (!source) {
+    state.photo = { ...state.photo, message: "합성할 사진이 없어요. 카메라를 켜거나 사진을 골라주세요." };
+    renderPhotoSheet();
+    return;
+  }
+
+  // 배경의 원본 크기입니다.
+  const sourceWidth = source.videoWidth || source.naturalWidth || 0;
+  const sourceHeight = source.videoHeight || source.naturalHeight || 0;
+
+  if (!sourceWidth || !sourceHeight) {
+    state.photo = { ...state.photo, message: "사진을 아직 불러오는 중이에요." };
+    renderPhotoSheet();
+    return;
+  }
+
+  // 합성 캔버스입니다. 기기 안에서만 처리합니다. (명세 §10 S11)
+  const canvas = document.createElement("canvas");
+  canvas.width = sourceWidth;
+  canvas.height = sourceHeight;
+  const context = canvas.getContext("2d");
+  context.drawImage(source, 0, 0, sourceWidth, sourceHeight);
+
+  // 합성할 꿈돌이 그림입니다. GIF 여도 셔터 순간의 한 프레임이 그려집니다. (명세 §10 S11)
+  const entry = state.catalog.entries.find((item) => item.ggumdoriId === state.photo.ggumdoriId);
+  if (entry?.ggumdoriImageRef) {
+    try {
+      const art = await loadImageElement(entry.ggumdoriImageRef);
+      // 캐릭터 높이는 사진 높이의 scale% 입니다.
+      const drawHeight = (sourceHeight * state.photo.scale) / 100;
+      const drawWidth = art.naturalWidth ? (drawHeight * art.naturalWidth) / art.naturalHeight : drawHeight;
+      // 좌우 위치는 offsetX% 지점을 중심으로 둡니다.
+      const drawX = (sourceWidth * state.photo.offsetX) / 100 - drawWidth / 2;
+      // 발이 사진 아래쪽에 닿게 둡니다.
+      const drawY = sourceHeight - drawHeight - sourceHeight * 0.04;
+      context.drawImage(art, drawX, drawY, drawWidth, drawHeight);
+    } catch (error) {
+      state.photo = { ...state.photo, message: "꿈돌이 그림을 불러오지 못했어요." };
+      renderPhotoSheet();
+      return;
+    }
+  }
+
+  stopPhotoCamera();
+  state.photo = { ...state.photo, resultDataUrl: canvas.toDataURL("image/png"), message: "" };
+  renderPhotoSheet();
+}
+
+/**
+ * 입력: 이미지 경로.
+ * 출력: 로드된 이미지 요소 Promise.
+ * 역할: Canvas 에 그리기 전에 이미지가 준비되기를 기다린다.
+ * 호출 예시: const art = await loadImageElement("/assets/ggumdori/science-1.png")
+ */
+function loadImageElement(source) {
+  return new Promise((resolve, reject) => {
+    // 합성에 쓸 이미지입니다.
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.addEventListener("load", () => resolve(image), { once: true });
+    image.addEventListener("error", reject, { once: true });
+    image.src = source;
   });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 결과 PNG 를 다시 찍을 수 있게 되돌린다. (명세 §10 S11)
+ * 호출 예시: retakePhoto()
+ */
+function retakePhoto() {
+  state.photo = { ...state.photo, resultDataUrl: "", message: "" };
+  renderPhotoSheet();
+
+  if (state.photo.source === "camera" || state.photo.source === "idle") {
+    startPhotoCamera();
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 저장 Promise.
+ * 역할: 합성한 PNG 를 기기에 내려받는다. (명세 §10 S11)
+ * 호출 예시: savePhoto()
+ */
+function savePhoto() {
+  if (!state.photo.resultDataUrl) {
+    return;
+  }
+
+  // 내려받기용 임시 링크입니다.
+  const link = document.createElement("a");
+  link.href = state.photo.resultDataUrl;
+  link.download = `questbook-${state.photo.ggumdoriId || "ggumdori"}.png`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+
+  state.photo = { ...state.photo, message: "PNG 로 저장했어요." };
+  renderPhotoSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 공유 Promise.
+ * 역할: 파일 공유를 지원하면 기기 공유창을 열고, 아니면 다운로드로 대신한다. (명세 §10 S11)
+ * 호출 예시: await sharePhoto()
+ */
+async function sharePhoto() {
+  if (!state.photo.resultDataUrl) {
+    return;
+  }
+
+  try {
+    // dataURL 을 공유 가능한 파일로 바꿉니다.
+    const blob = await (await fetch(state.photo.resultDataUrl)).blob();
+    const file = new File([blob], `questbook-${state.photo.ggumdoriId || "ggumdori"}.png`, { type: "image/png" });
+
+    // 파일 공유를 지원하는 기기에서만 공유창을 엽니다. (명세 §10 S11)
+    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+      await navigator.share({ files: [file], title: "모험가의 수첩" });
+      state.photo = { ...state.photo, message: "공유했어요." };
+      renderPhotoSheet();
+      return;
+    }
+  } catch (error) {
+    // 사용자가 공유창을 닫은 경우도 여기로 옵니다. 다운로드로 넘기지 않고 조용히 끝냅니다.
+    if (error?.name === "AbortError") {
+      return;
+    }
+  }
+
+  // 공유를 지원하지 않으면 다운로드 폴백입니다. (명세 §10 S11)
+  savePhoto();
+  state.photo = { ...state.photo, message: "공유를 지원하지 않아 PNG 로 저장했어요." };
+  renderPhotoSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 촬영 화면을 그린다. 미리보기·조절·결과를 한 시트에 담는다. (명세 §10 S11)
+ * 호출 예시: renderPhotoSheet()
+ */
+function renderPhotoSheet() {
+  // 촬영 시트 컨테이너입니다.
+  const sheet = select("#photo-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  if (!state.photo.open) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    delete document.body.dataset.photoSheetOpen;
+    return;
+  }
+
+  // 촬영에 쓰는 꿈돌이입니다.
+  const entry = state.catalog.entries.find((item) => item.ggumdoriId === state.photo.ggumdoriId);
+
+  sheet.hidden = false;
+  document.body.dataset.photoSheetOpen = "true";
+  sheet.replaceChildren();
+
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closePhotoSheet);
+
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "photo-sheet-title");
+
+  // 상단 고정 머리말입니다.
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", `${entry?.ggumdoriName || "꿈돌이"}와 사진 찍기`);
+  title.id = "photo-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "촬영 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closePhotoSheet);
+
+  head.append(titleGroup, closeButton);
+
+  const body = createElement("div", "quest-sheet__body");
+
+  if (state.photo.resultDataUrl) {
+    // 결과 화면입니다.
+    const resultBox = createElement("div", "photo-stage");
+    const resultImage = document.createElement("img");
+    resultImage.className = "photo-result";
+    resultImage.src = state.photo.resultDataUrl;
+    resultImage.alt = "합성한 사진";
+    resultBox.append(resultImage);
+    body.append(resultBox);
+  } else {
+    // 미리보기 화면입니다. 배경 위에 꿈돌이를 얹어 보여 줍니다.
+    const stage = createElement("div", "photo-stage");
+
+    if (state.photo.source === "camera") {
+      const video = document.createElement("video");
+      video.id = "photo-video";
+      video.className = "photo-source";
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+      stage.append(video);
+    } else if (state.photo.pickedImageUrl) {
+      const picked = document.createElement("img");
+      picked.id = "photo-picked";
+      picked.className = "photo-source";
+      picked.src = state.photo.pickedImageUrl;
+      picked.alt = "고른 사진";
+      stage.append(picked);
+    } else {
+      stage.append(createElement("p", "photo-placeholder", "카메라를 켜거나 사진을 골라주세요."));
+    }
+
+    // 미리보기 위에 얹는 꿈돌이입니다. 모션 에셋이 있으면 여기서 움직입니다. (명세 §5.4)
+    if (entry?.ggumdoriImageRef) {
+      const overlay = document.createElement("img");
+      overlay.className = "photo-overlay";
+      overlay.src = entry.ggumdoriImageRef;
+      overlay.alt = "";
+      overlay.style.height = `${state.photo.scale}%`;
+      overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
+      stage.append(overlay);
+    }
+
+    body.append(stage);
+
+    // 크기와 좌우 위치 조절입니다. (명세 §10 S11)
+    const controls = createElement("section", "px-panel");
+    controls.append(createElement("h3", "section-title", "캐릭터 조절"));
+    controls.append(createPhotoSlider("크기", "scale", 15, 90, state.photo.scale));
+    controls.append(createPhotoSlider("좌우 위치", "offsetX", 5, 95, state.photo.offsetX));
+    body.append(controls);
+  }
+
+  // 안내 문구입니다.
+  if (state.photo.message) {
+    const message = createElement("p", "data-note", state.photo.message);
+    message.setAttribute("aria-live", "polite");
+    body.append(message);
+  }
+
+  // 인증 사진을 자동으로 쓰지 않는다는 점을 밝힙니다. (명세 §15.2)
+  body.append(
+    createElement("p", "data-note", "인증 사진은 여기에 자동으로 불러오지 않아요. 합성은 기기 안에서만 처리합니다."),
+  );
+
+  // 하단 고정 버튼입니다.
+  const footer = createElement("div", "quest-sheet__cta photo-cta");
+
+  if (state.photo.resultDataUrl) {
+    const retakeButton = createElement("button", "px-button px-button--ghost", "다시 찍기");
+    retakeButton.type = "button";
+    retakeButton.addEventListener("click", retakePhoto);
+
+    const saveButton = createElement("button", "px-button px-button--ghost", "PNG로 저장");
+    saveButton.type = "button";
+    saveButton.addEventListener("click", savePhoto);
+
+    const shareButton = createElement("button", "px-button px-button--primary", "공유하기");
+    shareButton.type = "button";
+    shareButton.addEventListener("click", sharePhoto);
+
+    footer.append(retakeButton, saveButton, shareButton);
+  } else {
+    // 사진 고르기는 항상 제공합니다. 카메라를 거부해도 촬영을 이어갈 수 있습니다. (명세 §10 S11)
+    const pickLabel = createElement("label", "px-button px-button--ghost", "사진 고르기");
+    const pickInput = document.createElement("input");
+    pickInput.type = "file";
+    pickInput.accept = "image/*";
+    pickInput.className = "px-sr-only";
+    pickInput.addEventListener("change", (event) => usePickedPhoto(event.target.files?.[0]));
+    pickLabel.append(pickInput);
+
+    const shutterButton = createElement("button", "px-button px-button--primary", "촬영");
+    shutterButton.type = "button";
+    shutterButton.disabled = state.photo.source !== "camera" && !state.photo.pickedImageUrl;
+    shutterButton.addEventListener("click", capturePhoto);
+
+    footer.append(pickLabel, shutterButton);
+  }
+
+  panel.append(head, body, footer);
+  sheet.append(scrim, panel);
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#photo-sheet-title")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 라벨, 상태 키, 최솟값, 최댓값, 현재 값.
+ * 출력: 슬라이더 행 요소.
+ * 역할: 캐릭터 크기와 좌우 위치를 같은 모양으로 조절한다. (명세 §10 S11)
+ * 호출 예시: createPhotoSlider("크기", "scale", 15, 90, 40)
+ */
+function createPhotoSlider(label, key, min, max, value) {
+  // 슬라이더 한 줄입니다.
+  const row = createElement("div", "photo-slider");
+  const labelElement = createElement("label", "photo-slider__label", label);
+  labelElement.htmlFor = `photo-slider-${key}`;
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.id = `photo-slider-${key}`;
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(value);
+  input.addEventListener("input", (event) => {
+    state.photo = { ...state.photo, [key]: Number(event.target.value) };
+    // 미리보기만 즉시 갱신해 슬라이더 조작이 끊기지 않게 합니다.
+    const overlay = select(".photo-overlay");
+    if (overlay) {
+      overlay.style.height = `${state.photo.scale}%`;
+      overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
+    }
+  });
+
+  row.append(labelElement, input);
+  return row;
+}
+
+/* ──────────────────────────────────────────────
+   마이페이지 설정·권한·정보 (명세 §10 S12)
+   앱 음량만 조절하며 시스템 음량을 바꾸는 것처럼 표현하지 않는다.
+   ────────────────────────────────────────────── */
+
+// 설정 항목 정의입니다. 순서와 문구가 명세 §10 S12 와 같습니다.
+const APP_SETTING_GROUPS = [
+  {
+    title: "소리와 진동",
+    // 앱 안에서만 적용된다는 점을 분명히 합니다. (명세 §10 S12)
+    note: "앱에서 나는 소리만 조절해요. 기기 전체 음량은 바뀌지 않습니다.",
+    items: [
+      { key: "masterVolume", label: "전체 음량", type: "range" },
+      { key: "musicVolume", label: "배경음", type: "range" },
+      { key: "effectVolume", label: "효과음", type: "range" },
+      { key: "vibration", label: "진동", type: "toggle" },
+    ],
+  },
+  {
+    title: "알림",
+    // 알림 권한은 켜는 순간에만 요청합니다. (명세 §10 S12, §9.5)
+    note: "알림을 켜는 순간에만 브라우저 권한을 요청해요.",
+    items: [
+      { key: "questNotification", label: "퀘스트 알림", type: "toggle", needsPermission: true },
+      { key: "festivalNotification", label: "행사·축제 알림", type: "toggle", needsPermission: true },
+      { key: "rewardNotification", label: "보상 알림", type: "toggle", needsPermission: true },
+    ],
+  },
+  {
+    title: "화면",
+    note: "",
+    items: [{ key: "reducedMotion", label: "모션 줄이기", type: "toggle" }],
+  },
+];
+
+/**
+ * 입력: 없음.
+ * 출력: 저장된 앱 설정 객체.
+ * 역할: 브라우저에 남긴 설정을 복원한다. 없으면 기본값을 쓴다. (명세 §10 S12)
+ * 호출 예시: state.appSettings = readAppSettings()
+ */
+function readAppSettings() {
+  // 기본값입니다. 소리는 중간, 알림은 꺼진 상태에서 시작합니다.
+  const defaults = {
+    masterVolume: 60,
+    musicVolume: 40,
+    effectVolume: 70,
+    vibration: true,
+    questNotification: false,
+    festivalNotification: false,
+    rewardNotification: false,
+    reducedMotion: readStorageValue(REDUCED_MOTION_KEY) === "true",
+  };
+
+  try {
+    // 저장된 설정입니다.
+    const saved = JSON.parse(readStorageValue(APP_SETTINGS_KEY) || "{}");
+    return { ...defaults, ...(saved && typeof saved === "object" ? saved : {}) };
+  } catch (error) {
+    return defaults;
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 앱 설정을 브라우저에 저장한다.
+ * 호출 예시: persistAppSettings()
+ */
+function persistAppSettings() {
+  writeStorageValue(APP_SETTINGS_KEY, JSON.stringify(state.appSettings));
+  // 모션 줄이기는 기존 키와도 맞춰 둡니다. 다른 코드가 이 키를 봅니다.
+  writeStorageValue(REDUCED_MOTION_KEY, String(state.appSettings.reducedMotion));
+}
+
+/**
+ * 입력: 설정 키와 새 값.
+ * 출력: 설정 반영 Promise.
+ * 역할: 설정 하나를 바꾸고 필요한 권한을 그때 요청한다. (명세 §10 S12)
+ * 호출 예시: await changeAppSetting("questNotification", true)
+ */
+async function changeAppSetting(key, value) {
+  // 알림을 켜는 경우에만 브라우저 권한을 요청합니다. (명세 §9.5)
+  if (value === true && APP_SETTING_GROUPS[1].items.some((item) => item.key === key)) {
+    // 권한 요청 결과입니다.
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      state.settingsMessage = "알림 권한이 없어 켤 수 없어요. 브라우저 설정에서 알림을 허용해주세요.";
+      renderSettings();
+      return;
+    }
+  }
+
+  state.appSettings = { ...state.appSettings, [key]: value };
+  state.settingsMessage = "";
+  persistAppSettings();
+
+  if (key === "reducedMotion") {
+    state.reducedMotion = value;
+    applyReducedMotion();
+  }
+
+  renderSettings();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 권한을 받았는지 여부 Promise.
+ * 역할: 알림 권한을 사용자가 알림을 켜는 순간에만 요청한다. (명세 §9.5, §10 S12)
+ * 호출 예시: const granted = await requestNotificationPermission()
+ */
+async function requestNotificationPermission() {
+  if (typeof Notification === "undefined") {
+    return false;
+  }
+  if (Notification.permission === "granted") {
+    return true;
+  }
+  if (Notification.permission === "denied") {
+    return false;
+  }
+
+  try {
+    return (await Notification.requestPermission()) === "granted";
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 권한 상태 갱신 Promise.
+ * 역할: 위치·카메라·알림의 현재 권한 상태를 읽는다. 요청하지는 않는다. (명세 §10 S12)
+ * 호출 예시: await refreshPermissionStates()
+ */
+async function refreshPermissionStates() {
+  // 브라우저에 물어본 권한 상태입니다.
+  const next = { location: "unknown", camera: "unknown", notification: "unknown" };
+
+  if (typeof Notification !== "undefined") {
+    next.notification = Notification.permission;
+  }
+
+  if (navigator.permissions?.query) {
+    for (const [key, name] of [
+      ["location", "geolocation"],
+      ["camera", "camera"],
+    ]) {
+      try {
+        next[key] = (await navigator.permissions.query({ name })).state;
+      } catch (error) {
+        // 이 브라우저가 해당 권한 조회를 지원하지 않는 경우입니다.
+        next[key] = "unknown";
+      }
+    }
+  }
+
+  state.permissionStates = next;
+  renderSettings();
+}
+
+/**
+ * 입력: 권한 상태 값.
+ * 출력: 한국어 상태 문구.
+ * 역할: 권한 상태를 사용자가 읽을 수 있는 말로 바꾼다. (명세 §10 S12)
+ * 호출 예시: getPermissionLabel("granted")
+ */
+function getPermissionLabel(permissionState) {
+  // 상태별 표시 문구입니다.
+  const labels = {
+    granted: "허용됨",
+    denied: "거부됨",
+    prompt: "요청 전",
+    default: "요청 전",
+    unknown: "확인 불가",
+  };
+
+  return labels[permissionState] || "확인 불가";
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 설정·권한·정보 영역을 그린다. (명세 §10 S12)
+ * 호출 예시: renderSettings()
+ */
+function renderSettings() {
+  // 설정 영역 컨테이너입니다.
+  const panel = select("#me-settings");
+
+  if (!panel) {
+    return;
+  }
+
+  panel.replaceChildren();
+
+  APP_SETTING_GROUPS.forEach((group) => {
+    // 설정 묶음 하나입니다.
+    const section = createElement("section", "setting-group");
+    section.append(createElement("h4", "setting-group__title", group.title));
+
+    group.items.forEach((item) => {
+      // 설정 한 줄입니다.
+      const row = createElement("div", "setting-row");
+      const label = createElement("label", "setting-row__label", item.label);
+      label.htmlFor = `setting-${item.key}`;
+      row.append(label);
+
+      if (item.type === "range") {
+        // 음량 슬라이더입니다.
+        const input = document.createElement("input");
+        input.type = "range";
+        input.id = `setting-${item.key}`;
+        input.min = "0";
+        input.max = "100";
+        input.value = String(state.appSettings[item.key]);
+        input.addEventListener("change", (event) => changeAppSetting(item.key, Number(event.target.value)));
+        // 값 표시입니다. 슬라이더를 끌 때 즉시 갱신합니다.
+        const value = createElement("span", "setting-row__value", `${state.appSettings[item.key]}`);
+        input.addEventListener("input", (event) => {
+          value.textContent = event.target.value;
+        });
+        row.append(input, value);
+      } else {
+        // 켜고 끄는 설정입니다.
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.id = `setting-${item.key}`;
+        input.checked = Boolean(state.appSettings[item.key]);
+        input.addEventListener("change", (event) => changeAppSetting(item.key, event.target.checked));
+        row.append(input);
+      }
+
+      section.append(row);
+    });
+
+    if (group.note) {
+      section.append(createElement("p", "data-note", group.note));
+    }
+
+    panel.append(section);
+  });
+
+  if (state.settingsMessage) {
+    const message = createElement("p", "data-note account-warning", state.settingsMessage);
+    message.setAttribute("aria-live", "polite");
+    panel.append(message);
+  }
+
+  renderPermissionStates();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 위치·카메라·알림 권한 상태를 표시한다. (명세 §10 S12)
+ * 호출 예시: renderPermissionStates()
+ */
+function renderPermissionStates() {
+  // 권한 상태 영역입니다.
+  const panel = select("#me-permissions");
+
+  if (!panel) {
+    return;
+  }
+
+  panel.replaceChildren();
+
+  [
+    ["위치", state.permissionStates.location, "퀘스트 추천과 완료 인증에 씁니다."],
+    ["카메라", state.permissionStates.camera, "사진 인증과 꿈돌이 촬영에 씁니다."],
+    ["알림", state.permissionStates.notification, "퀘스트·행사·보상 알림에 씁니다."],
+  ].forEach(([name, permissionState, purpose]) => {
+    // 권한 한 줄입니다.
+    const row = createElement("div", "permission-row");
+    const main = createElement("div", "permission-row__main");
+    main.append(
+      createElement("span", "permission-row__name", name),
+      createElement("span", "permission-row__purpose", purpose),
+    );
+    row.append(main);
+    row.append(
+      createElement(
+        "span",
+        permissionState === "granted"
+          ? "status-badge status-badge--done"
+          : permissionState === "denied"
+            ? "status-badge status-badge--locked"
+            : "status-badge status-badge--available",
+        getPermissionLabel(permissionState),
+      ),
+    );
+    panel.append(row);
+  });
+
+  panel.append(
+    createElement("p", "data-note", "권한은 해당 기능을 실제로 쓸 때 요청해요. 브라우저 설정에서 언제든 바꿀 수 있습니다."),
+  );
+}
+
+/* ──────────────────────────────────────────────
+   나의 모험 기록 (명세 §10 S13)
+   마이페이지에서만 진입한다. 인증 원본 사진은 공유 카드에 넣지 않는다. (§15.2)
+   ────────────────────────────────────────────── */
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 모험 기록 화면을 연다. 마이페이지에서만 부른다. (명세 §10 S13)
+ * 호출 예시: openRecordSheet()
+ */
+function openRecordSheet() {
+  state.recordSheetOpen = true;
+  state.recordDetailId = "";
+  state.recordReturnFocus = document.activeElement;
+  renderRecordSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 모험 기록 화면을 닫고 포커스를 되돌린다.
+ * 호출 예시: closeRecordSheet()
+ */
+function closeRecordSheet() {
+  if (!state.recordSheetOpen) {
+    return;
+  }
+
+  // 상세를 보고 있었다면 목록으로만 돌아갑니다.
+  if (state.recordDetailId) {
+    state.recordDetailId = "";
+    renderRecordSheet();
+    return;
+  }
+
+  state.recordSheetOpen = false;
+  renderRecordSheet();
+
+  const target = state.recordReturnFocus;
+  if (target instanceof HTMLElement && target.isConnected) {
+    target.focus({ preventScroll: true });
+  }
+  state.recordReturnFocus = null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 월 → 기록 배열 형태의 묶음.
+ * 역할: 완료 기록을 월별로 묶고 각 월 안에서 최신순으로 둔다. (명세 §10 S13)
+ * 호출 예시: const groups = groupNotesByMonth()
+ */
+function groupNotesByMonth() {
+  // 월 키 → 기록 목록입니다.
+  const groups = new Map();
+
+  [...state.notes]
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .forEach((note) => {
+      // 이 기록이 속한 월입니다. KST 기준으로 묶습니다.
+      const dateKey = normalizeDateKey(note.createdAt);
+      const monthKey = dateKey ? dateKey.slice(0, 7) : "날짜 미상";
+      if (!groups.has(monthKey)) {
+        groups.set(monthKey, []);
+      }
+      groups.get(monthKey).push(note);
+    });
+
+  return groups;
+}
+
+/**
+ * 입력: YYYY-MM 문자열.
+ * 출력: 화면에 표시할 월 제목.
+ * 역할: 월 구분선을 한국어로 보여 준다.
+ * 호출 예시: formatMonthLabel("2026-06")
+ */
+function formatMonthLabel(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+    return monthKey;
+  }
+
+  return `${monthKey.slice(0, 4)}년 ${Number(monthKey.slice(5, 7))}월`;
+}
+
+/**
+ * 입력: 기록 식별자.
+ * 출력: 이 기록에 연결된 축제 방문 또는 null.
+ * 역할: 행사형 완료는 실제 방문한 행사명과 회차를 보존한다. (명세 §10 S13, §11.1)
+ * 호출 예시: findFestivalVisitForNote(note)
+ */
+function findFestivalVisitForNote(note) {
+  // 같은 날 같은 장소에서 기록된 축제 방문입니다.
+  const noteDate = normalizeDateKey(note.createdAt);
+
+  return (
+    state.festivalVisits.find(
+      (visit) => normalizeDateKey(visit.visitedAt) === noteDate && visit.title && note.title.includes("축제"),
+    ) || null
+  );
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 월별 목록과 기록 상세를 한 시트에서 그린다. (명세 §10 S13)
+ * 호출 예시: renderRecordSheet()
+ */
+function renderRecordSheet() {
+  // 모험 기록 시트 컨테이너입니다.
+  const sheet = select("#record-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  if (!state.recordSheetOpen) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    delete document.body.dataset.recordSheetOpen;
+    return;
+  }
+
+  sheet.hidden = false;
+  document.body.dataset.recordSheetOpen = "true";
+  sheet.replaceChildren();
+
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closeRecordSheet);
+
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "record-sheet-title");
+
+  // 현재 상세로 보고 있는 기록입니다.
+  const detail = state.recordDetailId
+    ? state.notes.find((note) => note.id === state.recordDetailId) || null
+    : null;
+
+  // 상단 고정 머리말입니다.
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", detail ? detail.title : "나의 모험 기록");
+  title.id = "record-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", detail ? "목록으로" : "기록 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", detail ? "arrow_back" : "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closeRecordSheet);
+
+  head.append(titleGroup, closeButton);
+  panel.append(head);
+  panel.append(detail ? createRecordDetail(detail) : createRecordList());
+  sheet.append(scrim, panel);
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#record-sheet-title")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 월별 기록 목록 요소.
+ * 역할: 완료 기록을 월·날짜 순으로 훑어볼 수 있게 한다. (명세 §10 S13)
+ * 호출 예시: createRecordList()
+ */
+function createRecordList() {
+  // 스크롤되는 본문입니다.
+  const body = createElement("div", "quest-sheet__body");
+
+  // 월별로 묶은 기록입니다.
+  const groups = groupNotesByMonth();
+
+  if (groups.size === 0) {
+    const empty = createElement("div", "empty-state");
+    empty.append(createElement("p", "empty-message", "아직 완료한 퀘스트가 없어요."));
+    const browseButton = createElement("button", "px-button px-button--primary", "퀘스트 찾아보기");
+    browseButton.type = "button";
+    browseButton.addEventListener("click", () => {
+      closeRecordSheet();
+      setActiveView("quests");
+    });
+    empty.append(browseButton);
+    body.append(empty);
+    return body;
+  }
+
+  // 전체 완료 수와 획득 XP 요약입니다.
+  const stats = createElement("div", "stat-row");
+  stats.append(
+    createStatCell("완료", `${state.notes.length}개`),
+    createStatCell("획득 XP", `${state.notes.reduce((sum, note) => sum + toNumber(note.earnedXp, 0), 0)}`),
+    createStatCell("기간", `${groups.size}개월`),
+  );
+  body.append(stats);
+
+  groups.forEach((notes, monthKey) => {
+    // 월 구분 묶음입니다.
+    const section = createElement("section", "record-month");
+    section.append(createElement("h3", "section-title", formatMonthLabel(monthKey)));
+
+    notes.forEach((note) => {
+      // 기록 한 줄입니다. 누르면 상세로 갑니다.
+      const row = createElement("button", "quest-line");
+      row.type = "button";
+
+      const main = createElement("div", "quest-line__main");
+      main.append(createElement("span", "quest-line__title", note.title));
+      main.append(createElement("span", "quest-line__place", note.placeName));
+
+      // 행사형은 실제 방문한 행사명과 회차를 함께 남깁니다. (명세 §10 S13)
+      const visit = findFestivalVisitForNote(note);
+      if (visit) {
+        main.append(
+          createElement("span", "quest-line__note event-note", `${visit.title} · ${visit.editionId} 회차 방문`),
+        );
+      }
+
+      const meta = createElement("span", "quest-line__meta");
+      meta.append(
+        createElement("span", "px-counter", formatDate(note.createdAt)),
+        createElement("span", "px-counter", `+${toNumber(note.earnedXp, 0)} XP`),
+      );
+      main.append(meta);
+
+      row.append(main);
+      row.addEventListener("click", () => {
+        state.recordDetailId = note.id;
+        renderRecordSheet();
+      });
+      section.append(row);
+    });
+
+    body.append(section);
+  });
+
+  return body;
+}
+
+/**
+ * 입력: 기록 항목.
+ * 출력: 기록 상세 요소.
+ * 역할: 완료 기록의 세부 내용과 편집, 공유 카드를 제공한다. (명세 §10 S13)
+ * 호출 예시: createRecordDetail(note)
+ */
+function createRecordDetail(note) {
+  const body = createElement("div", "quest-sheet__body");
+
+  // 언제 어디서 완료했는지입니다.
+  const summary = createElement("section", "px-panel px-panel--inset");
+  summary.append(createElement("span", "px-label quest-sheet__eyebrow", "완료 기록"));
+  summary.append(createElement("p", "px-body", `${note.placeName} · ${formatDate(note.createdAt)}`));
+  summary.append(createElement("p", "data-note", `획득 ${toNumber(note.earnedXp, 0)} XP`));
+  body.append(summary);
+
+  // 행사형이면 실제 방문한 행사명과 회차를 보존해 보여 줍니다. (명세 §10 S13, §11.1)
+  const visit = findFestivalVisitForNote(note);
+  if (visit) {
+    const eventPanel = createElement("section", "px-panel");
+    eventPanel.append(createElement("h3", "section-title", "방문한 행사"));
+    eventPanel.append(createElement("p", "px-label", visit.title));
+    eventPanel.append(createElement("p", "px-body", `${visit.editionId} 회차 · ${visit.venueName || "장소 미상"}`));
+    body.append(eventPanel);
+  }
+
+  // 획득한 뱃지입니다.
+  if ((note.badges || []).length > 0) {
+    const badgePanel = createElement("section", "px-panel");
+    badgePanel.append(createElement("h3", "section-title", "획득 보상"));
+    const row = createElement("div", "card-summary");
+    (note.badges || []).forEach((badge) => row.append(createElement("span", "px-tag", badge)));
+    badgePanel.append(row);
+    body.append(badgePanel);
+  }
+
+  // 인증 사진입니다. 본인에게만 보이고 공유 카드에는 넣지 않습니다. (명세 §10 S13, §15.2)
+  if (note.photoRef) {
+    const photoPanel = createElement("section", "px-panel");
+    photoPanel.append(createElement("h3", "section-title", "인증 사진"));
+    photoPanel.append(
+      createElement("p", "data-note", "본인만 볼 수 있어요. 공유 카드에는 들어가지 않습니다."),
+    );
+    body.append(photoPanel);
+  }
+
+  // 일기·리뷰 편집입니다. (명세 §10 S13 기록 상세·편집)
+  // 서버가 entry 를 주지 않은 기록도 있어 안전하게 읽습니다.
+  const entry = note.entry || { type: "diary", body: "" };
+  const entryPanel = createElement("section", "px-panel");
+  entryPanel.append(createElement("h3", "section-title", entry.type === "review" ? "리뷰" : "일기"));
+
+  const entryInput = document.createElement("textarea");
+  entryInput.id = "record-entry-input";
+  entryInput.rows = 4;
+  entryInput.value = entry.body || note.memo || "";
+  entryInput.setAttribute("aria-label", "기록 내용");
+  entryPanel.append(entryInput);
+
+  const saveRow = createElement("div", "account-field__controls");
+  const saveButton = createElement("button", "px-button px-button--primary", "기록 저장");
+  saveButton.type = "button";
+  saveButton.addEventListener("click", () => saveRecordEntry(note, entryInput.value));
+  saveRow.append(saveButton);
+  entryPanel.append(saveRow);
+  body.append(entryPanel);
+
+  // 시스템 공유 카드입니다. 닉네임·장소·뱃지·꿈돌이로만 구성합니다. (명세 §10 S13)
+  body.append(createShareCard(note));
+
+  if (state.recordMessage) {
+    const message = createElement("p", "data-note", state.recordMessage);
+    message.setAttribute("aria-live", "polite");
+    body.append(message);
+  }
+
+  return body;
+}
+
+/**
+ * 입력: 기록 항목.
+ * 출력: 공유 카드 요소.
+ * 역할: 닉네임·장소·뱃지·꿈돌이만 담은 공유 카드를 보여 준다. 인증 사진은 넣지 않는다. (명세 §10 S13, §15.2)
+ * 호출 예시: createShareCard(note)
+ */
+function createShareCard(note) {
+  const panel = createElement("section", "px-panel");
+  panel.append(createElement("h3", "section-title", "공유 카드"));
+
+  // 카드 본문입니다.
+  const card = createElement("div", "share-card");
+
+  // 대표 꿈돌이 그림입니다.
+  const featured = getSelectedGgumdori();
+  if (featured?.imageRef) {
+    const image = document.createElement("img");
+    image.className = "share-card__art";
+    image.src = featured.imageRef;
+    image.alt = "";
+    card.append(image);
+  }
+
+  const meta = createElement("div", "share-card__meta");
+  meta.append(createElement("span", "share-card__name", state.user.nickname || "모험가"));
+  meta.append(createElement("span", "share-card__place", note.placeName));
+  if ((note.badges || []).length > 0) {
+    meta.append(createElement("span", "share-card__badge", note.badges[0]));
+  }
+  card.append(meta);
+  panel.append(card);
+
+  panel.append(
+    createElement("p", "data-note", "닉네임·장소·뱃지·꿈돌이만 담습니다. 인증 사진은 공유되지 않아요."),
+  );
+
+  return panel;
+}
+
+/**
+ * 입력: 기록 항목과 새 본문.
+ * 출력: 저장 Promise.
+ * 역할: 일기·리뷰 내용을 고쳐 저장한다. (명세 §10 S13)
+ * 호출 예시: await saveRecordEntry(note, "오늘의 기록")
+ */
+async function saveRecordEntry(note, body) {
+  // 저장할 본문입니다.
+  const text = String(body || "").trim();
+
+  state.notes = state.notes.map((item) =>
+    item.id === note.id ? { ...item, entry: { ...(item.entry || { type: "diary" }), body: text }, memo: text || item.memo } : item,
+  );
+  state.recordMessage = "기록을 저장했어요.";
+  renderRecordSheet();
+
+  try {
+    await fetchJson(`/api/notes/${encodeURIComponent(note.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entry: { type: note.entry.type, body: text } }),
+    });
+  } catch (error) {
+    state.recordMessage = "서버에 저장하지 못했어요. 화면의 내용은 유지됩니다.";
+    renderRecordSheet();
+  }
+}
+
+/**
+ * 입력: 시트 패널 요소.
+ * 출력: 없음.
+ * 역할: 열린 시트 안에서만 Tab 이 돌도록 포커스를 가둔다. (명세 §13.3-5)
+ *       시트가 사라지면 리스너도 함께 사라지므로 따로 해제하지 않는다.
+ * 호출 예시: trapFocus(panel)
+ */
+function trapFocus(panel) {
+  panel.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    // 시트 안에서 초점을 받을 수 있는 요소들입니다.
+    const focusable = [
+      ...panel.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((el) => el.offsetParent !== null || el === document.activeElement);
+
+    if (focusable.length === 0) {
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    // 끝에서 앞으로, 처음에서 뒤로 넘어가게 감쌉니다.
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 오버레이를 하나 닫았는지 여부.
+ * 역할: 뒤로가기가 화면을 넘기기 전에 열려 있는 시트를 위에서부터 하나만 닫는다. (명세 §7.4)
+ * 호출 예시: if (closeTopOverlay()) return;
+ */
+function closeTopOverlay() {
+  // 나중에 연 것이 위에 있으므로 이 순서로 검사합니다.
+  if (state.photo.open) {
+    closePhotoSheet();
+    return true;
+  }
+  if (state.recordSheetOpen) {
+    closeRecordSheet();
+    return true;
+  }
+  if (state.planSheetOpen) {
+    closePlanSheet();
+    return true;
+  }
+  if (state.weatherSheetOpen) {
+    closeWeatherSheet();
+    return true;
+  }
+  if (state.catalogSheetId) {
+    closeCatalogSheet();
+    return true;
+  }
+  if (state.questSheetId) {
+    closeQuestSheet();
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -2587,19 +8164,26 @@ function renderCustomizer() {
  */
 function renderAll() {
   renderAppHeader();
-  renderBottomNavigation();
+  renderDrawerNavigation();
+  renderDrawerProfile();
+  renderHomeContext();
   renderProfile();
   renderHomeMetrics();
   renderRecentBadges();
   renderHomeRecommendations();
   renderRecommendationMeta();
   renderRecommendations();
+  renderAdventure();
   renderQuestBoard();
   renderMapView();
-  renderBadges();
   renderNotes();
-  renderGgumdori();
-  renderCustomizer();
+  renderWeather();
+  renderWeatherSheet();
+  renderPlanSheet();
+  renderAccountPanel();
+  renderCollection();
+  renderCatalogSheet();
+  renderQuestSheet();
   renderActionDialog();
 }
 
@@ -2662,6 +8246,7 @@ function normalizeMeasuredLocation(position) {
     lng: coordinates.longitude,
     accuracyMeters,
     label: `현재 위치 기준, 정확도 ${Math.round(accuracyMeters)}m`,
+    measured: true,
   };
 }
 
@@ -2869,10 +8454,20 @@ async function buildCompletionBody(recommendation) {
   // 변수 의미: 완료 요청에 첨부할 Object Storage 객체 키입니다.
   const objectKey = evidence?.objectKey || "";
 
+  // 공통 축제라면 사용자가 고른 실제 행사 회차입니다. (명세 §11.1)
+  const festivalTarget = recommendation?.isCommonFestival ? getSelectedFestivalTarget(recommendation) : null;
+
   return {
     latitude: measuredLocation.lat,
     longitude: measuredLocation.lng,
     accuracyMeters: Math.round(measuredLocation.accuracyMeters),
+    // 완료에는 canonicalQuestId 와 실제 행사 정보를 함께 저장합니다. (명세 §11.1)
+    canonicalQuestId: recommendation?.questId || "",
+    eventId: festivalTarget?.eventId || "",
+    editionId: festivalTarget?.editionId || "",
+    eventTitle: festivalTarget?.title || "",
+    eventVenueName: festivalTarget?.venueName || "",
+    visitedAt: new Date().toISOString(),
     photoAttached: Boolean(objectKey),
     photoRef: objectKey,
     objectKey,
@@ -2943,7 +8538,7 @@ function getRequestFailureMessage(error, action) {
  * 역할: 수락과 완료 버튼 처리 결과를 팝업으로 보여줄 상태를 만든다.
  * 호출 예시: showQuestActionDialog("complete", recommendation, result)
  */
-function showQuestActionDialog(action, recommendation, actionResult = {}, message = "") {
+function showQuestActionDialog(action, recommendation, actionResult = {}, message = "", additionalVisit = false) {
   // 변수 의미: 완료 버튼인지 여부입니다.
   const isComplete = action === "complete";
   // 변수 의미: 액션이 성공으로 처리됐는지 여부입니다.
@@ -2971,13 +8566,63 @@ function showQuestActionDialog(action, recommendation, actionResult = {}, messag
     details.push(getReceiptRequirementText(evidence.requirementCheck));
   }
 
+  // 추가 방문은 이미 공통 보상을 받았다는 점을 완료 후에도 알립니다. (명세 §11.2)
+  if (additionalVisit && succeeded) {
+    // 이번에 방문한 행사입니다. 실제 방문한 행사만 적습니다. (명세 §10 S07 행사형)
+    const visitedTarget = getSelectedFestivalTarget(recommendation);
+    if (visitedTarget) {
+      details.push(`방문 행사: ${visitedTarget.title}`);
+    }
+    details.push("공통 보상은 이미 받았어요. 새 뱃지·꿈돌이·XP는 지급되지 않습니다.");
+  }
+
   state.actionDialog = {
-    title: succeeded ? (isComplete ? "퀘스트 완료 확인" : "퀘스트 수락 확인") : "퀘스트 처리 실패",
+    title: succeeded
+      ? additionalVisit
+        ? "추가 방문 기록됨"
+        : isComplete
+          ? "퀘스트 완료 확인"
+          : "퀘스트 수락 확인"
+      : "퀘스트 처리 실패",
     message: message || (succeeded ? "버튼 입력이 정상 처리되었습니다." : "요청이 처리되지 않았습니다."),
     details: details.filter(Boolean),
     tone: succeeded ? "success" : "warning",
+    // GPS 완료가 성공한 경우에만 보상 연출을 얹습니다.
+    // 공통 축제의 추가 방문에는 보상 연출을 재생하지 않습니다. (명세 §10 S08, §11.2)
+    reward: isComplete && succeeded && !additionalVisit ? resolveRewardBadge(recommendation) : null,
   };
   renderActionDialog();
+}
+
+/**
+ * 입력: 액션 대상 추천 항목.
+ * 출력: 보상 연출에 쓸 표시 정보.
+ * 역할: 퀘스트에 1:1:1 로 묶인 rewardPair 를 연출에 그대로 넘긴다. (명세 §5.1, §10 S08)
+ * 호출 예시: resolveRewardBadge(recommendation)
+ */
+function resolveRewardBadge(recommendation) {
+  // 이 퀘스트에 묶인 보상 쌍입니다. 서버가 준 경로를 그대로 씁니다.
+  const rewardPair = recommendation?.rewardPair || {};
+  // 완료한 퀘스트가 주는 뱃지 이름입니다.
+  const badgeName = rewardPair.badgeName || recommendation?.badgeName || "";
+  // 뱃지 목록에서 찾은 같은 이름의 뱃지입니다. 명시 경로가 없을 때만 등급 계산에 씁니다.
+  const badge =
+    state.badges.find((item) => item.name === badgeName) || getEarnedBadges()[0] || state.badges[0];
+
+  return {
+    name: badgeName || badge?.name || "탐험 뱃지",
+    category: badge?.category || recommendation?.category || "default",
+    tier: badge?.tier || 1,
+    // 클라이언트가 경로를 계산하지 않습니다. (명세 §5.1)
+    badgeImageRef: rewardPair.badgeImageRef || "",
+    ggumdoriId: rewardPair.ggumdoriId || "",
+    ggumdoriName: rewardPair.ggumdoriName || "",
+    ggumdoriImageRef: rewardPair.ggumdoriStillImageRef || "",
+    // 획득 XP와 전체 레벨 진행입니다. (명세 §10 S08)
+    rewardXp: toNumber(recommendation?.rewardXp, 0),
+    level: toNumber(state.user.level, 0),
+    levelProgressPercent: getProgressPercent(state.user.xp, state.user.nextLevelXp),
+  };
 }
 
 /**
@@ -3040,7 +8685,32 @@ function renderActionDialog() {
   closeButton.type = "button";
   closeButton.addEventListener("click", closeActionDialog);
 
-  dialog.append(title, message, detailList, closeButton);
+  dialog.append(title, message, detailList);
+
+  // GPS 인증 성공 연출입니다. 노드를 붙이는 순간 900ms 연출이 시작됩니다.
+  if (state.actionDialog.reward) {
+    dialog.prepend(createRewardFx(state.actionDialog.reward));
+    playRewardFlash();
+
+    // 보상 화면에는 도감에서 보기를 함께 둡니다. 900ms 에 함께 나타납니다. (명세 §10 S08)
+    const rewardActions = createElement("div", "reward-actions");
+    const catalogButton = createElement("button", "secondary-action", "도감에서 보기");
+    catalogButton.type = "button";
+    catalogButton.addEventListener("click", () => {
+      // 방금 얻은 꿈돌이를 도감에서 바로 열어 줍니다.
+      const earnedGgumdoriId = state.actionDialog?.reward?.ggumdoriId || "";
+      closeActionDialog();
+      setActiveView("collection");
+      if (earnedGgumdoriId) {
+        openCatalogSheet(earnedGgumdoriId);
+      }
+    });
+    rewardActions.append(catalogButton, closeButton);
+    dialog.append(rewardActions);
+  } else {
+    dialog.append(closeButton);
+  }
+
   overlay.append(dialog);
   document.body.append(overlay);
   closeButton.focus({ preventScroll: true });
@@ -3117,6 +8787,7 @@ async function loadRecommendations(forceRefresh = false) {
   renderHomeMetrics();
   renderHomeRecommendations();
   renderRecommendations();
+  renderAdventure();
   renderQuestBoard();
   renderMapView();
 }
@@ -3163,6 +8834,14 @@ async function handleQuestAction(instanceId, action) {
       return;
     }
 
+    // 이번 완료가 공통 축제의 추가 방문인지 여부입니다. (명세 §11.2)
+    const additionalVisit = action === "complete" && isAdditionalFestivalVisit(recommendation);
+
+    // 실제 방문한 행사만 기록합니다. 방문하지 않은 행사는 담지 않습니다. (명세 §11.1)
+    if (action === "complete" && recommendation?.isCommonFestival) {
+      recordFestivalVisit(recommendation, getSelectedFestivalTarget(recommendation));
+    }
+
     // 액션 성공 후 반영할 상태입니다.
     const nextStatus = action === "complete" ? "completed" : "accepted";
 
@@ -3174,10 +8853,14 @@ async function handleQuestAction(instanceId, action) {
       await Promise.allSettled([loadUser(), loadBadges(), loadNotes(), loadGgumdori()]);
     }
 
-    // 변수 의미: 액션 성공 안내 문구입니다.
-    const successMessage = action === "complete" ? "GPS 기준 완료됨" : "퀘스트 수락됨";
+    // 변수 의미: 액션 성공 안내 문구입니다. 성공 문구에는 실제 방문한 행사만 적습니다. (명세 §10 S07 행사형)
+    const successMessage = additionalVisit
+      ? "추가 방문으로 기록했어요"
+      : action === "complete"
+        ? "GPS 기준 완료됨"
+        : "퀘스트 수락됨";
     updateSystemStatus(true, successMessage);
-    showQuestActionDialog(action, recommendation, actionResult, successMessage);
+    showQuestActionDialog(action, recommendation, actionResult, successMessage, additionalVisit);
   } catch (error) {
     if (!isUnauthorizedError(error)) {
       // 위치 권한 실패는 API 연결 상태를 바꾸지 않는다.
@@ -3230,6 +8913,11 @@ async function loadUser() {
       ),
       badgeCount: toNumber(user.badgeCount || stats.earnedBadgeCount, FALLBACK_USER.badgeCount),
       selectedGgumdoriName: user.selectedGgumdoriName || FALLBACK_USER.selectedGgumdoriName,
+      // 게스트와 소셜을 구분합니다. 마이페이지 표시가 이 값을 씁니다. (명세 §9.3, §9.4)
+      accountType: user.accountType === "social" ? "social" : "guest",
+      // 이메일과 제공자는 소셜 사용자만 값이 있고 마이페이지에서만 보여 줍니다. (명세 §9.4)
+      email: String(user.email || ""),
+      provider: String(user.provider || ""),
     };
   } catch (error) {
     state.user = { ...FALLBACK_USER };
@@ -3258,7 +8946,7 @@ async function loadBadges() {
 /**
  * 입력: 없음.
  * 출력: 수첩 기록 로드 Promise.
- * 역할: /api/notes를 호출하고 실패 시 기본 수첩 기록을 사용한다.
+ * 역할: /api/notes와 각 사진의 다운로드 URL을 호출하고 API의 빈 목록도 그대로 유지한다.
  * 호출 예시: await loadNotes()
  */
 async function loadNotes() {
@@ -3267,10 +8955,40 @@ async function loadNotes() {
     const payload = await fetchJson("/api/notes");
     // 정규화한 수첩 기록 목록입니다.
     const notes = unwrapList(payload).map(normalizeNote);
+    // 새 서버 응답과 병합하기 전의 편집 상태입니다.
+    const previousDrafts = state.noteDrafts;
 
-    state.notes = notes.length > 0 ? notes : [...FALLBACK_NOTES];
+    state.notes = notes;
+    state.notesSource = "api";
+    state.notePhotos = {};
+    state.noteDrafts = Object.fromEntries(
+      notes.map((note) => {
+        // 사용자가 아직 저장하지 않은 입력이 있는 기존 편집 상태입니다.
+        const previousDraft = previousDrafts[note.id];
+        if (previousDraft?.dirty || previousDraft?.pending) {
+          return [note.id, previousDraft];
+        }
+
+        return [
+          note.id,
+          {
+            ...createNoteDraft(note),
+            isOpen: Boolean(previousDraft?.isOpen),
+          },
+        ];
+      }),
+    );
+
+    // 사진이 있는 완료 기록마다 현재 사용자용 presigned GET URL을 발급합니다.
+    const photoRequests = notes
+      .filter((note) => note.photoRef)
+      .map((note) => requestNotePhoto(note));
+    await Promise.allSettled(photoRequests);
   } catch (error) {
     state.notes = [...FALLBACK_NOTES];
+    state.notesSource = "fallback";
+    state.notePhotos = {};
+    state.noteDrafts = {};
   }
 }
 
@@ -3342,6 +9060,10 @@ async function loadHealth() {
 async function loadInitialData(forceRefresh = false) {
   await Promise.allSettled([loadHealth(), loadUser(), loadBadges(), loadNotes(), loadGgumdori(), loadMapConfig()]);
   await loadRecommendations(forceRefresh);
+  // 도감은 퀘스트의 rewardPair 에서 파생되므로 추천을 받은 뒤에 만듭니다. (명세 §5.1)
+  await loadCatalog();
+  // 날씨는 실패해도 지도와 추천을 막지 않습니다. (명세 §6.4)
+  loadWeather();
   renderAll();
 }
 
@@ -3417,29 +9139,13 @@ function bindEvents() {
     });
   });
 
-  document.querySelectorAll("[data-customize-category]").forEach((button) => {
+  document.querySelectorAll("[data-adventure-sort]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.customizerCategory = button.dataset.customizeCategory || "all";
-      renderCustomizer();
+      state.adventureSort = button.dataset.adventureSort === "started" ? "started" : "distance";
+      state.adventureSortPinned = true;
+      renderAdventure();
     });
   });
-
-  const equipButton = select("#customizer-equip-button");
-  if (equipButton) {
-    equipButton.addEventListener("click", () => {
-      const previewItem = state.ggumdori.find((item) => item.id === state.customizerPreviewId);
-      if (!previewItem?.unlocked) return;
-
-      state.selectedGgumdoriId = previewItem.id;
-      writeStorageValue(SELECTED_GGUMDORI_KEY, previewItem.id);
-      renderProfile();
-      renderGgumdori();
-      renderCustomizer();
-
-      const feedback = select("#customizer-feedback");
-      if (feedback) feedback.textContent = `${previewItem.name} 장착 완료! 홈 화면에도 적용됐어요.`;
-    });
-  }
 
   document.addEventListener("click", (event) => {
     // 실제 클릭 대상 요소입니다.
@@ -3449,24 +9155,336 @@ function bindEvents() {
       return;
     }
 
+    // 도감 카드입니다. 누르면 도감 상세를 엽니다. (명세 §10 S09·S10)
+    const catalogTarget = target.closest("[data-catalog-target]");
+    if (catalogTarget) {
+      openCatalogSheet(catalogTarget.dataset.catalogTarget || "");
+      return;
+    }
+
+    // 퀘스트 카드입니다. 본문을 누르면 공용 상세 시트를 엽니다. (명세 §10 S04)
+    const questTarget = target.closest("[data-quest-target]");
+    if (questTarget) {
+      openQuestSheet(questTarget.dataset.questTarget || "");
+      return;
+    }
+
     // 화면 전환 버튼입니다.
     const viewTarget = target.closest("[data-view-target]");
     if (!viewTarget) {
       return;
     }
 
+    // 드로어에서 메뉴를 고를 때는 히스토리를 되감지 않습니다.
+    // history.back() 은 비동기라 아래 setActiveView 가 replaceState 로 바꾼 해시를
+    // 이전 값으로 되돌리고, 그 hashchange 가 화면을 홈으로 덮어씁니다.
+    // 드로어가 쌓아 둔 항목은 setActiveView 의 replaceState 가 목적지 항목으로 바꿔 씁니다.
+    closeDrawer(true);
     setActiveView(viewTarget.dataset.viewTarget || "home");
   });
 
   window.addEventListener("hashchange", () => {
-    setActiveView(readInitialView(), false);
+    // 해시가 가리키는 화면입니다.
+    const nextView = readInitialView();
+    // 이미 그 화면이면 다시 그리지 않습니다. 히스토리 이동 중 화면이 되돌아가는 것을 막습니다.
+    if (nextView === state.activeView) {
+      return;
+    }
+    setActiveView(nextView, false);
   });
+
+  bindDrawerEvents();
+  bindHomeContextEvents();
+  bindSettingEvents();
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.actionDialog) {
       closeActionDialog();
+      return;
+    }
+
+    // 보상 모달 다음으로 퀘스트 상세 시트를 닫습니다. (명세 §7.4)
+    if (event.key === "Escape" && state.recordSheetOpen) {
+      closeRecordSheet();
+      return;
+    }
+
+    if (event.key === "Escape" && state.photo.open) {
+      closePhotoSheet();
+      return;
+    }
+
+    if (event.key === "Escape" && state.weatherSheetOpen) {
+      closeWeatherSheet();
+      return;
+    }
+
+    if (event.key === "Escape" && state.planSheetOpen) {
+      closePlanSheet();
+      return;
+    }
+
+    if (event.key === "Escape" && state.catalogSheetId) {
+      closeCatalogSheet();
+      return;
+    }
+
+    if (event.key === "Escape" && state.questSheetId) {
+      closeQuestSheet();
+      return;
+    }
+
+    // 오버레이가 없으면 Esc 로 드로어를 닫습니다. (명세 §7.2)
+    if (event.key === "Escape" && isDrawerOpen()) {
+      closeDrawer();
+      return;
+    }
+
+    if (event.key === "Tab") {
+      trapDrawerFocus(event);
     }
   });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 우측 책갈피 손잡이, 닫기 버튼, 배경 탭, 가장자리 스와이프, 뒤로가기를 연결한다. (명세 §7.2)
+ * 호출 예시: bindDrawerEvents()
+ */
+function bindDrawerEvents() {
+  select("#bookmark-handle")?.addEventListener("click", openDrawer);
+  select("#drawer-close")?.addEventListener("click", () => closeDrawer());
+  select("#drawer-scrim")?.addEventListener("click", () => closeDrawer());
+
+  // 뒤로가기는 열린 드로어를 먼저 닫습니다. (명세 §7.4)
+  window.addEventListener("popstate", () => {
+    // 뒤로가기는 최상위 오버레이 → 열린 드로어 → 이전 화면 순으로 닫습니다. (명세 §7.4)
+    if (closeTopOverlay()) {
+      // 시트는 히스토리 항목을 쌓지 않으므로 되감긴 항목을 되돌려 보던 화면을 유지합니다.
+      // 해시를 원래대로 돌려놓으면 뒤이어 오는 hashchange 도 같은 화면이라 아무 일도 하지 않습니다.
+      window.history.pushState(null, "", `#view-${state.activeView}`);
+      return;
+    }
+    if (isDrawerOpen()) {
+      closeDrawer(true);
+      return;
+    }
+    setActiveView(readInitialView(), false);
+  });
+
+  // 스와이프 인식을 오른쪽 가장자리 24px 안에서 시작한 제스처로만 제한해
+  // 지도 드래그·OS 뒤로가기 제스처와 충돌을 줄입니다. (명세 §7.2)
+  const EDGE_WIDTH = 24;
+  const SWIPE_MIN = 40;
+
+  // 제스처 시작 좌표입니다.
+  let touchStartX = 0;
+  let touchStartY = 0;
+  // 이번 제스처가 드로어 대상인지 여부입니다.
+  let isEdgeGesture = false;
+
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      if (event.touches.length !== 1) {
+        isEdgeGesture = false;
+        return;
+      }
+
+      const touch = event.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      // 열려 있으면 드로어 안에서 시작한 오른쪽 스와이프를 닫기로 받습니다.
+      isEdgeGesture = isDrawerOpen()
+        ? Boolean(event.target instanceof Element && event.target.closest("#app-drawer"))
+        : touch.clientX >= window.innerWidth - EDGE_WIDTH;
+    },
+    { passive: true },
+  );
+
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      if (!isEdgeGesture) {
+        return;
+      }
+      isEdgeGesture = false;
+
+      const touch = event.changedTouches[0];
+      if (!touch) {
+        return;
+      }
+
+      // 가로 이동량과 세로 이동량입니다. 세로가 크면 스크롤로 봅니다.
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+      if (Math.abs(deltaX) < SWIPE_MIN || Math.abs(deltaY) > Math.abs(deltaX)) {
+        return;
+      }
+
+      if (!isDrawerOpen() && deltaX < 0) {
+        openDrawer();
+        return;
+      }
+      if (isDrawerOpen() && deltaX > 0) {
+        closeDrawer();
+      }
+    },
+    { passive: true },
+  );
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈의 현위치·계획 모드 토글과 3단 시트 손잡이를 연결한다. (명세 §6, §10 S03)
+ * 호출 예시: bindHomeContextEvents()
+ */
+function bindHomeContextEvents() {
+  document.querySelectorAll("[data-context-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setExplorationMode(button.dataset.contextMode || "current");
+    });
+  });
+
+  select("#home-sheet-grip")?.addEventListener("click", cycleHomeSheetSnap);
+
+  select("#home-plan-date")?.addEventListener("change", (event) => {
+    state.plannedDate = event.target.value || "";
+    persistPlanContext();
+    renderHomeContext();
+    renderRecommendations();
+    loadWeather(true);
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 마이페이지 설정 항목을 연결하고 저장된 값을 화면에 반영한다. (명세 §12)
+ * 호출 예시: bindSettingEvents()
+ */
+function bindSettingEvents() {
+  applyReducedMotion();
+
+  // 모험 기록은 마이페이지에서만 들어갑니다. (명세 §10 S13)
+  select("#me-record-open")?.addEventListener("click", openRecordSheet);
+
+  // 권한 상태는 화면을 열 때 한 번 읽습니다. 여기서 권한을 요청하지는 않습니다. (명세 §9.5)
+  refreshPermissionStates();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 앱 모션 줄이기 설정을 body 속성으로 내려 CSS가 연출을 멈추게 한다.
+ * 호출 예시: applyReducedMotion()
+ */
+function applyReducedMotion() {
+  document.body.dataset.reducedMotion = String(state.reducedMotion);
+}
+
+/**
+ * 입력: "current" 또는 "planned".
+ * 출력: 없음.
+ * 역할: 탐색 기준 위치를 명시적으로 전환한다. (명세 §6.1)
+ * 호출 예시: setExplorationMode("planned")
+ */
+function setExplorationMode(mode) {
+  state.explorationMode = mode === "planned" ? "planned" : "current";
+
+  if (state.explorationMode === "planned") {
+    // 마지막 계획 위치와 날짜를 복원합니다. 없으면 날짜만 오늘로 둡니다. (명세 §6.3)
+    const saved = readPlanContext();
+    if (saved?.label) {
+      state.location = { lat: saved.lat, lng: saved.lng, label: saved.label, measured: false };
+    }
+    state.plannedDate = saved?.date || state.plannedDate || toKstDateKey(new Date());
+  }
+
+  renderHomeContext();
+  renderRecommendations();
+  loadWeather(true);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈 시트를 접힘·중간·전체 순으로 순환시킨다. (명세 §10 S03)
+ * 호출 예시: cycleHomeSheetSnap()
+ */
+function cycleHomeSheetSnap() {
+  // 3스냅 순환 순서입니다.
+  const order = ["collapsed", "mid", "full"];
+  // 다음 스냅 위치입니다.
+  const next = order[(order.indexOf(state.homeSheetSnap) + 1) % order.length];
+
+  state.homeSheetSnap = next;
+  renderHomeSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈 시트의 현재 스냅을 DOM에 반영한다.
+ * 호출 예시: renderHomeSheet()
+ */
+function renderHomeSheet() {
+  // 홈 3단 시트입니다.
+  const sheet = select("#home-sheet");
+
+  if (!sheet) {
+    return;
+  }
+
+  sheet.dataset.snap = state.homeSheetSnap;
+
+  // 스냅 상태를 스크린리더에도 알립니다.
+  const grip = select("#home-sheet-grip");
+  if (grip) {
+    // 현재 스냅의 한국어 이름입니다.
+    const label = { collapsed: "접힘", mid: "중간", full: "전체" }[state.homeSheetSnap] || "중간";
+    grip.setAttribute("aria-label", `시트 높이 변경 (현재 ${label})`);
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 홈 상단의 탐색 컨텍스트 표시를 현재 상태로 갱신한다. (명세 §6)
+ * 호출 예시: renderHomeContext()
+ */
+function renderHomeContext() {
+  // 계획 모드인지 여부입니다.
+  const isPlanned = state.explorationMode === "planned";
+
+  // 탐색 모드를 body 에 내려 화면 전체가 같은 색 규칙을 따르게 합니다. (명세 §6.3)
+  document.body.dataset.explorationMode = state.explorationMode;
+
+  document.querySelectorAll("[data-context-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.contextMode === state.explorationMode));
+  });
+
+  // 계획 위치·날짜 입력 줄입니다. 현위치 모드에서는 감춥니다.
+  const planControls = select("#home-plan-controls");
+  if (planControls) {
+    planControls.hidden = !isPlanned;
+  }
+
+  // 현재 기준 위치 이름입니다.
+  const placeText = select("#home-place-text");
+  if (placeText) {
+    placeText.textContent = state.location.label || "대전광역시청";
+  }
+
+  // GPS 상태 표시입니다. 계획 모드에서는 실제 측위가 아님을 명시합니다.
+  const gpsState = select("#home-gps-state");
+  if (gpsState) {
+    gpsState.textContent = isPlanned ? "계획 위치" : state.location.measured ? "GPS ON" : "기본 좌표";
+  }
+
+  renderHomeSheet();
 }
 
 /**
@@ -3482,6 +9500,8 @@ function initializeApp() {
   const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();
   setActiveView(state.activeView, false);
+  // 서버 응답 전에도 도감이 비어 보이지 않게 퀘스트에서 파생한 목업으로 채웁니다. (명세 §5.1)
+  state.catalog = buildFallbackCatalog();
   renderAll();
   if (!oauthRedirectPending && ensureSessionReady()) {
     loadInitialData();

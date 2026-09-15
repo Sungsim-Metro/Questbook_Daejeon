@@ -135,6 +135,11 @@ CREATE TABLE IF NOT EXISTS adventure_notes (
   badges_json JSONB NOT NULL,
   distance_km DOUBLE PRECISION NOT NULL,
   share_image_url TEXT,
+  entry_type TEXT NOT NULL DEFAULT 'diary' CHECK (entry_type IN ('diary', 'review')),
+  entry_title TEXT NOT NULL DEFAULT '',
+  entry_body TEXT NOT NULL DEFAULT '',
+  entry_rating SMALLINT CHECK (entry_rating IS NULL OR entry_rating BETWEEN 1 AND 5),
+  entry_updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL
 );
 

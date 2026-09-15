@@ -27,7 +27,9 @@
 3. API 인증 키를 준비한다.
    - 운영은 루트 계정보다 Object Storage에 필요한 권한만 가진 Sub Account 키를 권장한다.
    - Access Key ID와 Secret Key는 서버 `.env` 또는 비밀 관리 도구에만 저장한다.
-4. 브라우저 직접 업로드를 위해 버킷 CORS를 설정한다.
+4. 브라우저 직접 업로드를 위해 버킷 CORS를 설정한다. 실제 적용 명령은 [Object Storage CORS 설정 런북](./object-storage-cors.md)을 따른다. 로컬 Python, 테스트 Docker, 운영 Docker에서 같은 절차를 사용할 수 있다.
+
+아래 XML은 규칙 구조를 설명하는 예시다. 문서나 `.env`에 이 내용을 추가하는 것만으로 버킷에 적용되지는 않는다.
 
 ```xml
 <CORSConfiguration>
@@ -68,9 +70,9 @@ NCP_OBJECT_STORAGE_ADDRESSING_STYLE=path
 앱 API 의존성을 설치한 뒤 아래 명령을 실행한다.
 
 ```bash
-cd /home/ilhyeonchu/Documents/GitHub/Questbook_Dajeon/services/app-api
-uv sync
-uv run python ../../scripts/check_object_storage.py
+cd <Questbook_Dajeon-저장소-경로>
+uv sync --project services/app-api --python 3.11 --frozen --no-dev
+uv run --project services/app-api --no-sync python scripts/check_object_storage.py
 ```
 
 성공하면 다음 형태가 출력된다.
@@ -82,7 +84,9 @@ bucket: qbook-evidence-dev
 OK - Object Storage 버킷 접근 가능: qbook-evidence-dev
 ```
 
-실패하면 `missing` 목록 또는 `head_bucket` 오류 코드를 기준으로 버킷명, 키 권한, CORS, 네트워크 아웃바운드를 확인한다. Secret Key 값은 출력하지 않는다.
+실패하면 `missing` 목록 또는 `head_bucket` 오류 코드를 기준으로 버킷명, 키 권한, 네트워크 아웃바운드를 확인한다. Secret Key 값은 출력하지 않는다.
+
+이 점검은 서버의 버킷 접근만 확인하며 CORS와 실제 사진 쓰기 권한은 검사하지 않는다. 성공해도 브라우저의 직접 PUT 업로드는 실패할 수 있다. [CORS 설정 런북의 검증 절차](./object-storage-cors.md#5-브라우저-업로드-허용-확인)로 OPTIONS 응답까지 확인한다.
 
 ## 앱 API 사용 흐름
 
