@@ -2,7 +2,18 @@
 
 대전을 탐험하고 퀘스트를 완료해 뱃지와 꿈돌이를 수집하는 위치 기반 관광 퀘스트 게임
 
-## 프론트엔드 v2 개발 현황과 백엔드 인수인계 (2026-09-10)
+## 현재 통합 기준 (2026-09-15)
+
+이번 통합은 **main의 Stitch UI와 기존 planMode 백엔드 기능**을 기준으로 한다. 카테고리 XP에 따른 기존 뱃지·꿈돌이 해금과 기존 사용자 기록을 보존하며, 퀘스트별 고유 보상으로 전환하지 않는다.
+
+- 범위·검증 기준: [main UI 백엔드 통합](docs/main-ui-backend-integration.md).
+- 관광지 수집·공용 퀘스트·수락 기록 보존·배포: [퀘스트 카탈로그 운영](docs/quest-catalog-operations.md).
+- v2 고유 보상 SQL은 [미적용 제안](database/proposals/quest_reward_pairs_v2.sql)으로 분리했다. 현재 DB 초기화나 마이그레이션에 실행하지 않는다.
+- 독립 게스트·소셜 기록 병합, 축제 회차별 보상, 날씨 제공, 계정 영구 삭제는 후속 확장이다.
+
+아래 2026-09-10 인수인계는 v2 전체 확장에 관한 과거 제안이다. 그 문서의 보상 전환과 신규 API 요구 전체를 이번 통합의 완료 조건으로 사용하지 않는다.
+
+## 프론트엔드 v2 인수인계 기록 (2026-09-10)
 
 **현재 상태: 프론트엔드 v2 화면과 상호작용이 구현되어 있으나, 실제 백엔드와의 통합은 아직 완료되지 않았다.** UI·보상·데이터 계약의 기준은 [FRONTEND_SPEC.md](FRONTEND_SPEC.md)이며, 이 README 아래의 기존 주요 기능·실행 설명과 [PROJECT_DESIGN.md](docs/PROJECT_DESIGN.md), [MVP_STATUS.md](docs/MVP_STATUS.md)에는 v1 baseline 설명이 남아 있다. 특히 카테고리 XP에 따른 단계별 해금을 v2의 퀘스트별 고유 보상과 혼동하지 않는다.
 
@@ -39,7 +50,7 @@
 **P0 — main 통합 전 필요한 데이터·계정·인증 작업**
 
 1. **v2 보상 DB와 기존 데이터 이관**
-   - [003_quest_reward_pairs.sql](database/migrations/003_quest_reward_pairs.sql)에 `quest_rewards`, `user_quest_rewards`, `festival_visits` 정의가 추가되어 있다. 파일 추가와 실제 DB 적용은 별개이며, 현재 저장소 초기화는 `repository.py`의 `SCHEMA_SQL`을 사용하므로 실행·배포 경로에 마이그레이션 적용을 연결해야 한다.
+   - [v2 보상 SQL 제안](database/proposals/quest_reward_pairs_v2.sql)에 `quest_rewards`, `user_quest_rewards`, `festival_visits` 정의가 있다. 현재 통합에서는 실행하지 않는다. 향후 보상 정책 전환을 승인할 때 별도 이관 절차와 함께 검토한다.
    - `assets-src/ggumdori/quest-mapping.json`을 작성하고 [seed_quest_rewards.mjs](scripts/seed_quest_rewards.mjs)로 시드를 생성·검토한다. 현재 Git에는 매핑 파일이 없으므로 생성 도구만 실행해서는 보상 연결이 완성되지 않는다. 실제 퀘스트 ID와 고유 뱃지·꿈돌이를 매핑해야 한다.
    - 기존 카테고리·뱃지·꿈돌이·대표 선택 이관 정책을 확정한다. 003의 카테고리 UPDATE는 일부 `reusable_quests`만 처리하므로 기존 사용자 보상 전체의 이관까지 완료한 것이 아니다.
 2. **퀘스트별 1:1:1 보상 지급**

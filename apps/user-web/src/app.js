@@ -6,8 +6,8 @@ import { createRewardFx, playRewardFlash } from "./reward-fx.js";
 // API 요청이 실패했을 때 화면을 채우는 기본 사용자 정보입니다.
 const FALLBACK_USER = {
   nickname: "대전 탐험가",
-  // guest | social. 게스트도 모든 핵심 기능을 씁니다. (명세 §9.3)
-  accountType: "guest",
+  // demo | social. demo는 서버가 제공하는 공용 체험 계정입니다.
+  accountType: "demo",
   // 소셜 사용자만 값이 있습니다. 마이페이지에서만 표시합니다. (명세 §9.4)
   email: "",
   provider: "",
@@ -72,6 +72,29 @@ const LEGACY_CATEGORY_MAP = {
   hotspring: "nature",
   nightview: "culture",
 };
+
+// 화면 카테고리를 현재 서버의 6개 카테고리 코드로 되돌리는 표입니다.
+const SERVER_CATEGORY_MAP = {
+  all: "all",
+  science: "science",
+  nature: "nature",
+  heritage: "downtown",
+  culture: "nightview",
+  market: "market",
+  tashu: "mobility",
+};
+
+// 현재 서버가 관심사로 저장하는 6개 카테고리입니다.
+const INTEREST_CATEGORIES = ["nature", "science", "downtown", "market", "mobility", "nightview"];
+
+// 계획 위치를 빠르게 정할 수 있는 대전 주요 지점입니다.
+const PLAN_LOCATION_PRESETS = [
+  { label: "대전역", lat: 36.3321, lng: 127.4344 },
+  { label: "유성온천역", lat: 36.3538, lng: 127.3412 },
+  { label: "국립중앙과학관", lat: 36.3752, lng: 127.3764 },
+  { label: "한밭수목원", lat: 36.3664, lng: 127.3881 },
+];
+
 
 // 최상위 다섯 화면의 메타데이터입니다. (명세 §7.1)
 // icon 값은 Material Symbols 리거처 이름이며 이모지를 쓰지 않습니다. (명세 §3.2)
@@ -474,9 +497,27 @@ const state = {
     expiresAt: "",
   },
   selectedCategory: "all",
+  currentCategory: "all",
+  plannedCategory: "all",
   location: { ...FALLBACK_LOCATION },
   user: { ...FALLBACK_USER },
+  plannedLocation: { ...FALLBACK_LOCATION, label: "계획 위치를 설정해주세요" },
   recommendations: [...FALLBACK_RECOMMENDATIONS],
+  preference: { categories: [], categoriesSetAt: "", isConfigured: false },
+  interestDraft: [],
+  interestMessage: "",
+  attractions: [],
+  // 관심 관광지를 한 번에 보여줄 개수입니다.
+  attractionLimit: 5,
+  attractionMessage: "",
+  authProviders: { naver: false, google: false },
+  sessionVersion: 0,
+  // 닉네임 중복 저장을 막는 현재 세션의 처리 상태입니다.
+  nicknamePending: false,
+  requestVersions: {
+    recommendation: 0, user: 0, preference: 0, attraction: 0, planSearch: 0, badges: 0, notes: 0, ggumdori: 0,
+  },
+
   badges: [...FALLBACK_BADGES],
   notes: [...FALLBACK_NOTES],
   notesSource: "fallback",
@@ -974,10 +1015,18 @@ function isUnauthorizedError(error) {
  */
 function resetExpiredSession(message = "세션이 만료되었습니다. 다시 동의 후 시작하세요.") {
   state.accessToken = "";
+  state.sessionVersion += 1;
   state.notes = [];
   state.notesSource = "api";
   state.notePhotos = {};
   state.noteDrafts = {};
+  state.badges = [];
+  state.ggumdori = [];
+  state.catalog = { earnedCount: 0, totalCount: 0, entries: [], nextCursor: "" };
+  state.preference = { categories: [], categoriesSetAt: "", isConfigured: false };
+  state.interestDraft = [];
+  state.attractions = [];
+  clearAccountActions();
   removeStorageValue(ACCESS_TOKEN_KEY);
   removeSessionValue(OAUTH_NONCE_KEY);
   resetLoggedOutNavigation();
@@ -994,10 +1043,14 @@ function resetExpiredSession(message = "세션이 만료되었습니다. 다시 
  * 호출 예시: fetchJson("/api/me")
  */
 async function fetchJson(path, options = {}) {
+  // 요청을 시작한 로그인 세션의 버전입니다.
+  const requestSessionVersion = state.sessionVersion;
+  // 이 요청의 인증 토큰입니다.
+  const requestAccessToken = state.accessToken;
   // API 요청에 보낼 헤더입니다.
   const headers = { Accept: "application/json", ...(options.headers || {}) };
-  if (state.accessToken) {
-    headers.Authorization = `Bearer ${state.accessToken}`;
+  if (requestAccessToken) {
+    headers.Authorization = `Bearer ${requestAccessToken}`;
   }
 
   // fetch에 전달할 기본 옵션입니다.
@@ -1012,13 +1065,59 @@ async function fetchJson(path, options = {}) {
   if (!response.ok) {
     // 호출부에서 상태별로 처리할 수 있는 API 오류입니다.
     const error = await createApiError(response);
-    if (isUnauthorizedError(error) && state.accessToken) {
+    if (isUnauthorizedError(error) && requestAccessToken && requestAccessToken === state.accessToken && requestSessionVersion === state.sessionVersion) {
       resetExpiredSession();
     }
     throw error;
   }
 
   return response.json();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 요청을 시작한 로그인 세션이 현재도 유효한지 검사하는 함수.
+ * 역할: 비동기 작업이 계정 전환 뒤 상태를 변경하거나 후속 요청을 보내는 것을 막습니다.
+ * 호출 예시: const isCurrentSession = captureSession();
+ */
+function captureSession() {
+  // 작업을 시작한 계정의 토큰과 세션 버전입니다.
+  const accessToken = state.accessToken;
+  const sessionVersion = state.sessionVersion;
+  return () => Boolean(accessToken) && accessToken === state.accessToken && sessionVersion === state.sessionVersion;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 로그아웃과 만료 시 계정에 속한 처리 상태와 열린 기록을 정리합니다.
+ * 호출 예시: clearAccountActions();
+ */
+function clearAccountActions() {
+  state.pendingQuestActions = {};
+  state.evidenceUploads = {};
+  state.questStatuses = {};
+  state.recommendations = [];
+  state.nicknamePending = false;
+  state.selectedGgumdoriId = "";
+  state.interestDraft = [];
+  state.interestMessage = "";
+  state.attractionMessage = "";
+  state.recordMessage = "";
+  state.actionDialog = null;
+  state.recordSheetOpen = false;
+  state.recordDetailId = "";
+  state.catalogSheetId = "";
+  state.questSheetId = "";
+  state.planSheetOpen = false;
+  state.weatherSheetOpen = false;
+  stopPhotoCamera();
+  if (state.photo.pickedImageUrl) {
+    URL.revokeObjectURL(state.photo.pickedImageUrl);
+  }
+  state.photo = createEmptyPhotoState();
+  renderPhotoSheet();
+  renderRecordSheet();
 }
 
 /**
@@ -1092,6 +1191,7 @@ function startLocalDemoSession() {
   state.accessToken = "design-preview";
   writeStorageValue(ACCESS_TOKEN_KEY, state.accessToken);
   setConsentPanelVisible(false);
+  state.sessionVersion += 1;
   setConsentMessage("");
   updateSystemStatus(false, "체험 모드");
   renderAll();
@@ -1167,6 +1267,7 @@ async function handleDemoLogin() {
         locationConsent: true,
       }),
     });
+    state.sessionVersion += 1;
     state.accessToken = payload.accessToken;
     writeStorageValue(ACCESS_TOKEN_KEY, payload.accessToken);
     setConsentMessage("");
@@ -1176,6 +1277,39 @@ async function handleDemoLogin() {
   } catch (error) {
     setConsentMessage("로그인 처리에 실패했습니다. 잠시 뒤 다시 시도하세요.");
   }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: OAuth provider 설정 조회 Promise.
+ * 역할: 서버에 설정된 로그인 방식만 활성화하고 준비되지 않은 버튼은 정확히 표시합니다.
+ * 호출 예시: await loadAuthProviders()
+ */
+async function loadAuthProviders() {
+  try {
+    const payload = await fetchJson("/api/auth/providers");
+    const providers = Array.isArray(payload?.providers) ? payload.providers : [];
+    state.authProviders = {
+      naver: Boolean(providers.find((item) => item.id === "naver")?.configured),
+      google: Boolean(providers.find((item) => item.id === "google")?.configured),
+    };
+  } catch (error) {
+    state.authProviders = { naver: false, google: false };
+  }
+
+  [
+    ["naver", "#naver-login-button", "네이버"],
+    ["google", "#google-login-button", "구글"],
+  ].forEach(([provider, selector, label]) => {
+    const button = select(selector);
+    if (!button || IS_HOSTED_STATIC_PREVIEW) {
+      return;
+    }
+    const configured = state.authProviders[provider];
+    button.disabled = !configured;
+    button.textContent = configured ? `${label}로 시작` : `${label} 로그인 · 준비 중`;
+    button.title = configured ? "" : "서버 OAuth 설정이 완료된 뒤 사용할 수 있습니다.";
+  });
 }
 
 /**
@@ -1268,29 +1402,17 @@ async function redeemOAuthCode(oauthCode) {
       throw new Error("missing access token");
     }
     writeStorageValue(ACCESS_TOKEN_KEY, state.accessToken);
+    state.sessionVersion += 1;
     removeSessionValue(OAUTH_NONCE_KEY);
 
-    // 연결에 성공했으므로 이제 게스트 토큰을 버려도 됩니다. (명세 §9.3)
-    // 승계 대상(퀘스트·완료 기록·뱃지·꿈돌이·대표·XP·기록·설정)은 서버가 합집합으로 병합합니다.
-    const wasLinking = readSessionValue(OAUTH_INTENT_KEY) === "link";
-    removeStorageValue(GUEST_TOKEN_KEY);
-    removeSessionValue(OAUTH_INTENT_KEY);
     state.accountLinkState = "idle";
-    state.accountMessage = wasLinking ? "계정을 연결했어요. 기록을 그대로 가져왔습니다." : "";
+    state.accountMessage = "소셜 계정으로 로그인했습니다.";
 
     setConsentPanelVisible(false);
     setConsentMessage("");
     await loadInitialData();
   } catch (error) {
     removeSessionValue(OAUTH_NONCE_KEY);
-    // 승계 시도였다면 게스트 세션을 되살립니다. 연결 성공 전에는 게스트 데이터를 버리지 않습니다. (명세 §9.3)
-    if (restoreGuestSession()) {
-      state.accountLinkState = "failed";
-      state.accountMessage = "계정 연결에 실패했어요. 기록은 그대로 있으니 다시 시도해주세요.";
-      setConsentPanelVisible(false);
-      renderAll();
-      return;
-    }
     state.accessToken = "";
     removeStorageValue(ACCESS_TOKEN_KEY);
     setConsentPanelVisible(true);
@@ -1475,7 +1597,7 @@ function getTourApiStatusText() {
 
   // fallback 상태별 사용자 안내 문구입니다.
   const fallbackMessages = {
-    "fallback:not_configured": "TOURAPI_SERVICE_KEY가 없어 대전 fallback 장소 데이터로 표시합니다.",
+    "fallback:not_configured": "현재 기본 대전 장소 정보를 표시합니다.",
     "fallback:circuit_open": "TourAPI 연속 실패로 잠시 대전 fallback 장소 데이터로 표시합니다.",
     "fallback:empty": "TourAPI 주변 장소 결과가 비어 있어 대전 fallback 장소 데이터로 표시합니다.",
     "fallback:upstream_4xx": "TourAPI 요청이 인증 또는 요청 오류를 반환해 대전 fallback 장소 데이터로 표시합니다.",
@@ -1518,8 +1640,8 @@ function normalizeRecommendation(rawItem) {
     roadAddress: String(
       item.roadAddress || place.roadAddress || item.address || place.address || quest.roadAddress || "",
     ),
-    placeLatitude: toNumber(item.latitude || place.latitude, state.location.lat),
-    placeLongitude: toNumber(item.longitude || place.longitude, state.location.lng),
+    placeLatitude: toNumber(item.latitude || place.latitude, getRecommendationLocation().lat),
+    placeLongitude: toNumber(item.longitude || place.longitude, getRecommendationLocation().lng),
     category: normalizeCategory(
       item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
     ),
@@ -1663,6 +1785,68 @@ function normalizeCategory(rawCategory) {
 }
 
 /**
+ * 입력: 화면 카테고리 코드.
+ * 출력: 현재 서버 카테고리 코드 또는 null.
+ * 역할: 지원하지 않는 새 분류를 전체 조회로 바꾸지 않고 명시적으로 막습니다.
+ * 호출 예시: toServerCategory("heritage")
+ */
+function toServerCategory(category) {
+  return SERVER_CATEGORY_MAP[String(category || "").toLowerCase()] || null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 현재 탐색 모드의 추천 기준 위치.
+ * 역할: 현위치와 계획 위치를 서로 덮어쓰지 않고 분리합니다.
+ * 호출 예시: const location = getRecommendationLocation()
+ */
+function getRecommendationLocation() {
+  return state.explorationMode === "planned" ? state.plannedLocation : state.location;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: recommendation API가 받는 모드 값.
+ * 역할: 화면의 planned/current 값을 서버의 planning/nearby 계약으로 변환합니다.
+ * 호출 예시: query.set("mode", getApiRecommendationMode())
+ */
+function getApiRecommendationMode() {
+  return state.explorationMode === "planned" ? "planning" : "nearby";
+}
+
+/**
+ * 입력: preference API 원본 응답.
+ * 출력: 화면에서 사용하는 관심사 상태.
+ * 역할: 기존 6개 서버 카테고리만 보존하고 설정 여부를 함께 정규화합니다.
+ * 호출 예시: state.preference = normalizePreference(payload)
+ */
+function normalizePreference(payload) {
+  const preference = payload?.preference || payload?.data?.preference || payload?.data || payload || {};
+  const categories = Array.isArray(preference.categories)
+    ? preference.categories.filter((category) => INTEREST_CATEGORIES.includes(category))
+    : [];
+
+  return {
+    categories,
+    categoriesSetAt: String(preference.categoriesSetAt || preference.categories_set_at || ""),
+    isConfigured: Boolean(preference.isConfigured ?? preference.is_configured ?? categories.length > 0),
+  };
+}
+
+/**
+ * 입력: 요청 종류, 요청 번호, 시작 세션과 선택적 모드.
+ * 출력: 응답이 아직 최신인지 여부.
+ * 역할: 계정이나 탐색 모드가 바뀐 뒤 도착한 이전 응답을 무시합니다.
+ * 호출 예시: if (!isCurrentRequest("user", id, session)) return
+ */
+function isCurrentRequest(kind, requestId, sessionVersion, mode = null) {
+  if (state.requestVersions[kind] !== requestId || state.sessionVersion !== sessionVersion) {
+    return false;
+  }
+  return mode === null || state.explorationMode === mode;
+}
+
+/**
  * 입력: 서버의 questType 또는 v1 verificationType 문구.
  * 출력: 인증 5종 키.
  * 역할: 인증 방식이 없거나 한국어 문구로만 온 데이터를 v2 키로 맞춘다. (명세 §4.3)
@@ -1711,6 +1895,8 @@ function normalizeBadge(rawBadge) {
     progressXp: toNumber(badge.progressXp || badge.xp, 0),
     requiredXp: toNumber(badge.requiredXp || badge.definition?.requiredXp, 300),
     earnedAt: badge.earnedAt || null,
+    earned: Boolean(badge.earned ?? badge.earnedAt),
+    imageRef: String(badge.imageRef || badge.image_ref || ""),
   };
 }
 
@@ -1762,6 +1948,8 @@ function normalizeGgumdori(rawGgumdori) {
     name: ggumdori.name || ggumdori.variantName || "꿈돌이",
     themeCategory: ggumdori.themeCategory || ggumdori.category || "all",
     unlocked: Boolean(ggumdori.unlocked ?? ggumdori.earnedAt),
+    tier: toNumber(ggumdori.tier, 1),
+    unlockedAt: String(ggumdori.unlockedAt || ggumdori.unlocked_at || ""),
     condition: ggumdori.condition || ggumdori.unlockCondition || "뱃지 조건 달성",
     imageRef: ggumdori.imageRef || ggumdori.imageUrl || "",
   };
@@ -2565,7 +2753,7 @@ function renderHomeMetrics() {
 
   // 표시할 지표 목록입니다.
   const metrics = [
-    ["📍", state.location.label.replace(" 기준", ""), "현재 위치 후보"],
+    ["📍", getRecommendationLocation().label.replace(" 기준", ""), state.explorationMode === "planned" ? "계획 위치" : "현재 위치 후보"],
     ["🏷️", `${earnedBadges.length}개`, "획득 뱃지"],
     ["🗺️", `${state.recommendations.length}개`, "주변 퀘스트"],
     ["🎁", getRecommendationDataLabel(), "추천 데이터"],
@@ -2673,7 +2861,7 @@ function renderRecommendationMeta() {
 
   if (mapCopy) {
     const mapStatus = state.naverMapConfigured ? "NAVER Dynamic Map 연결 준비" : "목업 지도 표시";
-    mapCopy.textContent = `${state.location.label} · ${state.location.lat.toFixed(4)}, ${state.location.lng.toFixed(4)} · ${mapStatus}`;
+    mapCopy.textContent = `${getRecommendationLocation().label} · ${getRecommendationLocation().lat.toFixed(4)}, ${getRecommendationLocation().lng.toFixed(4)} · ${mapStatus}`;
   }
 
   // 지도 제공자 상태 요소입니다.
@@ -3247,35 +3435,41 @@ function createStatCell(label, value) {
 /**
  * 입력: 추천 항목과 진행 상태.
  * 출력: 보상 쌍 패널 요소.
- * 역할: 퀘스트에 1:1:1 로 연결된 뱃지와 꿈돌이를 보여 준다. (명세 §5.1, §10 S06)
+ * 역할: 누적 카테고리 XP 정책과 서버에서 확인한 보유 보상을 보여 줍니다.
  * 호출 예시: createRewardPairPanel(quest, "recommended")
  */
-function createRewardPairPanel(quest, questStatus) {
-  // 완료한 퀘스트인지 여부입니다. 완료 전에는 꿈돌이를 무채색으로 보여 줍니다.
-  const isEarned = questStatus === "completed" || questStatus === "done";
+function createRewardPairPanel(quest, _questStatus) {
+  const category = normalizeCategory(quest.category);
+  const badge = state.badges
+    .filter((item) => normalizeCategory(item.category) === category && (item.earned || item.earnedAt))
+    .sort((left, right) => right.tier - left.tier)[0];
+  const ggumdori = state.ggumdori
+    .filter((item) => normalizeCategory(item.themeCategory) === category && item.unlocked)
+    .sort((left, right) => right.tier - left.tier)[0];
 
-  // 보상 패널입니다.
   const panel = createElement("section", "px-panel");
   const heading = createElement("div", "context-row");
   heading.append(
-    createElement("h3", "section-title", "클리어 보상"),
+    createElement("h3", "section-title", "카테고리 진행 보상"),
     createElement("span", "px-tag px-tag--ink", `+${quest.rewardXp} XP`),
   );
   panel.append(heading);
-
-  // 뱃지와 꿈돌이를 나란히 두는 영역입니다.
-  const pair = createElement("div", "reward-pair");
-  pair.append(
-    createRewardSlot("미니 뱃지", quest.badgeName, quest.rewardPair?.badgeImageRef, isEarned, quest.category),
-    createRewardSlot(
-      "꿈돌이",
-      quest.rewardPair?.ggumdoriName || "고유 꿈돌이",
-      quest.rewardPair?.ggumdoriStillImageRef,
-      isEarned,
-      quest.category,
-    ),
+  panel.append(
+    createElement("p", "data-note", "완료 XP가 카테고리에 누적되며 단계 조건을 달성할 때 뱃지와 꿈돌이가 해금됩니다."),
   );
-  panel.append(pair);
+
+  if (badge || ggumdori) {
+    const pair = createElement("div", "reward-pair");
+    if (badge) {
+      pair.append(createRewardSlot("보유 뱃지", badge.name, badge.imageRef || "", true, category));
+    }
+    if (ggumdori) {
+      pair.append(createRewardSlot("보유 꿈돌이", ggumdori.name, ggumdori.imageRef, true, category));
+    }
+    panel.append(pair);
+  } else {
+    panel.append(createElement("p", "data-note", "현재 이 카테고리에서 해금한 보상은 없습니다."));
+  }
 
   return panel;
 }
@@ -3814,7 +4008,7 @@ function renderQuestsContext() {
   const isPlanned = state.explorationMode === "planned";
 
   // 기준 위치 이름입니다.
-  const placeLabel = state.location.label || "대전광역시청";
+  const placeLabel = getRecommendationLocation().label || "대전광역시청";
 
   if (isPlanned) {
     contextText.textContent = `계획 중 · ${placeLabel} · ${formatContextDate(getQuestReferenceDate())} 기준`;
@@ -4048,9 +4242,9 @@ function renderMapBackground(canvas) {
  */
 function renderMockMapView(canvas, places) {
   // 위도 목록입니다.
-  const latitudes = places.map((item) => item.placeLatitude).concat(state.location.lat);
+  const latitudes = places.map((item) => item.placeLatitude).concat(getRecommendationLocation().lat);
   // 경도 목록입니다.
-  const longitudes = places.map((item) => item.placeLongitude).concat(state.location.lng);
+  const longitudes = places.map((item) => item.placeLongitude).concat(getRecommendationLocation().lng);
   // 지도 좌표 범위입니다.
   const minLatitude = Math.min(...latitudes);
   const maxLatitude = Math.max(...latitudes);
@@ -4067,9 +4261,9 @@ function renderMockMapView(canvas, places) {
 
   // 현재 위치 표시 요소입니다.
   const currentLocationMarker = createElement("span", "current-location-marker");
-  currentLocationMarker.title = state.location.label;
-  currentLocationMarker.style.left = `${toMapPercent(state.location.lng, minLongitude, maxLongitude)}%`;
-  currentLocationMarker.style.top = `${toMapPercent(state.location.lat, minLatitude, maxLatitude, true)}%`;
+  currentLocationMarker.title = getRecommendationLocation().label;
+  currentLocationMarker.style.left = `${toMapPercent(getRecommendationLocation().lng, minLongitude, maxLongitude)}%`;
+  currentLocationMarker.style.top = `${toMapPercent(getRecommendationLocation().lat, minLatitude, maxLatitude, true)}%`;
   canvas.append(currentLocationMarker);
 
   places.forEach((place) => {
@@ -4101,9 +4295,12 @@ async function renderNaverMapView(canvas, places) {
   }
 
   await loadNaverMapsSdk(state.naverMapConfig.keyId);
+  if (places !== state.recommendations) {
+    return;
+  }
 
   // 지도 중심 좌표입니다.
-  const center = new window.naver.maps.LatLng(state.location.lat, state.location.lng);
+  const center = new window.naver.maps.LatLng(getRecommendationLocation().lat, getRecommendationLocation().lng);
   canvas.classList.remove("is-mock");
   canvas.classList.add("is-naver");
 
@@ -4119,6 +4316,12 @@ async function renderNaverMapView(canvas, places) {
       zoomControlOptions: {
         position: window.naver.maps.Position.TOP_RIGHT,
       },
+    });
+    window.naver.maps.Event.addListener(state.naverMapInstance, "click", (event) => {
+      if (state.explorationMode !== "planned") {
+        return;
+      }
+      setPlanningLocation(event.coord.lat(), event.coord.lng(), "지도에서 선택한 위치");
     });
   } else {
     state.naverMapInstance.setCenter(center);
@@ -4141,7 +4344,7 @@ function syncNaverPositionMarker() {
   }
 
   // 현재 위치 좌표입니다.
-  const position = new window.naver.maps.LatLng(state.location.lat, state.location.lng);
+  const position = new window.naver.maps.LatLng(getRecommendationLocation().lat, getRecommendationLocation().lng);
 
   if (state.naverPositionMarker) {
     state.naverPositionMarker.setPosition(position);
@@ -4242,7 +4445,7 @@ function renderMapView() {
   }
 
   // 지도에 표시할 추천 항목입니다.
-  const places = state.recommendations.length > 0 ? state.recommendations : [...FALLBACK_RECOMMENDATIONS];
+  const places = state.recommendations;
 
   if (!places.some((item) => item.instanceId === state.selectedMapInstanceId)) {
     state.selectedMapInstanceId = places[0]?.instanceId || "";
@@ -4271,10 +4474,15 @@ function renderMapView() {
 
   if (selectedPlace) {
     detail.append(createMapDetailCard(selectedPlace));
+  } else {
+    detail.append(createElement("p", "empty-state", "이 위치에는 추천 퀘스트가 없습니다."));
   }
 
   if (state.naverMapConfig.dynamicMapConfigured && state.naverMapConfig.keyId && state.naverMapLoadState !== "failed") {
     renderNaverMapView(canvas, places).catch(() => {
+      if (places !== state.recommendations) {
+        return;
+      }
       state.naverMapLoadState = "failed";
       state.naverMapConfigured = false;
       renderMockMapView(canvas, places);
@@ -4378,6 +4586,8 @@ async function requestNotePhoto(note, shouldRender = false) {
     return;
   }
 
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
   // 동시에 진행된 요청 중 최신 응답만 반영하기 위한 요청 식별자입니다.
   const requestId = createClientId("note-photo");
   state.notePhotos[note.id] = {
@@ -4402,7 +4612,11 @@ async function requestNotePhoto(note, shouldRender = false) {
     // 응답을 반영할 현재 사진 요청 상태입니다.
     const currentPhoto = state.notePhotos[note.id];
 
-    if (currentPhoto?.requestId !== requestId) {
+    if (
+      currentPhoto?.requestId !== requestId ||
+      sessionVersion !== state.sessionVersion ||
+      accessToken !== state.accessToken
+    ) {
       return;
     }
     if (!payload.url) {
@@ -4420,7 +4634,12 @@ async function requestNotePhoto(note, shouldRender = false) {
   } catch (error) {
     // 실패 응답을 반영할 현재 사진 요청 상태입니다.
     const currentPhoto = state.notePhotos[note.id];
-    if (isUnauthorizedError(error) || currentPhoto?.requestId !== requestId) {
+    if (
+      isUnauthorizedError(error) ||
+      currentPhoto?.requestId !== requestId ||
+      sessionVersion !== state.sessionVersion ||
+      accessToken !== state.accessToken
+    ) {
       return;
     }
 
@@ -4432,7 +4651,7 @@ async function requestNotePhoto(note, shouldRender = false) {
       error: "사진을 불러오지 못했습니다.",
     };
   } finally {
-    if (shouldRender && state.accessToken) {
+    if (shouldRender && accessToken && accessToken === state.accessToken && sessionVersion === state.sessionVersion) {
       renderNotes();
     }
   }
@@ -4574,6 +4793,8 @@ function createNoteEntryDisplay(note) {
  * 호출 예시: await saveNoteEntry("note_x")
  */
 async function saveNoteEntry(noteId) {
+  // 계정 전환 후에는 저장 결과를 화면에 반영하지 않습니다.
+  const isCurrentSession = captureSession();
   // 저장 대상 수첩 기록입니다.
   const note = state.notes.find((item) => item.id === noteId);
   // 저장 대상의 현재 편집 상태입니다.
@@ -4629,6 +4850,9 @@ async function saveNoteEntry(noteId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ entryType, title, body, rating }),
     });
+    if (!isCurrentSession()) {
+      return;
+    }
     // 서버가 반환한 최신 수첩 기록입니다.
     const updatedRawNote = payload.note || payload.data;
     if (!updatedRawNote || typeof updatedRawNote !== "object") {
@@ -4636,6 +4860,7 @@ async function saveNoteEntry(noteId) {
     }
     // 화면 구조로 정규화한 최신 수첩 기록입니다.
     const updatedNote = normalizeNote(updatedRawNote);
+    state.requestVersions.notes += 1;
     state.notes = state.notes.map((item) => (item.id === noteId ? updatedNote : item));
     state.noteDrafts[noteId] = {
       ...createNoteDraft(updatedNote),
@@ -4644,7 +4869,7 @@ async function saveNoteEntry(noteId) {
       tone: "success",
     };
   } catch (error) {
-    if (isUnauthorizedError(error)) {
+    if (!isCurrentSession() || isUnauthorizedError(error)) {
       return;
     }
 
@@ -4654,7 +4879,7 @@ async function saveNoteEntry(noteId) {
       : "기록을 저장하지 못했습니다. 잠시 뒤 다시 시도하세요.";
     draft.tone = "error";
   } finally {
-    if (state.accessToken) {
+    if (isCurrentSession()) {
       renderNotes();
     }
   }
@@ -4988,6 +5213,42 @@ function normalizeCatalogPage(payload) {
 
 /**
  * 입력: 없음.
+ * 출력: 서버의 꿈돌이와 뱃지 상태로 만든 도감 페이지.
+ * 역할: 서버 보유 variant id와 해금 상태를 정본으로 사용합니다.
+ * 호출 예시: state.catalog = buildServerCatalog()
+ */
+function buildServerCatalog() {
+  const entries = state.ggumdori.map((item, index) => {
+    const category = normalizeCategory(item.themeCategory);
+    const badge = state.badges.find(
+      (candidate) => normalizeCategory(candidate.category) === category && candidate.tier === item.tier,
+    );
+
+    return normalizeCatalogEntry({
+      questId: "",
+      ggumdoriId: item.id,
+      ggumdoriName: item.name,
+      ggumdoriStillImageRef: item.imageRef,
+      badgeName: badge?.name || CATEGORY_LABELS[category] || "탐험 뱃지",
+      category,
+      state: item.unlocked ? "earned" : "locked",
+      unlockedAt: item.unlockedAt || "",
+      equipped: item.id === state.selectedGgumdoriId,
+      unlockDescription: item.condition,
+      catalogOrder: index,
+    });
+  });
+
+  return {
+    earnedCount: entries.filter((item) => item.state === "earned").length,
+    totalCount: entries.length,
+    entries,
+    nextCursor: "",
+  };
+}
+
+/**
+ * 입력: 없음.
  * 출력: 목업 도감 페이지.
  * 역할: 서버가 없을 때 퀘스트의 rewardPair 로 도감을 만든다. 도감은 퀘스트에서 파생된다. (명세 §5.1, §5.2)
  * 호출 예시: state.catalog = buildFallbackCatalog()
@@ -5067,29 +5328,8 @@ function buildFallbackCatalog() {
  * 역할: /api/catalog 를 호출하고 실패하면 퀘스트에서 파생한 도감을 쓴다. (명세 §5.2)
  * 호출 예시: await loadCatalog()
  */
-async function loadCatalog(cursor = "") {
-  try {
-    // 도감 API 응답입니다. 커서가 있으면 이어서 받습니다. (명세 §10 S09)
-    const payload = await fetchJson(`/api/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
-    // 정규화한 도감 페이지입니다.
-    const page = normalizeCatalogPage(payload);
-
-    if (page.entries.length === 0 && !cursor) {
-      state.catalog = buildFallbackCatalog();
-      return;
-    }
-
-    state.catalog = cursor
-      ? { ...page, entries: [...state.catalog.entries, ...page.entries] }
-      : page;
-  } catch (error) {
-    // 이어 받기에 실패하면 이미 받은 목록을 그대로 둡니다.
-    if (!cursor) {
-      state.catalog = buildFallbackCatalog();
-    }
-  }
-
-  syncGgumdoriFromCatalog();
+async function loadCatalog(_cursor = "") {
+  state.catalog = buildServerCatalog();
 }
 
 /**
@@ -5482,17 +5722,17 @@ function renderCatalogSheet() {
     body.append(questPanel);
   }
 
-  // 미획득은 정확한 해금 조건을, 획득은 완료 기록을 보여 줍니다. (명세 §10 S10)
+  // 미획득은 해금 조건을, 보유 보상은 서버에 기록된 획득일을 보여 줍니다.
   const conditionPanel = createElement("section", "px-panel");
-  conditionPanel.append(createElement("h3", "section-title", isEarned ? "완료 기록" : "해금 조건"));
+  conditionPanel.append(createElement("h3", "section-title", isEarned ? "획득 기록" : "해금 조건"));
   conditionPanel.append(
     createElement(
       "p",
       "px-body",
       isEarned
         ? entry.unlockedAt
-          ? `${formatDate(entry.unlockedAt)}에 이 퀘스트를 완료했어요.`
-          : "이 퀘스트를 완료해 얻었어요."
+          ? `${formatDate(entry.unlockedAt)}에 이 꿈돌이를 획득했어요.`
+          : "보유한 꿈돌이입니다."
         : entry.unlockDescription,
     ),
   );
@@ -5560,24 +5800,31 @@ function renderCatalogSheet() {
  * 역할: 홈 대표 꿈돌이를 바꾸고 즉시 반영한다. (명세 §5.4, §10 S10)
  * 호출 예시: setFeaturedGgumdori(entry)
  */
-function setFeaturedGgumdori(entry) {
+async function setFeaturedGgumdori(entry) {
+  // 저장 중 계정이 바뀌면 결과 안내도 새 화면에 남기지 않습니다.
+  const isCurrentSession = captureSession();
   if (entry.state !== "earned") {
+    return;
+  }
+
+  state.catalogMessage = "대표 꿈돌이를 저장하는 중입니다.";
+  renderCatalogSheet();
+  const saved = await saveFeaturedGgumdori(entry.ggumdoriId);
+  if (!isCurrentSession()) {
+    return;
+  }
+  if (!saved) {
+    state.catalogMessage = "대표 꿈돌이를 저장하지 못했어요.";
+    renderCatalogSheet();
     return;
   }
 
   state.selectedGgumdoriId = entry.ggumdoriId;
   writeStorageValue(SELECTED_GGUMDORI_KEY, entry.ggumdoriId);
-
-  // 도감 항목의 대표 표시도 함께 맞춥니다.
   state.catalog.entries.forEach((item) => {
     item.equipped = item.ggumdoriId === entry.ggumdoriId;
   });
-
-  state.catalogMessage = "홈 대표 꿈돌이를 바꿨어요";
-
-  // 서버에도 저장합니다. 실패해도 화면은 이미 바뀐 상태를 유지합니다. (명세 §5.4)
-  saveFeaturedGgumdori(entry.ggumdoriId);
-
+  state.catalogMessage = "홈 대표 꿈돌이를 바꿨어요.";
   renderAll();
 }
 
@@ -5588,15 +5835,20 @@ function setFeaturedGgumdori(entry) {
  * 호출 예시: saveFeaturedGgumdori("science-1")
  */
 async function saveFeaturedGgumdori(ggumdoriId) {
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
   try {
     await fetchJson("/api/me/ggumdori", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selectedGgumdoriId: ggumdoriId }),
     });
+    return sessionVersion === state.sessionVersion && accessToken === state.accessToken;
   } catch (error) {
-    // 저장에 실패해도 로컬 선택은 유지합니다. 다음 로드에서 서버값으로 덮어씁니다.
-    updateSystemStatus(state.apiHealthy, "대표 꿈돌이를 서버에 저장하지 못했어요");
+    if (sessionVersion === state.sessionVersion && accessToken === state.accessToken) {
+      updateSystemStatus(state.apiHealthy, "대표 꿈돌이를 서버에 저장하지 못했어요");
+    }
+    return false;
   }
 }
 
@@ -5674,32 +5926,59 @@ async function confirmNickname() {
     return;
   }
 
-  state.user = { ...state.user, nickname };
+  if (!await saveNickname(nickname)) {
+    return;
+  }
   state.accountStep = "consent";
   setConsentPanelVisible(false);
   setConsentMessage("");
   renderAll();
-
-  // 서버에도 남깁니다. 실패해도 로컬 표시는 유지합니다.
-  await saveNickname(nickname);
 }
 
 /**
  * 입력: 닉네임 문자열.
- * 출력: 저장 Promise.
- * 역할: 닉네임을 서버에 기록한다. (명세 §9.4)
+ * 출력: 현재 세션의 저장 성공 여부 Promise.
+ * 역할: 서버가 저장을 확인한 뒤 닉네임과 성공 안내를 갱신합니다.
  * 호출 예시: await saveNickname("씩씩한 꿈돌이")
  */
 async function saveNickname(nickname) {
+  // 닉네임 저장을 시작한 계정의 유효성을 확인합니다.
+  const isCurrentSession = captureSession();
+  if (!isCurrentSession() || state.nicknamePending) {
+    return false;
+  }
+  state.nicknamePending = true;
+  state.accountMessage = "닉네임을 저장하는 중입니다.";
   try {
-    await fetchJson("/api/me/nickname", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nickname }),
-    });
+    // 명시적 디자인 미리보기 이외에는 실제 서버의 저장 응답이 필요합니다.
+    const payload = IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW
+      ? { user: { nickname } }
+      : await fetchJson("/api/me/nickname", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname }),
+      });
+    if (!isCurrentSession()) {
+      return false;
+    }
+    if (!payload.user?.nickname) {
+      throw new Error("missing saved nickname");
+    }
+    state.requestVersions.user += 1;
+    state.user = { ...state.user, nickname: payload.user.nickname };
+    state.accountMessage = "닉네임을 바꿨어요.";
+    return true;
   } catch (error) {
-    // 닉네임은 중복을 허용하므로 실패해도 화면을 되돌리지 않습니다.
-    updateSystemStatus(state.apiHealthy, "닉네임을 서버에 저장하지 못했어요");
+    if (isCurrentSession()) {
+      state.accountMessage = "닉네임을 저장하지 못했어요. 20자 이내로 입력하고 다시 시도해주세요.";
+      setConsentMessage(state.accountMessage);
+      renderAccountPanel();
+    }
+    return false;
+  } finally {
+    if (isCurrentSession()) {
+      state.nicknamePending = false;
+    }
   }
 }
 
@@ -5710,21 +5989,96 @@ async function saveNickname(nickname) {
  * 호출 예시: await startAccountLink("naver")
  */
 async function startAccountLink(provider) {
-  if (state.user.accountType === "social") {
+  if (state.user.accountType === "social" || !state.authProviders[provider]) {
+    state.accountMessage = state.authProviders[provider]
+      ? ""
+      : "이 로그인 방식은 서버 설정이 완료된 뒤 사용할 수 있어요.";
+    renderAccountPanel();
     return;
   }
 
-  // 연결이 실패해도 되돌아갈 현재 게스트 토큰입니다. 성공해야만 지웁니다. (명세 §9.3)
-  if (state.accessToken) {
-    writeStorageValue(GUEST_TOKEN_KEY, state.accessToken);
-  }
-  writeSessionValue(OAUTH_INTENT_KEY, "link");
-
   state.accountLinkState = "pending";
-  state.accountMessage = "계정을 연결하는 중입니다. 기록은 그대로 유지됩니다.";
+  state.accountMessage = "새 계정으로 로그인합니다. 공용 체험 기록은 이전되지 않습니다.";
   renderAccountPanel();
-
   await handleOAuthLogin(provider);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 관심사 저장과 대전 전체 관광지 조회 패널.
+ * 역할: 기존 6개 관심사를 마이페이지의 기존 시각 스타일로 제공합니다.
+ * 호출 예시: panel.append(renderInterestSettings())
+ */
+function renderInterestSettings() {
+  const section = createElement("div", "account-field");
+  section.append(createElement("span", "account-field__label", "관심사"));
+  section.append(
+    createElement("p", "data-note", "관심사는 주변 추천과 대전 전체 관광지 탐색에 사용합니다."),
+  );
+
+  const labels = {
+    nature: "자연·산책",
+    science: "과학·우주",
+    downtown: "원도심·역사",
+    market: "시장·상권",
+    mobility: "이동·타슈",
+    nightview: "문화·예술(현 단계 야경)",
+  };
+  const chips = createElement("div", "chip-row");
+  INTEREST_CATEGORIES.forEach((category) => {
+    const active = state.interestDraft.includes(category);
+    const button = createElement("button", `chip-button${active ? " is-active" : ""}`, labels[category]);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(active));
+    button.addEventListener("click", () => {
+      state.interestDraft = active
+        ? state.interestDraft.filter((item) => item !== category)
+        : [...state.interestDraft, category];
+      renderAccountPanel();
+    });
+    chips.append(button);
+  });
+  section.append(chips);
+
+  const actions = createElement("div", "account-field__controls");
+  const saveButton = createElement("button", "px-button px-button--primary", "관심사 저장");
+  saveButton.type = "button";
+  saveButton.addEventListener("click", savePreferences);
+  const attractionsButton = createElement("button", "px-button px-button--ghost", "대전 전체 관광지");
+  attractionsButton.type = "button";
+  attractionsButton.addEventListener("click", loadAttractions);
+  actions.append(saveButton, attractionsButton);
+  section.append(actions);
+
+  if (state.interestMessage) {
+    section.append(createElement("p", "data-note", state.interestMessage));
+  }
+  if (state.attractionMessage) {
+    section.append(createElement("p", "data-note", state.attractionMessage));
+  }
+  state.attractions.slice(0, state.attractionLimit).forEach((item) => {
+    const button = createElement("button", "quest-line");
+    button.type = "button";
+    button.append(createElement("span", "quest-line__title", item.placeName));
+    button.disabled = !Number.isFinite(item.lat) || !Number.isFinite(item.lng);
+    button.addEventListener("click", () => {
+      state.plannedCategory = normalizeCategory(item.category);
+      setActiveView("home");
+      setPlanningLocation(item.lat, item.lng, item.placeName);
+    });
+    section.append(button);
+  });
+  if (state.attractions.length > state.attractionLimit) {
+    // 뒤쪽 추천도 기존 버튼 스타일로 계속 조회할 수 있습니다.
+    const moreButton = createElement("button", "px-button px-button--ghost", "관광지 더 보기");
+    moreButton.type = "button";
+    moreButton.addEventListener("click", () => {
+      state.attractionLimit += 5;
+      renderAccountPanel();
+    });
+    section.append(moreButton);
+  }
+  return section;
 }
 
 /**
@@ -5742,7 +6096,7 @@ function renderAccountPanel() {
   }
 
   // 게스트 계정인지 여부입니다.
-  const isGuest = state.user.accountType !== "social";
+  const isDemo = state.user.accountType !== "social";
 
   panel.replaceChildren();
 
@@ -5768,10 +6122,9 @@ function renderAccountPanel() {
       renderAccountPanel();
       return;
     }
-    state.user = { ...state.user, nickname: next };
-    state.accountMessage = "닉네임을 바꿨어요.";
-    renderAll();
-    await saveNickname(next);
+    if (await saveNickname(next)) {
+      renderAll();
+    }
   });
 
   nicknameControls.append(nicknameInput, nicknameSave);
@@ -5783,22 +6136,22 @@ function renderAccountPanel() {
   const accountRow = createElement("div", "account-field");
   accountRow.append(createElement("span", "account-field__label", "계정"));
 
-  if (isGuest) {
-    accountRow.append(createElement("p", "px-body", "연결된 계정 없음"));
+  if (isDemo) {
+    accountRow.append(createElement("p", "px-body", "공용 체험 계정"));
 
     // 게스트 승계 안내입니다. (명세 §9.3)
     accountRow.append(
       createElement(
         "p",
         "data-note",
-        "지금은 비회원이에요. 계정을 연결하면 지금까지의 퀘스트·도감·기록을 그대로 가져갑니다.",
+        "여러 사용자가 같은 체험 데이터를 사용합니다. 소셜 로그인 시 해당 계정의 기록을 불러옵니다.",
       ),
     );
     accountRow.append(
       createElement(
         "p",
         "data-note account-warning",
-        "계정을 연결하기 전에 브라우저 데이터를 지우면 기록을 되살리기 어려울 수 있어요.",
+        "공용 체험 계정의 기록은 소셜 계정으로 이전되지 않습니다.",
       ),
     );
 
@@ -5808,10 +6161,10 @@ function renderAccountPanel() {
       const button = createElement(
         "button",
         "px-button px-button--primary",
-        provider === "naver" ? "네이버로 연결" : "구글로 연결",
+        provider === "naver" ? "네이버 계정으로 로그인" : "구글 계정으로 로그인",
       );
       button.type = "button";
-      button.disabled = state.accountLinkState === "pending";
+      button.disabled = state.accountLinkState === "pending" || !state.authProviders[provider];
       button.addEventListener("click", () => startAccountLink(provider));
       linkRow.append(button);
     });
@@ -5824,6 +6177,7 @@ function renderAccountPanel() {
   }
 
   panel.append(accountRow);
+  panel.append(renderInterestSettings());
 
   // 연결 결과 등을 알리는 문구입니다.
   const message = createElement("p", "data-note account-message", state.accountMessage);
@@ -5836,9 +6190,10 @@ function renderAccountPanel() {
   logoutButton.type = "button";
   logoutButton.addEventListener("click", handleLogout);
 
-  const withdrawButton = createElement("button", "px-button px-button--danger", "회원 탈퇴");
+  const withdrawButton = createElement("button", "px-button px-button--danger", "회원 탈퇴 · 준비 중");
   withdrawButton.type = "button";
-  withdrawButton.addEventListener("click", handleWithdraw);
+  withdrawButton.disabled = true;
+  withdrawButton.title = "계정 삭제 기능은 현재 제공하지 않습니다.";
 
   dangerRow.append(logoutButton, withdrawButton);
   panel.append(dangerRow);
@@ -5865,6 +6220,17 @@ function getProviderLabel(provider) {
  */
 function handleLogout() {
   state.accessToken = "";
+  state.user = { ...FALLBACK_USER };
+  state.badges = [];
+  state.ggumdori = [];
+  state.catalog = { earnedCount: 0, totalCount: 0, entries: [], nextCursor: "" };
+  state.notes = [];
+  state.notePhotos = {};
+  state.noteDrafts = {};
+  state.preference = { categories: [], categoriesSetAt: "", isConfigured: false };
+  state.attractions = [];
+  state.sessionVersion += 1;
+  clearAccountActions();
   removeStorageValue(ACCESS_TOKEN_KEY);
   // 로그아웃은 연결 대기 중인 게스트 토큰까지 정리합니다.
   removeStorageValue(GUEST_TOKEN_KEY);
@@ -5883,20 +6249,8 @@ function handleLogout() {
  * 호출 예시: await handleWithdraw()
  */
 async function handleWithdraw() {
-  // 되돌릴 수 없는 동작이므로 명시적으로 확인받습니다.
-  if (!window.confirm("탈퇴하면 퀘스트 기록과 도감이 모두 사라지고 되돌릴 수 없어요. 계속할까요?")) {
-    return;
-  }
-
-  try {
-    await fetchJson("/api/me", { method: "DELETE" });
-  } catch (error) {
-    state.accountMessage = "탈퇴 처리에 실패했어요. 잠시 뒤 다시 시도해주세요.";
-    renderAccountPanel();
-    return;
-  }
-
-  handleLogout();
+  state.accountMessage = "계정 삭제 기능은 현재 제공하지 않습니다.";
+  renderAccountPanel();
 }
 
 /* ──────────────────────────────────────────────
@@ -5912,8 +6266,8 @@ async function handleWithdraw() {
  */
 function buildWeatherCacheKey() {
   // 소수 셋째 자리까지 자른 기준 좌표입니다. 미세한 GPS 흔들림으로 키가 바뀌지 않게 합니다.
-  const lat = toNumber(state.location.lat, 0).toFixed(3);
-  const lng = toNumber(state.location.lng, 0).toFixed(3);
+  const lat = toNumber(getRecommendationLocation().lat, 0).toFixed(3);
+  const lng = toNumber(getRecommendationLocation().lng, 0).toFixed(3);
   // 조회 기준 날짜입니다. 계획 모드면 선택일입니다.
   const date = getQuestReferenceDate();
   // KST 기준 조회 시각입니다. 시간이 바뀌면 다시 받습니다.
@@ -5960,41 +6314,16 @@ function normalizeWeather(payload) {
  * 역할: 현위치·오늘 또는 계획 위치·선택일의 날씨를 받는다. 실패해도 지도와 추천은 건드리지 않는다. (명세 §6.4)
  * 호출 예시: await loadWeather()
  */
-async function loadWeather(forceRefresh = false) {
-  // 이번 조회의 캐시 키입니다.
-  const cacheKey = buildWeatherCacheKey();
-
-  if (!forceRefresh && state.weather.cacheKey === cacheKey && state.weather.status === "ready") {
-    return;
-  }
-
-  state.weather = { ...state.weather, status: "loading", cacheKey };
-  renderWeather();
-
-  try {
-    // 날씨 API 응답입니다. 기준 좌표와 기준 날짜를 함께 보냅니다.
-    const payload = await fetchJson(
-      `/api/weather?lat=${encodeURIComponent(state.location.lat)}&lng=${encodeURIComponent(
-        state.location.lng,
-      )}&date=${encodeURIComponent(getQuestReferenceDate())}`,
-    );
-    // 정규화한 날씨 정보입니다.
-    const weather = normalizeWeather(payload);
-
-    state.weather = {
-      ...weather,
-      cacheKey,
-      // 예보 범위 밖이거나 값이 하나도 없으면 미제공으로 다룹니다. (명세 §6.4)
-      status:
-        weather.unavailable || (weather.temperatureC === null && weather.hourly.length === 0)
-          ? "unavailable"
-          : "ready",
-    };
-  } catch (error) {
-    // 날씨만 실패 상태로 두고 지도·추천은 그대로 둡니다. (명세 §6.4)
-    state.weather = { ...createEmptyWeather(), cacheKey, status: "failed" };
-  }
-
+async function loadWeather(_forceRefresh = false) {
+  state.weather = {
+    ...createEmptyWeather(),
+    status: "unavailable",
+    unavailable: true,
+    cacheKey: buildWeatherCacheKey(),
+    outdoorNote: state.explorationMode === "planned"
+      ? "계획 날짜는 일정 메모이며 현재 날씨·행사 조회에는 사용되지 않습니다."
+      : "날씨 연동은 준비 중입니다.",
+  };
   renderWeather();
 }
 
@@ -6052,7 +6381,7 @@ function renderWeather() {
     return;
   }
   if (state.weather.status === "unavailable") {
-    text.textContent = "예보 없음";
+    text.textContent = "날씨 연동 준비 중";
     return;
   }
 
@@ -6146,7 +6475,7 @@ function renderWeatherSheet() {
   const contextPanel = createElement("section", "px-panel px-panel--inset");
   contextPanel.append(
     createElement("span", "px-label quest-sheet__eyebrow", state.explorationMode === "planned" ? "계획 위치" : "현위치"),
-    createElement("p", "px-body", `${state.location.label || "대전광역시청"} · ${formatContextDate(getQuestReferenceDate())}`),
+    createElement("p", "px-body", `${getRecommendationLocation().label || "대전광역시청"} · ${formatContextDate(getQuestReferenceDate())}`),
   );
   body.append(contextPanel);
 
@@ -6347,8 +6676,9 @@ function closePlanSheet() {
  * 호출 예시: await searchPlanLocation("유성구")
  */
 async function searchPlanLocation(keyword) {
-  // 앞뒤 공백을 지운 검색어입니다.
   const query = String(keyword || "").trim();
+  const requestId = ++state.requestVersions.planSearch;
+  const sessionVersion = state.sessionVersion;
 
   if (!query) {
     state.planSearchResults = [];
@@ -6361,17 +6691,24 @@ async function searchPlanLocation(keyword) {
   renderPlanSheet();
 
   try {
-    // 위치 검색 API 응답입니다.
-    const payload = await fetchJson(`/api/places/search?query=${encodeURIComponent(query)}`);
-
-    state.planSearchResults = unwrapList(payload.items || payload).map((item) => ({
-      label: String(item.label || item.name || item.placeName || query),
-      address: String(item.roadAddress || item.address || ""),
-      lat: toNumber(item.latitude ?? item.lat, FALLBACK_LOCATION.lat),
-      lng: toNumber(item.longitude ?? item.lng, FALLBACK_LOCATION.lng),
-    }));
+    const payload = await fetchJson(`/api/naver-map/geocode?query=${encodeURIComponent(query)}`);
+    if (!isCurrentRequest("planSearch", requestId, sessionVersion)) {
+      return;
+    }
+    const addresses = Array.isArray(payload?.addresses) ? payload.addresses : unwrapList(payload);
+    state.planSearchResults = addresses
+      .map((item) => ({
+        label: String(item.roadAddress || item.jibunAddress || item.label || item.name || query),
+        address: String(item.roadAddress || item.jibunAddress || item.address || ""),
+        lat: Number(item.y ?? item.latitude ?? item.lat),
+        lng: Number(item.x ?? item.longitude ?? item.lng),
+      }))
+      .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng));
     state.planMessage = state.planSearchResults.length === 0 ? "검색 결과가 없어요." : "";
   } catch (error) {
+    if (!isCurrentRequest("planSearch", requestId, sessionVersion)) {
+      return;
+    }
     state.planSearchResults = [];
     state.planMessage = "위치를 검색하지 못했어요. 다시 시도해주세요.";
   }
@@ -6386,21 +6723,37 @@ async function searchPlanLocation(keyword) {
  * 호출 예시: applyPlanLocation(candidate)
  */
 function applyPlanLocation(candidate) {
-  state.location = {
-    lat: candidate.lat,
-    lng: candidate.lng,
-    label: candidate.label,
-    // 계획 좌표는 실측이 아닙니다. 완료 인증에 쓰이지 않도록 표시합니다. (명세 §19)
+  const lat = Number(candidate?.lat);
+  const lng = Number(candidate?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    state.planMessage = "올바른 위도와 경도를 입력해주세요.";
+    renderPlanSheet();
+    return;
+  }
+
+  state.plannedLocation = {
+    lat,
+    lng,
+    label: String(candidate?.label || "선택한 계획 위치"),
     measured: false,
   };
-
+  state.explorationMode = "planned";
+  state.selectedCategory = state.plannedCategory;
+  state.requestVersions.recommendation += 1;
   persistPlanContext();
   closePlanSheet();
-
-  // 기준 위치가 바뀌었으므로 추천과 날씨를 다시 받습니다. (명세 §6.3)
   renderAll();
   loadRecommendations(true);
-  loadWeather(true);
+}
+
+/**
+ * 입력: 선택한 위도, 경도와 표시 이름.
+ * 출력: 없음.
+ * 역할: 프리셋, 직접 좌표와 지도 클릭을 같은 계획 위치 설정 흐름으로 연결합니다.
+ * 호출 예시: setPlanningLocation(36.3321, 127.4344, "대전역")
+ */
+function setPlanningLocation(lat, lng, label = "선택한 계획 위치") {
+  applyPlanLocation({ lat, lng, label });
 }
 
 /**
@@ -6413,9 +6766,9 @@ function persistPlanContext() {
   writeStorageValue(
     PLAN_CONTEXT_KEY,
     JSON.stringify({
-      lat: state.location.lat,
-      lng: state.location.lng,
-      label: state.location.label,
+      lat: state.plannedLocation.lat,
+      lng: state.plannedLocation.lng,
+      label: state.plannedLocation.label,
       date: state.plannedDate,
     }),
   );
@@ -6513,6 +6866,45 @@ function renderPlanSheet() {
 
   searchRow.append(searchInput, searchButton);
   searchPanel.append(searchRow);
+  searchPanel.append(
+    createElement("p", "data-note", `현재 계획 위치: ${state.plannedLocation.label}`),
+  );
+  const presets = createElement("div", "chip-row");
+  PLAN_LOCATION_PRESETS.forEach((preset) => {
+    const button = createElement("button", "chip-button", preset.label);
+    button.type = "button";
+    button.addEventListener("click", () => applyPlanLocation(preset));
+    presets.append(button);
+  });
+  searchPanel.append(presets);
+
+  const coordinateRow = createElement("div", "account-field__controls");
+  const latitudeInput = document.createElement("input");
+  latitudeInput.type = "number";
+  latitudeInput.step = "any";
+  latitudeInput.value = String(state.plannedLocation.lat);
+  latitudeInput.setAttribute("aria-label", "계획 위치 위도");
+  latitudeInput.placeholder = "위도";
+  const longitudeInput = document.createElement("input");
+  longitudeInput.type = "number";
+  longitudeInput.step = "any";
+  longitudeInput.value = String(state.plannedLocation.lng);
+  longitudeInput.setAttribute("aria-label", "계획 위치 경도");
+  longitudeInput.placeholder = "경도";
+  const coordinateButton = createElement("button", "px-button px-button--ghost", "좌표 적용");
+  coordinateButton.type = "button";
+  coordinateButton.addEventListener("click", () => {
+    setPlanningLocation(
+      latitudeInput.value,
+      longitudeInput.value,
+      `${latitudeInput.value}, ${longitudeInput.value}`,
+    );
+  });
+  coordinateRow.append(latitudeInput, longitudeInput, coordinateButton);
+  searchPanel.append(coordinateRow);
+  searchPanel.append(
+    createElement("p", "data-note", "계획 모드에서는 지도에서 지점을 눌러 위치를 정할 수도 있습니다."),
+  );
 
   if (state.planMessage) {
     searchPanel.append(createElement("p", "data-note", state.planMessage));
@@ -6571,7 +6963,7 @@ function renderPlanSheet() {
   dateRow.append(dateInput, todayButton);
   datePanel.append(dateRow);
   datePanel.append(
-    createElement("p", "data-note", "계획 위치와 날짜는 추천·날씨·행사 조회에만 씁니다. 완료 인증은 항상 현장의 실제 위치와 현재 시각으로 처리해요."),
+    createElement("p", "data-note", "날짜는 일정 메모로 저장됩니다. 추천은 계획 위치를 기준으로 하며 완료 인증은 현장의 실제 GPS와 현재 시각만 사용합니다."),
   );
   body.append(datePanel);
 
@@ -7991,13 +8383,14 @@ function createRecordDetail(note) {
   const entryInput = document.createElement("textarea");
   entryInput.id = "record-entry-input";
   entryInput.rows = 4;
-  entryInput.value = entry.body || note.memo || "";
+  entryInput.value = getNoteDraft(note).body;
   entryInput.setAttribute("aria-label", "기록 내용");
   entryPanel.append(entryInput);
 
   const saveRow = createElement("div", "account-field__controls");
   const saveButton = createElement("button", "px-button px-button--primary", "기록 저장");
   saveButton.type = "button";
+  saveButton.disabled = Boolean(getNoteDraft(note).pending);
   saveButton.addEventListener("click", () => saveRecordEntry(note, entryInput.value));
   saveRow.append(saveButton);
   entryPanel.append(saveRow);
@@ -8061,25 +8454,19 @@ function createShareCard(note) {
  * 호출 예시: await saveRecordEntry(note, "오늘의 기록")
  */
 async function saveRecordEntry(note, body) {
-  // 저장할 본문입니다.
-  const text = String(body || "").trim();
-
-  state.notes = state.notes.map((item) =>
-    item.id === note.id ? { ...item, entry: { ...(item.entry || { type: "diary" }), body: text }, memo: text || item.memo } : item,
-  );
-  state.recordMessage = "기록을 저장했어요.";
-  renderRecordSheet();
-
-  try {
-    await fetchJson(`/api/notes/${encodeURIComponent(note.id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entry: { type: note.entry.type, body: text } }),
-    });
-  } catch (error) {
-    state.recordMessage = "서버에 저장하지 못했어요. 화면의 내용은 유지됩니다.";
-    renderRecordSheet();
+  // 저장 결과가 속한 계정과 기록 편집 초안입니다.
+  const isCurrentSession = captureSession();
+  const draft = getNoteDraft(note);
+  if (!isCurrentSession() || draft.pending) {
+    return;
   }
+  draft.body = String(body || "").trim();
+  await saveNoteEntry(note.id);
+  if (!isCurrentSession()) {
+    return;
+  }
+  state.recordMessage = state.noteDrafts[note.id]?.message || "";
+  renderRecordSheet();
 }
 
 /**
@@ -8198,11 +8585,22 @@ function setCategory(category) {
     return;
   }
 
+  if (!toServerCategory(category)) {
+    state.recommendationMeta = {
+      ...state.recommendationMeta,
+      sourceStatus: "unsupported_category",
+      attribution: "빵·미식과 축제·이벤트 분류는 준비 중입니다.",
+    };
+    renderRecommendationMeta();
+    return;
+  }
+
   state.selectedCategory = category;
+  state.explorationMode === "planned"
+    ? (state.plannedCategory = category)
+    : (state.currentCategory = category);
 
-  // 모든 카테고리 필터 버튼입니다.
   const filterButtons = document.querySelectorAll("[data-category]");
-
   filterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.category === category);
   });
@@ -8307,6 +8705,8 @@ async function uploadEvidenceFile(upload, file) {
  * 호출 예시: await runReceiptOcr(recommendation, evidence)
  */
 async function runReceiptOcr(recommendation, evidence) {
+  // 이전 계정의 OCR 결과를 새 세션에 반영하지 않습니다.
+  const isCurrentSession = captureSession();
   // 변수 의미: OCR 대상 퀘스트 인스턴스 ID입니다.
   const instanceId = recommendation.instanceId;
   state.evidenceUploads[instanceId] = { ...evidence, ocrStatus: "running" };
@@ -8323,7 +8723,9 @@ async function runReceiptOcr(recommendation, evidence) {
         contentType: evidence.contentType,
       }),
     });
-
+    if (!isCurrentSession()) {
+      return;
+    }
     state.evidenceUploads[instanceId] = {
       ...evidence,
       ocrStatus: "done",
@@ -8333,6 +8735,9 @@ async function runReceiptOcr(recommendation, evidence) {
     };
     updateSystemStatus(true, getReceiptRequirementText(payload.requirementCheck) || "OCR 확인 완료");
   } catch (error) {
+    if (!isCurrentSession()) {
+      return;
+    }
     state.evidenceUploads[instanceId] = {
       ...evidence,
       ocrStatus: "failed",
@@ -8340,7 +8745,9 @@ async function runReceiptOcr(recommendation, evidence) {
     };
     updateSystemStatus(state.apiHealthy, "사진은 업로드됐고 OCR 확인은 실패했습니다.");
   } finally {
-    renderAll();
+    if (isCurrentSession()) {
+      renderAll();
+    }
   }
 }
 
@@ -8354,6 +8761,9 @@ async function handleQuestEvidenceUpload(recommendation, file) {
   if (!ensureSessionReady()) {
     return;
   }
+
+  // URL 발급·업로드·OCR 각 단계 사이에 같은 계정인지 확인합니다.
+  const isCurrentSession = captureSession();
 
   // 변수 의미: 업로드 대상 퀘스트 인스턴스 ID입니다.
   const instanceId = recommendation.instanceId;
@@ -8392,11 +8802,19 @@ async function handleQuestEvidenceUpload(recommendation, file) {
       }),
     });
 
+    if (!isCurrentSession()) {
+      return;
+    }
+
     if (file.size > toNumber(upload.maxUploadBytes, DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES)) {
       throw new Error(`${formatBytes(upload.maxUploadBytes)} 이하 이미지만 업로드할 수 있습니다.`);
     }
 
     await uploadEvidenceFile(upload, file);
+
+    if (!isCurrentSession()) {
+      return;
+    }
 
     // 변수 의미: 업로드 완료 후 완료 요청에 첨부할 증빙 상태입니다.
     const evidence = {
@@ -8416,6 +8834,9 @@ async function handleQuestEvidenceUpload(recommendation, file) {
       renderAll();
     }
   } catch (error) {
+    if (!isCurrentSession()) {
+      return;
+    }
     state.evidenceUploads[instanceId] = {
       status: "failed",
       fileName: file.name,
@@ -8435,6 +8856,8 @@ async function handleQuestEvidenceUpload(recommendation, file) {
  * 호출 예시: const body = await buildCompletionBody(recommendation)
  */
 async function buildCompletionBody(recommendation) {
+  // GPS 대기 중 계정이 바뀌면 위치와 인증 증빙을 새 세션에서 읽지 않습니다.
+  const isCurrentSession = captureSession();
   updateSystemStatus(state.apiHealthy, "현재 위치 확인 중");
 
   // 완료 버튼을 누른 순간의 실측 위치입니다.
@@ -8443,6 +8866,10 @@ async function buildCompletionBody(recommendation) {
     timeout: 10000,
     maximumAge: 0,
   });
+
+  if (!isCurrentSession()) {
+    throw new Error("completion session changed");
+  }
 
   // 화면과 지도에 반영할 실측 위치입니다.
   const measuredLocation = normalizeMeasuredLocation(position);
@@ -8589,7 +9016,7 @@ function showQuestActionDialog(action, recommendation, actionResult = {}, messag
     tone: succeeded ? "success" : "warning",
     // GPS 완료가 성공한 경우에만 보상 연출을 얹습니다.
     // 공통 축제의 추가 방문에는 보상 연출을 재생하지 않습니다. (명세 §10 S08, §11.2)
-    reward: isComplete && succeeded && !additionalVisit ? resolveRewardBadge(recommendation) : null,
+    reward: isComplete && succeeded && !additionalVisit ? resolveCompletionReward(actionResult) : null,
   };
   renderActionDialog();
 }
@@ -8600,26 +9027,29 @@ function showQuestActionDialog(action, recommendation, actionResult = {}, messag
  * 역할: 퀘스트에 1:1:1 로 묶인 rewardPair 를 연출에 그대로 넘긴다. (명세 §5.1, §10 S08)
  * 호출 예시: resolveRewardBadge(recommendation)
  */
-function resolveRewardBadge(recommendation) {
-  // 이 퀘스트에 묶인 보상 쌍입니다. 서버가 준 경로를 그대로 씁니다.
-  const rewardPair = recommendation?.rewardPair || {};
-  // 완료한 퀘스트가 주는 뱃지 이름입니다.
-  const badgeName = rewardPair.badgeName || recommendation?.badgeName || "";
-  // 뱃지 목록에서 찾은 같은 이름의 뱃지입니다. 명시 경로가 없을 때만 등급 계산에 씁니다.
-  const badge =
-    state.badges.find((item) => item.name === badgeName) || getEarnedBadges()[0] || state.badges[0];
+function resolveCompletionReward(actionResult) {
+  const completion = actionResult?.completion || {};
+  const badges = Array.isArray(completion.badges?.earnedBadges)
+    ? completion.badges.earnedBadges
+    : [];
+  const unlocked = Array.isArray(completion.unlockedGgumdori)
+    ? completion.unlockedGgumdori
+    : [];
+  if (badges.length === 0 && unlocked.length === 0) {
+    return null;
+  }
 
+  const badge = badges[0] || {};
+  const ggumdori = unlocked[0] || {};
   return {
-    name: badgeName || badge?.name || "탐험 뱃지",
-    category: badge?.category || recommendation?.category || "default",
-    tier: badge?.tier || 1,
-    // 클라이언트가 경로를 계산하지 않습니다. (명세 §5.1)
-    badgeImageRef: rewardPair.badgeImageRef || "",
-    ggumdoriId: rewardPair.ggumdoriId || "",
-    ggumdoriName: rewardPair.ggumdoriName || "",
-    ggumdoriImageRef: rewardPair.ggumdoriStillImageRef || "",
-    // 획득 XP와 전체 레벨 진행입니다. (명세 §10 S08)
-    rewardXp: toNumber(recommendation?.rewardXp, 0),
+    name: badge.name || badge.badgeName || ggumdori.name || "새 보상",
+    category: normalizeCategory(badge.categoryCode || badge.category || ggumdori.themeCategory || "default"),
+    tier: toNumber(badge.tier, 1),
+    badgeImageRef: badge.imageRef || badge.image_ref || "",
+    ggumdoriId: ggumdori.id || ggumdori.variantId || "",
+    ggumdoriName: ggumdori.name || ggumdori.variantName || "",
+    ggumdoriImageRef: ggumdori.imageRef || ggumdori.image_ref || "",
+    rewardXp: toNumber(completion.earnedXp, 0),
     level: toNumber(state.user.level, 0),
     levelProgressPercent: getProgressPercent(state.user.xp, state.user.nextLevelXp),
   };
@@ -8748,30 +9178,54 @@ function requestLocation() {
  * 호출 예시: await loadRecommendations(true)
  */
 async function loadRecommendations(forceRefresh = false) {
-  // 추천 API에 보낼 쿼리 문자열입니다.
+  const mode = state.explorationMode;
+  const location = getRecommendationLocation();
+  const serverCategory = toServerCategory(state.selectedCategory);
+  const requestId = ++state.requestVersions.recommendation;
+  const sessionVersion = state.sessionVersion;
+
+  if (!serverCategory) {
+    state.recommendations = [];
+    state.dataSource = "api";
+    state.recommendationMeta = {
+      sourceStatus: "unsupported_category",
+      cacheHit: false,
+      attribution: "현재 서버에서 이 분류를 준비 중입니다.",
+      fetchedAt: "",
+      expiresAt: "",
+    };
+    renderRecommendationMeta();
+    renderHomeMetrics();
+    renderHomeRecommendations();
+    renderRecommendations();
+    renderAdventure();
+    renderQuestBoard();
+    renderMapView();
+    return;
+  }
+
   const query = new URLSearchParams({
-    lat: String(state.location.lat),
-    lng: String(state.location.lng),
-    category: state.selectedCategory,
+    lat: String(location.lat),
+    lng: String(location.lng),
+    category: serverCategory,
+    mode: getApiRecommendationMode(),
   });
   if (forceRefresh) {
     query.set("refresh", "1");
   }
 
   try {
-    // 추천 API의 JSON 응답입니다.
     const payload = await fetchJson(`/api/recommendations?${query.toString()}`);
-    // 정규화한 추천 목록입니다.
-    const recommendations = unwrapList(payload).map(normalizeRecommendation);
-
-    if (recommendations.length === 0) {
-      throw new Error("추천 결과 없음");
+    if (!isCurrentRequest("recommendation", requestId, sessionVersion, mode)) {
+      return;
     }
-
-    state.recommendations = recommendations;
+    state.recommendations = unwrapList(payload).map(normalizeRecommendation);
     state.dataSource = "api";
     state.recommendationMeta = normalizeRecommendationMeta(payload);
   } catch (error) {
+    if (!isCurrentRequest("recommendation", requestId, sessionVersion, mode)) {
+      return;
+    }
     state.recommendations = [...FALLBACK_RECOMMENDATIONS];
     state.dataSource = "fallback";
     state.recommendationMeta = {
@@ -8802,6 +9256,8 @@ async function handleQuestAction(instanceId, action) {
   if (!ensureSessionReady()) {
     return;
   }
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
 
   // 액션에 따라 호출할 API 경로입니다.
   const path = `/api/quests/${encodeURIComponent(instanceId)}/${action}`;
@@ -8819,12 +9275,18 @@ async function handleQuestAction(instanceId, action) {
     if (action === "complete") {
       // 실측 GPS 기반 완료 인증 본문입니다.
       const completionBody = await buildCompletionBody(recommendation);
+      if (sessionVersion !== state.sessionVersion || accessToken !== state.accessToken) {
+        return;
+      }
       requestOptions.headers = { "Content-Type": "application/json" };
       requestOptions.body = JSON.stringify(completionBody);
     }
 
     // 앱 서버에서 받은 액션 처리 결과입니다.
     const actionResult = await fetchJson(path, requestOptions);
+    if (sessionVersion !== state.sessionVersion || accessToken !== state.accessToken) {
+      return;
+    }
     if (action === "complete" && actionResult.ok === false) {
       state.apiHealthy = true;
       // 변수 의미: 완료 실패 안내 문구입니다.
@@ -8851,6 +9313,10 @@ async function handleQuestAction(instanceId, action) {
 
     if (action === "complete") {
       await Promise.allSettled([loadUser(), loadBadges(), loadNotes(), loadGgumdori()]);
+      await loadCatalog();
+    }
+    if (sessionVersion !== state.sessionVersion || accessToken !== state.accessToken) {
+      return;
     }
 
     // 변수 의미: 액션 성공 안내 문구입니다. 성공 문구에는 실제 방문한 행사만 적습니다. (명세 §10 S07 행사형)
@@ -8862,7 +9328,11 @@ async function handleQuestAction(instanceId, action) {
     updateSystemStatus(true, successMessage);
     showQuestActionDialog(action, recommendation, actionResult, successMessage, additionalVisit);
   } catch (error) {
-    if (!isUnauthorizedError(error)) {
+    if (
+      sessionVersion === state.sessionVersion &&
+      accessToken === state.accessToken &&
+      !isUnauthorizedError(error)
+    ) {
       // 위치 권한 실패는 API 연결 상태를 바꾸지 않는다.
       const isLocationError =
         error?.name === "GeolocationPositionError" ||
@@ -8875,9 +9345,101 @@ async function handleQuestAction(instanceId, action) {
       showQuestActionDialog(action, recommendation, { ok: false, error }, failureMessage);
     }
   } finally {
-    delete state.pendingQuestActions[instanceId];
-    renderAll();
+    if (sessionVersion === state.sessionVersion && accessToken === state.accessToken) {
+      delete state.pendingQuestActions[instanceId];
+      renderAll();
+    }
   }
+}
+
+/**
+ * 입력: 사용자가 고른 서버 관심사 목록.
+ * 출력: 저장 Promise.
+ * 역할: 기존 6개 관심사를 /api/me/preferences의 평면 계약으로 저장합니다.
+ * 호출 예시: await savePreferences()
+ */
+async function savePreferences() {
+  const categories = state.interestDraft.filter((category) => INTEREST_CATEGORIES.includes(category));
+  const requestId = ++state.requestVersions.preference;
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
+  state.interestMessage = "관심사를 저장하는 중입니다.";
+
+  try {
+    const payload = await fetchJson("/api/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categories }),
+    });
+    if (
+      !isCurrentRequest("preference", requestId, sessionVersion) ||
+      accessToken !== state.accessToken
+    ) {
+      return;
+    }
+    state.preference = normalizePreference(payload);
+    state.interestDraft = [...state.preference.categories];
+    state.interestMessage = "관심사를 저장했어요.";
+  } catch (error) {
+    if (
+      !isCurrentRequest("preference", requestId, sessionVersion) ||
+      accessToken !== state.accessToken
+    ) {
+      return;
+    }
+    state.interestMessage = "관심사를 저장하지 못했어요.";
+  }
+  renderAccountPanel();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 대전 전체 관광지 로드 Promise.
+ * 역할: GPS 좌표 없이 기존 citywide 관광지 API를 호출합니다.
+ * 호출 예시: await loadAttractions()
+ */
+async function loadAttractions() {
+  const requestId = ++state.requestVersions.attraction;
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
+  // 서버가 저장된 관심사 전체로 정렬하도록 특정 첫 관심사로 제한하지 않습니다.
+  const category = "all";
+  state.attractionMessage = "관광지를 불러오는 중입니다.";
+
+  try {
+    const payload = await fetchJson(
+      `/api/places/recommendations?category=${encodeURIComponent(category)}`,
+    );
+    if (
+      !isCurrentRequest("attraction", requestId, sessionVersion) ||
+      accessToken !== state.accessToken
+    ) {
+      return;
+    }
+    state.attractions = unwrapList(payload).map((item) => {
+      const place = item.place || item;
+      return {
+        ...item,
+        placeName: String(place.title || place.placeName || place.name || place.address || "관광지"),
+        lat: Number(place.latitude ?? place.lat),
+        lng: Number(place.longitude ?? place.lng),
+        category: place.categoryCode || place.category || item.category || category,
+      };
+    });
+    state.attractionLimit = 5;
+    state.attractionMessage =
+      state.attractions.length > 0 ? `${state.attractions.length}곳을 찾았어요.` : "조건에 맞는 관광지가 없어요.";
+  } catch (error) {
+    if (
+      !isCurrentRequest("attraction", requestId, sessionVersion) ||
+      accessToken !== state.accessToken
+    ) {
+      return;
+    }
+    state.attractions = [];
+    state.attractionMessage = "관광지를 불러오지 못했어요.";
+  }
+  renderAccountPanel();
 }
 
 /**
@@ -8887,22 +9449,26 @@ async function handleQuestAction(instanceId, action) {
  * 호출 예시: await loadUser()
  */
 async function loadUser() {
+  const requestId = ++state.requestVersions.user;
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
+
   try {
-    // 사용자 API 응답입니다.
     const payload = await fetchJson("/api/me");
-    // 사용자 응답이 data로 래핑된 경우의 실제 본문입니다.
+    if (
+      !isCurrentRequest("user", requestId, sessionVersion) ||
+      accessToken !== state.accessToken
+    ) {
+      return;
+    }
     const user = payload.data || payload.user || payload;
-
-    // 레벨 진행도 응답 객체입니다.
     const level = user.level || user.levelProgress || {};
-
-    // 사용자 통계 응답 객체입니다.
     const stats = user.stats || {};
 
     state.user = {
       nickname: user.nickname || user.name || FALLBACK_USER.nickname,
       level: toNumber(user.currentLevel || level.currentLevel || level.level, FALLBACK_USER.level),
-      xp: toNumber(user.xp || user.currentXp || level.currentXp || level.xp || level.totalXp, FALLBACK_USER.xp),
+      xp: toNumber(user.xp ?? user.currentXp ?? level.currentXp ?? level.xp ?? level.totalXp, FALLBACK_USER.xp),
       nextLevelXp: toNumber(
         user.nextLevelXp || level.nextLevelRequiredXp || level.nextLevelXp,
         FALLBACK_USER.nextLevelXp,
@@ -8913,13 +9479,20 @@ async function loadUser() {
       ),
       badgeCount: toNumber(user.badgeCount || stats.earnedBadgeCount, FALLBACK_USER.badgeCount),
       selectedGgumdoriName: user.selectedGgumdoriName || FALLBACK_USER.selectedGgumdoriName,
-      // 게스트와 소셜을 구분합니다. 마이페이지 표시가 이 값을 씁니다. (명세 §9.3, §9.4)
-      accountType: user.accountType === "social" ? "social" : "guest",
-      // 이메일과 제공자는 소셜 사용자만 값이 있고 마이페이지에서만 보여 줍니다. (명세 §9.4)
+      accountType: user.accountType === "social" ? "social" : "demo",
       email: String(user.email || ""),
       provider: String(user.provider || ""),
     };
+    state.selectedGgumdoriId = String(user.selectedGgumdoriId || state.selectedGgumdoriId || "");
+    state.preference = normalizePreference(user.preference || user.preferences || {});
+    state.interestDraft = [...state.preference.categories];
   } catch (error) {
+    if (
+      !isCurrentRequest("user", requestId, sessionVersion) ||
+      accessToken !== state.accessToken
+    ) {
+      return;
+    }
     state.user = { ...FALLBACK_USER };
   }
 }
@@ -8931,15 +9504,20 @@ async function loadUser() {
  * 호출 예시: await loadBadges()
  */
 async function loadBadges() {
+  const requestId = ++state.requestVersions.badges;
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
   try {
-    // 뱃지 API 응답입니다.
     const payload = await fetchJson("/api/badges");
-    // 정규화한 뱃지 목록입니다.
-    const badges = unwrapList(payload).map(normalizeBadge);
-
-    state.badges = badges.length > 0 ? badges : [...FALLBACK_BADGES];
+    if (!isCurrentRequest("badges", requestId, sessionVersion) || accessToken !== state.accessToken) {
+      return;
+    }
+    state.badges = unwrapList(payload).map(normalizeBadge);
   } catch (error) {
-    state.badges = [...FALLBACK_BADGES];
+    if (!isCurrentRequest("badges", requestId, sessionVersion) || accessToken !== state.accessToken) {
+      return;
+    }
+    state.badges = IS_DESIGN_PREVIEW ? [...FALLBACK_BADGES] : [];
   }
 }
 
@@ -8950,12 +9528,15 @@ async function loadBadges() {
  * 호출 예시: await loadNotes()
  */
 async function loadNotes() {
+  const requestId = ++state.requestVersions.notes;
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
   try {
-    // 수첩 API 응답입니다.
     const payload = await fetchJson("/api/notes");
-    // 정규화한 수첩 기록 목록입니다.
+    if (!isCurrentRequest("notes", requestId, sessionVersion) || accessToken !== state.accessToken) {
+      return;
+    }
     const notes = unwrapList(payload).map(normalizeNote);
-    // 새 서버 응답과 병합하기 전의 편집 상태입니다.
     const previousDrafts = state.noteDrafts;
 
     state.notes = notes;
@@ -8963,7 +9544,6 @@ async function loadNotes() {
     state.notePhotos = {};
     state.noteDrafts = Object.fromEntries(
       notes.map((note) => {
-        // 사용자가 아직 저장하지 않은 입력이 있는 기존 편집 상태입니다.
         const previousDraft = previousDrafts[note.id];
         if (previousDraft?.dirty || previousDraft?.pending) {
           return [note.id, previousDraft];
@@ -8979,14 +9559,16 @@ async function loadNotes() {
       }),
     );
 
-    // 사진이 있는 완료 기록마다 현재 사용자용 presigned GET URL을 발급합니다.
     const photoRequests = notes
       .filter((note) => note.photoRef)
       .map((note) => requestNotePhoto(note));
     await Promise.allSettled(photoRequests);
   } catch (error) {
-    state.notes = [...FALLBACK_NOTES];
-    state.notesSource = "fallback";
+    if (!isCurrentRequest("notes", requestId, sessionVersion) || accessToken !== state.accessToken) {
+      return;
+    }
+    state.notes = IS_DESIGN_PREVIEW ? [...FALLBACK_NOTES] : [];
+    state.notesSource = IS_DESIGN_PREVIEW ? "fallback" : "api";
     state.notePhotos = {};
     state.noteDrafts = {};
   }
@@ -8999,16 +9581,21 @@ async function loadNotes() {
  * 호출 예시: await loadGgumdori()
  */
 async function loadGgumdori() {
+  const requestId = ++state.requestVersions.ggumdori;
+  const sessionVersion = state.sessionVersion;
+  const accessToken = state.accessToken;
   try {
-    // 꿈돌이 API 응답입니다.
     const payload = await fetchJson("/api/ggumdori");
-    // 정규화한 꿈돌이 목록입니다.
-    const ggumdori = unwrapList(payload).map(normalizeGgumdori);
-
-    state.ggumdori = ggumdori.length > 0 ? ggumdori : [...FALLBACK_GGUMDORI];
+    if (!isCurrentRequest("ggumdori", requestId, sessionVersion) || accessToken !== state.accessToken) {
+      return;
+    }
+    state.ggumdori = unwrapList(payload).map(normalizeGgumdori);
     state.selectedGgumdoriId = payload.selectedVariantId || state.selectedGgumdoriId;
   } catch (error) {
-    state.ggumdori = [...FALLBACK_GGUMDORI];
+    if (!isCurrentRequest("ggumdori", requestId, sessionVersion) || accessToken !== state.accessToken) {
+      return;
+    }
+    state.ggumdori = IS_DESIGN_PREVIEW ? [...FALLBACK_GGUMDORI] : [];
   }
 }
 
@@ -9058,11 +9645,24 @@ async function loadHealth() {
  * 호출 예시: await loadInitialData(true)
  */
 async function loadInitialData(forceRefresh = false) {
-  await Promise.allSettled([loadHealth(), loadUser(), loadBadges(), loadNotes(), loadGgumdori(), loadMapConfig()]);
+  // 이전 로그인에서 시작된 초기화의 후속 요청을 중단합니다.
+  const isCurrentSession = captureSession();
+  await Promise.allSettled([
+    loadHealth(), loadUser(), loadBadges(), loadNotes(), loadGgumdori(), loadMapConfig(), loadAuthProviders(),
+  ]);
+  if (!isCurrentSession()) {
+    return;
+  }
   await loadRecommendations(forceRefresh);
-  // 도감은 퀘스트의 rewardPair 에서 파생되므로 추천을 받은 뒤에 만듭니다. (명세 §5.1)
+  if (!isCurrentSession()) {
+    return;
+  }
+  // 도감은 서버의 꿈돌이 해금 상태와 뱃지 진행도에서 만듭니다.
   await loadCatalog();
-  // 날씨는 실패해도 지도와 추천을 막지 않습니다. (명세 §6.4)
+  if (!isCurrentSession()) {
+    return;
+  }
+  // 날씨 연동 준비 상태를 표시하되 지도와 추천은 막지 않습니다.
   loadWeather();
   renderAll();
 }
@@ -9198,6 +9798,11 @@ function bindEvents() {
   bindSettingEvents();
 
   window.addEventListener("keydown", (event) => {
+    // 다른 시트 위에 연 드로어는 현재 화면의 최상위 모달입니다.
+    if (event.key === "Escape" && isDrawerOpen()) {
+      closeDrawer();
+      return;
+    }
     if (event.key === "Escape" && state.actionDialog) {
       closeActionDialog();
       return;
@@ -9234,12 +9839,6 @@ function bindEvents() {
       return;
     }
 
-    // 오버레이가 없으면 Esc 로 드로어를 닫습니다. (명세 §7.2)
-    if (event.key === "Escape" && isDrawerOpen()) {
-      closeDrawer();
-      return;
-    }
-
     if (event.key === "Tab") {
       trapDrawerFocus(event);
     }
@@ -9259,15 +9858,15 @@ function bindDrawerEvents() {
 
   // 뒤로가기는 열린 드로어를 먼저 닫습니다. (명세 §7.4)
   window.addEventListener("popstate", () => {
+    if (isDrawerOpen()) {
+      closeDrawer(true);
+      return;
+    }
     // 뒤로가기는 최상위 오버레이 → 열린 드로어 → 이전 화면 순으로 닫습니다. (명세 §7.4)
     if (closeTopOverlay()) {
       // 시트는 히스토리 항목을 쌓지 않으므로 되감긴 항목을 되돌려 보던 화면을 유지합니다.
       // 해시를 원래대로 돌려놓으면 뒤이어 오는 hashchange 도 같은 화면이라 아무 일도 하지 않습니다.
       window.history.pushState(null, "", `#view-${state.activeView}`);
-      return;
-    }
-    if (isDrawerOpen()) {
-      closeDrawer(true);
       return;
     }
     setActiveView(readInitialView(), false);
@@ -9392,20 +9991,32 @@ function applyReducedMotion() {
  * 호출 예시: setExplorationMode("planned")
  */
 function setExplorationMode(mode) {
-  state.explorationMode = mode === "planned" ? "planned" : "current";
+  const nextMode = mode === "planned" ? "planned" : "current";
+  if (state.explorationMode === nextMode) {
+    return;
+  }
 
-  if (state.explorationMode === "planned") {
-    // 마지막 계획 위치와 날짜를 복원합니다. 없으면 날짜만 오늘로 둡니다. (명세 §6.3)
+  state.explorationMode === "planned"
+    ? (state.plannedCategory = state.selectedCategory)
+    : (state.currentCategory = state.selectedCategory);
+  state.explorationMode = nextMode;
+  state.selectedCategory = nextMode === "planned" ? state.plannedCategory : state.currentCategory;
+  document.querySelectorAll("[data-category]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.category === state.selectedCategory);
+  });
+  state.requestVersions.recommendation += 1;
+
+  if (nextMode === "planned") {
     const saved = readPlanContext();
-    if (saved?.label) {
-      state.location = { lat: saved.lat, lng: saved.lng, label: saved.label, measured: false };
+    if (saved?.label && Number.isFinite(Number(saved.lat)) && Number.isFinite(Number(saved.lng))) {
+      state.plannedLocation = { lat: Number(saved.lat), lng: Number(saved.lng), label: saved.label, measured: false };
     }
     state.plannedDate = saved?.date || state.plannedDate || toKstDateKey(new Date());
   }
 
   renderHomeContext();
   renderRecommendations();
-  loadWeather(true);
+  loadRecommendations();
 }
 
 /**
@@ -9475,7 +10086,7 @@ function renderHomeContext() {
   // 현재 기준 위치 이름입니다.
   const placeText = select("#home-place-text");
   if (placeText) {
-    placeText.textContent = state.location.label || "대전광역시청";
+    placeText.textContent = getRecommendationLocation().label || "대전광역시청";
   }
 
   // GPS 상태 표시입니다. 계획 모드에서는 실제 측위가 아님을 명시합니다.
@@ -9483,6 +10094,14 @@ function renderHomeContext() {
   if (gpsState) {
     gpsState.textContent = isPlanned ? "계획 위치" : state.location.measured ? "GPS ON" : "기본 좌표";
   }
+
+  // 계획 좌표를 고르는 동안 현위치 측위를 요청하는 버튼은 숨깁니다.
+  ["#use-location-button", "#map-location-button"].forEach((selector) => {
+    const button = select(selector);
+    if (button) {
+      button.hidden = isPlanned;
+    }
+  });
 
   renderHomeSheet();
 }
@@ -9499,9 +10118,17 @@ function initializeApp() {
   // OAuth callback code를 token으로 교환 중인지 여부입니다.
   const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();
+  loadAuthProviders();
   setActiveView(state.activeView, false);
-  // 서버 응답 전에도 도감이 비어 보이지 않게 퀘스트에서 파생한 목업으로 채웁니다. (명세 §5.1)
-  state.catalog = buildFallbackCatalog();
+  // 실제 연결 모드는 서버의 보유 기록을 받기 전까지 보상과 수첩을 비워 둡니다.
+  if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+    state.catalog = buildFallbackCatalog();
+  } else {
+    state.badges = [];
+    state.ggumdori = [];
+    state.notes = [];
+    state.catalog = buildServerCatalog();
+  }
   renderAll();
   if (!oauthRedirectPending && ensureSessionReady()) {
     loadInitialData();
