@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#fdf6e3" />
+
     <meta
       name="description"
       content="대전 관광지를 퀘스트, 뱃지, 모험가의 수첩, 꿈돌이 도감으로 연결하는 모바일 웹/PWA"
@@ -15,6 +15,7 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' fill='%23fdf6e3'/%3E%3Crect x='6' y='6' width='84' height='84' fill='none' stroke='%232c1d16' stroke-width='6'/%3E%3Crect x='20' y='20' width='40' height='56' fill='%23fffdf7' stroke='%232c1d16' stroke-width='6'/%3E%3Crect x='62' y='14' width='14' height='34' fill='%23e0a72b' stroke='%232c1d16' stroke-width='6'/%3E%3C/svg%3E"
     />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- 기능 아이콘은 이모지 대신 Material Symbols 를 사용합니다. (명세 §3.2) -->
@@ -49,7 +50,9 @@
       <main class="app-main" id="main-content">
         <section class="consent-panel px-panel" id="consent-panel" aria-labelledby="consent-title" hidden>
           <p class="page-kicker">시작 전 확인</p>
+
           <h2 class="page-title" id="consent-title">모험가 등록</h2>
+
           <p class="page-copy">
             추천과 퀘스트 인증을 위해 닉네임, 활동 기록, 현재 위치를 필요한 순간에만 사용합니다.
           </p>
@@ -81,6 +84,7 @@
             <p class="data-note">체험 계정은 공용 데이터로 동작합니다. 개인 기록이 필요한 경우 네이버 또는 구글 계정으로 로그인해주세요.</p>
           </div>
 
+
           <!-- 3단계 공통 닉네임 설정 (명세 §9.4, §10 S02) -->
           <div id="nickname-step" hidden>
             <h3 class="section-title">닉네임을 정해주세요</h3>
@@ -91,6 +95,7 @@
               <button class="px-button px-button--ghost" type="button" id="nickname-suggest">다시 추천</button>
               <button class="primary-action" type="button" id="nickname-confirm">이 이름으로 시작</button>
             </div>
+
           </div>
           <p class="data-note" id="consent-message" aria-live="polite"></p>
         </section>
@@ -98,6 +103,7 @@
         <div class="view-stack" id="app-views">
           <!-- ── S03 홈: 탐색 컨텍스트 + 지도 + 3단 시트 (명세 §10 S03) ── -->
           <section class="view-panel is-active" id="view-home" data-view-panel="home" aria-labelledby="home-title">
+
             <h2 class="px-sr-only" id="home-title">홈</h2>
 
             <div class="context-bar" id="home-context-bar">
@@ -129,6 +135,7 @@
                   <span class="px-icon px-icon--sm" aria-hidden="true">wb_sunny</span>
                   <span class="px-counter" id="home-weather-text">날씨 연동 준비 중</span>
                 </span>
+
               </div>
 
               <div class="context-place">
@@ -368,6 +375,7 @@
               <h3 class="section-title">설정</h3>
               <div class="px-panel" id="me-settings"></div>
             </section>
+
 
             <section aria-label="권한">
               <h3 class="section-title">권한</h3>
