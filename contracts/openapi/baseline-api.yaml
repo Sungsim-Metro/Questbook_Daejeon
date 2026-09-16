@@ -52,22 +52,198 @@ paths:
       responses:
         "200":
           description: 사용자 요약
-  /api/recommendations:
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserProfile"
+  /api/me/preferences:
+    patch:
+      summary: 인증된 사용자가 관심 카테고리를 직접 선택하거나 해제한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [categories]
+              properties:
+                categories:
+                  type: array
+                  maxItems: 6
+                  uniqueItems: true
+                  description: 빈 배열은 관심사 전체 해제이며 명시적으로 설정한 상태로 저장된다.
+                  items:
+                    $ref: "#/components/schemas/InterestCategory"
+      responses:
+        "200":
+          description: 저장된 관심사. 이후 로그인과 추천에 즉시 적용된다.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [preference]
+                properties:
+                  preference:
+                    $ref: "#/components/schemas/UserPreference"
+        "400":
+          description: 배열이 아닌 값, 중복 또는 지원하지 않는 카테고리
+        "401":
+          description: 유효한 인증 토큰 없음
+  /api/me/nickname:
+    post:
+      summary: 인증된 사용자의 닉네임을 저장한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname:
+                  type: string
+                  minLength: 1
+                  maxLength: 20
+                  description: 앞뒤 공백은 제거하며 다른 사용자와 중복될 수 있다.
+      responses:
+        "200":
+          description: 닉네임이 갱신된 기존 전체 사용자 프로필
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserProfile"
+        "400":
+          description: 문자열이 아니거나 공백 제거 후 비어 있거나 20자를 초과한 닉네임
+        "401":
+          description: 유효한 인증 토큰 없음
+  /api/me/ggumdori:
+    post:
+      summary: 인증된 사용자가 실제 해금한 legacy 꿈돌이를 대표로 저장한다.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selectedGgumdoriId]
+              properties:
+                selectedGgumdoriId:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: 저장된 대표 꿈돌이 식별자
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [selectedGgumdoriId]
+                properties:
+                  selectedGgumdoriId:
+                    type: string
+        "400":
+          description: 식별자가 비어 있거나 현재 사용자가 해금하지 않은 꿈돌이
+        "401":
+          description: 유효한 인증 토큰 없음
+  /api/places/recommendations:
     get:
-      summary: 현재 위치와 카테고리 기준 추천 관광지와 퀘스트 후보를 반환한다.
+      summary: 현재 위치와 활동 이력 없이 관심사 기준으로 대전 전체 관광지를 추천한다.
+      description: 관심사 일치 장소를 우선하며 같은 그룹은 안정적으로 정렬한다. 정상 TourAPI 응답에서는 contentId가 승인된 재사용 퀘스트와 연결된 장소만 표시하며 관광지 조회로 퀘스트 인스턴스를 생성하지 않는다. 기존 예시 폴백은 유지한다.
       security:
         - bearerAuth: []
       parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            default: all
+            enum: [all, nature, science, downtown, market, mobility, nightview]
+        - name: refresh
+          in: query
+          schema:
+            type: string
+            default: "0"
+            enum: ["0", "1", "false", "true", "no", "yes"]
+      responses:
+        "200":
+          description: 대전 관광지 추천. 정상 빈 목록은 그대로 반환하고 예시 또는 일부 조회는 cache.sourceStatus로 구분한다.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scope, preference, recommendations, cache, attribution]
+                properties:
+                  scope:
+                    type: string
+                    const: daejeon
+                  preference:
+                    $ref: "#/components/schemas/UserPreference"
+                  recommendations:
+                    type: array
+                    maxItems: 30
+                    items:
+                      type: object
+                      required: [place, score, matchesPreference, reason]
+                      properties:
+                        place:
+                          $ref: "#/components/schemas/TourPlace"
+                        score:
+                          type: number
+                        matchesPreference:
+                          type: boolean
+                        reason:
+                          type: string
+                  cache:
+                    $ref: "#/components/schemas/RecommendationCache"
+                  attribution:
+                    type: string
+        "400":
+          description: 지원하지 않는 카테고리
+        "401":
+          description: 유효한 인증 토큰 없음
+  /api/recommendations:
+    get:
+      summary: 현재 위치 또는 사용자가 정한 계획 위치 주변의 관광지와 퀘스트 후보를 반환한다.
+      description: 정상 TourAPI 응답에서는 관광지를 선별한 뒤 contentId와 분류가 일치하는 승인된 저장 퀘스트를 조회한다. 퀘스트가 없는 장소는 제외하며 공용 퀘스트는 이 요청에서 생성하지 않는다. API 실패의 기존 예시 폴백은 유지한다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: mode
+          in: query
+          schema:
+            type: string
+            default: nearby
+            enum: [nearby, planning]
         - name: lat
           in: query
-          required: true
+          required: false
+          description: planning 모드에는 필수다. nearby에서 생략하면 기존 기본 좌표를 사용한다.
           schema:
             type: number
+            minimum: -90
+            maximum: 90
         - name: lng
           in: query
-          required: true
+          required: false
+          description: planning 모드에는 필수다. NaN 또는 무한대는 허용하지 않는다.
           schema:
             type: number
+            minimum: -180
+            maximum: 180
         - name: category
           in: query
           required: false
@@ -80,9 +256,15 @@ paths:
           schema:
             type: integer
             default: 5000
+            minimum: 100
+            maximum: 20000
       responses:
         "200":
-          description: 추천 결과. OpenAPI 원본 전체가 아니라 최소 장소 필드와 퀘스트 후보만 포함한다.
+          description: 기존 추천 결과에 mode와 referenceLocation(latitude, longitude, radiusMeters)을 포함한다. 거리는 이 기준 위치에서의 거리이며 실제 GPS를 증명하지 않는다.
+        "400":
+          description: 잘못된 모드, planning 좌표 누락 또는 범위를 벗어난 좌표
+        "401":
+          description: 유효한 인증 토큰 없음
   /api/quests/{instanceId}/accept:
     post:
       summary: 추천 퀘스트를 수행하기로 선택한다.
@@ -284,6 +466,115 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    UserProfile:
+      type: object
+      required:
+        - id
+        - nickname
+        - avatar
+        - accountType
+        - provider
+        - email
+        - selectedGgumdoriId
+        - rewardPolicy
+        - level
+        - preference
+        - stats
+        - consent
+      properties:
+        id:
+          type: string
+        nickname:
+          type: string
+          maxLength: 20
+        avatar:
+          type: string
+        accountType:
+          type: string
+          enum: [demo, social]
+          description: demo는 공유 baseline 체험 계정이며 독립 게스트나 소셜 승계를 뜻하지 않는다.
+        provider:
+          anyOf:
+            - type: string
+            - type: "null"
+        email:
+          anyOf:
+            - type: string
+            - type: "null"
+        selectedGgumdoriId:
+          anyOf:
+            - type: string
+            - type: "null"
+        rewardPolicy:
+          type: string
+          const: category_xp
+          description: 이번 통합은 기존 카테고리 XP·뱃지·꿈돌이 해금 정책을 사용한다.
+        level:
+          type: object
+        preference:
+          $ref: "#/components/schemas/UserPreference"
+        stats:
+          type: object
+        consent:
+          type: object
+    InterestCategory:
+      type: string
+      enum: [nature, science, downtown, market, mobility, nightview]
+    UserPreference:
+      type: object
+      required: [categories, distanceRangeMeters, pace, isConfigured]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/InterestCategory"
+        distanceRangeMeters:
+          type: integer
+        pace:
+          type: string
+        isConfigured:
+          type: boolean
+          description: 사용자가 관심사를 직접 저장한 적이 있는지 여부. 신규 사용자와 미설정 기존 사용자는 false다.
+    TourPlace:
+      type: object
+      required: [contentId, title, latitude, longitude, categoryCode, categoryName, summary, distanceMeters, source]
+      properties:
+        contentId:
+          type: string
+        title:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        categoryCode:
+          $ref: "#/components/schemas/InterestCategory"
+        categoryName:
+          type: string
+        summary:
+          type: string
+        distanceMeters:
+          type: [number, "null"]
+          description: 대전 전체 추천에서는 거리 기준이 없으므로 null이다.
+        source:
+          type: string
+    RecommendationCache:
+      type: object
+      required: [hit, sourceStatus, fetchedAt, expiresAt, ttlSeconds]
+      properties:
+        hit:
+          type: boolean
+        sourceStatus:
+          type: string
+          description: live는 실시간 조회, live:partial은 제한 내 일부 조회, fallback으로 시작하면 예시 장소다.
+        fetchedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        ttlSeconds:
+          type: integer
     AdventureNoteEntry:
       type: object
       required: [type, title, body, rating, updatedAt]
