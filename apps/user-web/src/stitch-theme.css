@@ -681,6 +681,23 @@ html:not(.fonts-icons-ready) .px-icon {
   min-block-size: 36px;
 }
 
+.drawer-language-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+}
+
+.ui-language-select {
+  padding: 2px var(--u2);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--px-ink);
+  background: #ffffff;
+  border: 2px solid var(--px-outline);
+  box-shadow: 1px 1px 0 var(--px-bevel-dark);
+}
+
 .drawer-profile {
   display: flex;
   align-items: center;
@@ -1364,6 +1381,99 @@ body[data-exploration-mode="planned"] .plan-flag {
 }
 
 .quest-sheet__message:empty {
+  display: none;
+}
+
+/* ────────────────────────────────────────────────
+   12b. 관광지 상세 모달 (지도 마커 클릭)
+   퀘스트 상세 시트와 같은 scrim/panel 뼈대를 재사용합니다.
+   ──────────────────────────────────────────────── */
+
+.place-detail__sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+.place-detail__description-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u1);
+}
+
+.place-detail__description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.place-detail__description-toggle {
+  align-self: flex-start;
+  padding: 2px var(--u2);
+  font-size: 12px;
+  color: var(--px-ink-sub);
+  background: none;
+  border: 1px solid var(--px-outline);
+}
+
+.place-detail__section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--px-ink-sub);
+  margin-bottom: var(--u1);
+}
+
+.place-detail__amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--u1);
+}
+
+.place-detail__amenity {
+  padding: 2px var(--u2);
+  font-size: 12px;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+.place-detail__empty {
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+.place-detail__audio {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  padding: var(--u2);
+  font-size: 13px;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+.place-detail__audio-button {
+  flex: 0 0 auto;
+  padding: var(--u1) var(--u2);
+  font-size: 12px;
+  border: 2px solid var(--px-outline);
+  background: var(--px-panel);
+}
+
+.place-detail__audio-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--px-ink-sub);
+}
+
+.place-detail__status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--px-ink-sub);
+}
+
+.place-detail__status:empty {
   display: none;
 }
 

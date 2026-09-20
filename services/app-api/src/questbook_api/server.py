@@ -8,7 +8,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from questbook_api.application.baseline_service import BaselineQuestbookService
@@ -20,6 +20,7 @@ from questbook_api.integrations.object_storage.client import ObjectStorageClient
 from questbook_api.integrations.ocr.client import OcrClient, normalize_ocr_image_format
 from questbook_api.integrations.oauth import client as oauth_client
 from questbook_api.integrations.tourapi.client import TourApiClient
+from questbook_api.integrations.translation.client import TranslationClient
 from questbook_api.settings import AppSettings
 
 
@@ -60,6 +61,8 @@ class AppState:
     object_storage: ObjectStorageClient | None = None
     # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
     ocr: OcrClient | None = None
+    # 변수 의미: NAVER Papago 번역 클라이언트다.
+    translation: TranslationClient | None = None
 
 
 def build_json_bytes(payload: dict[str, Any]) -> bytes:
@@ -114,6 +117,56 @@ def first_query_value(query: dict[str, list[str]], name: str, default: str = "")
     # 변수 의미: 요청한 필드에 해당하는 모든 쿼리 값이다.
     values = query.get(name, [])
     return values[0].strip() if values else default
+
+
+def parse_optional_float_query(query: dict[str, list[str]], name: str) -> float | None:
+    """
+    입력: 파싱된 쿼리 딕셔너리와 필드 이름.
+    출력: 파싱된 실수 값. 값이 없거나 잘못되면 None.
+    역할: 장소 상세 조회에서 선택적인 lat/lng 파라미터를 안전하게 읽는다.
+    호출 예시: latitude = parse_optional_float_query(query, "lat")
+    """
+    values = query.get(name, [])
+    if not values:
+        return None
+    try:
+        return float(values[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def translate_recommendation_texts(
+    payload: dict[str, Any], translation: TranslationClient | None, language: str,
+) -> None:
+    """
+    입력: 추천 응답 딕셔너리, 번역 클라이언트, 요청 언어.
+    출력: 없음. payload를 제자리에서 수정한다.
+    역할: 장소명·퀘스트 제목·설명처럼 장소명이 문장에 끼워져 조합이 무한한 텍스트를
+          영문 요청일 때만 Papago로 번역한다. 카테고리명 등 고정된 값은 프런트 사전이 담당한다.
+    호출 예시: translate_recommendation_texts(payload, state.translation, "eng")
+    """
+    if language != "eng" or translation is None:
+        return
+    for item in payload.get("recommendations", []):
+        place = item.get("place")
+        if isinstance(place, dict) and place.get("title"):
+            translated_title, _ = translation.translate_description(
+                str(place.get("contentId", "")), place["title"], "eng",
+            )
+            place["title"] = translated_title
+        quest = item.get("quest")
+        if isinstance(quest, dict):
+            content_id = str(place.get("contentId", "")) if isinstance(place, dict) else ""
+            if quest.get("title"):
+                translated_quest_title, _ = translation.translate_description(
+                    f"{content_id}:title", quest["title"], "eng",
+                )
+                quest["title"] = translated_quest_title
+            if quest.get("description"):
+                translated_quest_description, _ = translation.translate_description(
+                    f"{content_id}:description", quest["description"], "eng",
+                )
+                quest["description"] = translated_quest_description
 
 
 def is_safe_oauth_nonce(value: str) -> bool:
@@ -304,18 +357,19 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     radius_meters = parse_int_query(query, "radiusMeters", 5000, 100, 20000)
                     # 변수 의미: 명시적 새로고침 여부다.
                     force_refresh = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
-                    self._send_json(
-                        HTTPStatus.OK,
-                        state.service.get_recommendations(
-                            user_id,
-                            latitude,
-                            longitude,
-                            category_key,
-                            radius_meters,
-                            force_refresh,
-                            mode,
-                        ),
+                    # 변수 의미: 장소명·퀘스트 텍스트 표시 언어다. 국문+영문만 지원한다.
+                    language = first_query_value(query, "lang", "kor")
+                    recommendations_payload = state.service.get_recommendations(
+                        user_id,
+                        latitude,
+                        longitude,
+                        category_key,
+                        radius_meters,
+                        force_refresh,
+                        mode,
                     )
+                    translate_recommendation_texts(recommendations_payload, state.translation, language)
+                    self._send_json(HTTPStatus.OK, recommendations_payload)
                     return
                 if path == "/api/places/recommendations":
                     # 변수 의미: 토큰에서 검증한 사용자 ID다.
@@ -324,10 +378,18 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     category_key = query.get("category", ["all"])[0]
                     # 변수 의미: 사용자별 대전 관광지 캐시를 우회할지 여부다.
                     force_refresh = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
-                    self._send_json(
-                        HTTPStatus.OK,
-                        state.service.get_place_recommendations(user_id, category_key, force_refresh),
+                    # 변수 의미: 장소명 표시 언어다. 국문+영문만 지원한다.
+                    language = first_query_value(query, "lang", "kor")
+                    place_recommendations_payload = state.service.get_place_recommendations(
+                        user_id, category_key, force_refresh,
                     )
+                    translate_recommendation_texts(place_recommendations_payload, state.translation, language)
+                    self._send_json(HTTPStatus.OK, place_recommendations_payload)
+                    return
+                # 변수 의미: 장소 상세 조회 경로 토큰이다. (/api/places/{contentId}/detail)
+                place_parts = [part for part in path.split("/") if part]
+                if len(place_parts) == 4 and place_parts[:2] == ["api", "places"] and place_parts[3] == "detail":
+                    self._handle_place_detail(unquote(place_parts[2]), query)
                     return
                 if path == "/api/badges":
                     user_id = self._required_user_id()
@@ -990,6 +1052,33 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
+        def _handle_place_detail(self, content_id: str, query: dict[str, list[str]]) -> None:
+            """
+            입력: TourAPI contentId와 쿼리 파라미터(contentTypeId, lang, lat, lng).
+            출력: 없음. 장소 상세 JSON 응답을 직접 전송한다.
+            역할: TourAPI 언어별 매칭을 우선 쓰고, 실패하면 Papago 기계번역으로 폴백한다.
+            호출 예시: GET /api/places/126508/detail?lang=eng&lat=36.367&lng=127.388
+            """
+            if not content_id:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "content_id is required."})
+                return
+            content_type_id = first_query_value(query, "contentTypeId")
+            language = first_query_value(query, "lang", "kor")
+            latitude = parse_optional_float_query(query, "lat")
+            longitude = parse_optional_float_query(query, "lng")
+            detail = state.service.tour_client.fetch_localized_detail(
+                content_id, content_type_id, language, latitude, longitude,
+            )
+            if not detail.get("translationAvailable", True) and language != "kor" and state.translation is not None:
+                translated_text, machine_translated = state.translation.translate_description(
+                    content_id, detail.get("description", ""), language,
+                )
+                detail["description"] = translated_text
+                detail["machineTranslated"] = machine_translated
+            else:
+                detail["machineTranslated"] = False
+            self._send_json(HTTPStatus.OK, detail)
+
         def _handle_naver_geocode(self, query: dict[str, list[str]]) -> None:
             """
             입력: 주소 검색어가 포함된 쿼리 딕셔너리.
@@ -1166,6 +1255,8 @@ def build_state(settings: AppSettings) -> AppState:
     object_storage = ObjectStorageClient(settings)
     # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
     ocr = OcrClient(settings)
+    # 변수 의미: NAVER Papago 번역 클라이언트다.
+    translation = TranslationClient(settings)
     return AppState(
         settings=settings,
         repository=repository,
@@ -1174,6 +1265,7 @@ def build_state(settings: AppSettings) -> AppState:
         oauth_state=oauth_state,
         object_storage=object_storage,
         ocr=ocr,
+        translation=translation,
     )
 
 

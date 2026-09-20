@@ -24,9 +24,9 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block"
       onload="document.documentElement.classList.add('fonts-icons-ready')"
     />
-    <link rel="stylesheet" href="../src/styles.css?v=20260915-integration-5" />
-    <link rel="stylesheet" href="../src/stitch-theme.css?v=20260915-integration-5" />
-    <link rel="stylesheet" href="../src/reward-fx.css?v=20260915-integration-5" />
+    <link rel="stylesheet" href="../src/styles.css?v=20260915-integration-13" />
+    <link rel="stylesheet" href="../src/stitch-theme.css?v=20260915-integration-13" />
+    <link rel="stylesheet" href="../src/reward-fx.css?v=20260915-integration-13" />
   </head>
   <body data-active-view="home">
     <a class="skip-link" href="#main-content">본문으로 이동</a>
@@ -426,6 +426,9 @@
     <!-- ── S13 나의 모험 기록 시트 (명세 §10 S13) ── -->
     <div class="quest-sheet" id="record-sheet" hidden></div>
 
+    <!-- ── 관광지 상세 모달 (지도 마커 클릭 시) ── -->
+    <div class="quest-sheet" id="place-detail-sheet" hidden></div>
+
     <!-- ── 우측 상시 책갈피 손잡이와 드로어 (명세 §7.2) ── -->
     <button class="bookmark-handle" type="button" id="bookmark-handle" aria-expanded="false" aria-controls="app-drawer">
       <span class="bookmark-handle__letter" aria-hidden="true">메</span>
@@ -444,6 +447,13 @@
             닫기
           </button>
         </div>
+        <div class="drawer-language-row">
+          <span class="px-label">LANGUAGE</span>
+          <select class="ui-language-select" id="ui-language-select" aria-label="화면 언어 선택">
+            <option value="kor">국문</option>
+            <option value="eng">English</option>
+          </select>
+        </div>
         <div class="drawer-profile" id="drawer-profile"></div>
       </header>
 
@@ -455,7 +465,7 @@
       </div>
     </aside>
 
-    <script type="module" src="../src/app.js?v=20260915-integration-5"></script>
-    <script src="../src/scroll-fab.js?v=20260915-integration-5"></script>
+    <script type="module" src="../src/app.js?v=20260915-integration-13"></script>
+    <script src="../src/scroll-fab.js?v=20260915-integration-13"></script>
   </body>
 </html>

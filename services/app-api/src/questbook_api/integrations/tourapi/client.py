@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
 from threading import Lock, Thread
@@ -31,6 +32,28 @@ DAEJEON_FETCH_BUDGET_SECONDS = 7.5
 UPSTREAM_TIMEOUT_SECONDS = 5
 # 변수 의미: TourAPI 정상 응답 코드다.
 TOURAPI_SUCCESS_RESULT_CODE = "0000"
+# 변수 의미: TourAPI 오퍼레이션 URL을 조립할 기준 URL이다.
+TOURAPI_BASE_URL = "https://apis.data.go.kr/B551011"
+# 변수 의미: 지원하는 언어별 TourAPI 서비스 호스트다. 국문+영문만 지원한다.
+LANGUAGE_SERVICE_HOSTS: dict[str, str] = {
+    "kor": "KorService2",
+    "eng": "EngService2",
+}
+# 변수 의미: 국문 장소를 영문 서비스에서 이름으로 매칭할 때 사용하는 검색 반경이다.
+LANGUAGE_MATCH_SEARCH_RADIUS_METERS = 1000
+# 변수 의미: 오디오 가이드(Odii) 검색 반경이다.
+ODII_SEARCH_RADIUS_METERS = 1500
+# 변수 의미: Odii 결과를 같은 장소로 인정할 최대 거리다. Odii 제목이 국문뿐이라 좌표로만 매칭한다.
+ODII_STORY_MATCH_RADIUS_METERS = 150.0
+# 변수 의미: detailIntro2 응답 필드를 사람이 읽을 라벨로 바꾸는 표다. 값이 있는 첫 필드만 사용한다.
+DETAIL_AMENITY_FIELD_LABELS: tuple[tuple[str, str], ...] = (
+    ("parking", "주차"),
+    ("usetime", "이용 시간"),
+    ("restdate", "휴무일"),
+    ("infocenter", "문의처"),
+    ("chkbabycarriageculture", "유모차 대여"),
+    ("chkpetculture", "반려동물 동반"),
+)
 
 
 # 변수 의미: TourAPI가 없을 때 baseline 흐름을 검증하기 위한 대전 장소 후보 목록이다.
@@ -42,6 +65,37 @@ FALLBACK_PLACES: list[TourPlaceCandidate] = [
     TourPlaceCandidate("fallback-tashu-station", "타슈 중앙로 거점", 36.3267, 127.4262, "mobility", "이동형", "자전거 이동 퀘스트의 시작점으로 사용할 수 있는 도심 거점입니다.", None, "fallback"),
     TourPlaceCandidate("fallback-bomunsan-observatory", "보문산 전망대", 36.3016, 127.4218, "nightview", "야경 기록", "대전 전망과 야경 기록을 남길 수 있는 활동형 관광지입니다.", None, "fallback"),
 ]
+
+# 변수 의미: contentId로 fallback 장소를 바로 찾기 위한 색인이다.
+FALLBACK_PLACES_BY_ID: dict[str, TourPlaceCandidate] = {place.content_id: place for place in FALLBACK_PLACES}
+
+# 변수 의미: fallback 장소의 상세 설명이다. 실시간 TourAPI 조회 없이 고정 텍스트로 제공한다.
+FALLBACK_PLACE_DETAILS: dict[str, dict[str, str]] = {
+    "fallback-hanbat-arboretum": {
+        "kor": "한밭수목원은 대전 시민들이 즐겨 찾는 도심 속 대형 생태공원으로, 다양한 수목과 계절 꽃을 산책하며 관찰할 수 있는 자연 학습 공간입니다.",
+        "eng": "Hanbat Arboretum is a large urban ecological park beloved by Daejeon residents, offering a peaceful place to walk among diverse trees and seasonal flowers.",
+    },
+    "fallback-science-museum": {
+        "kor": "국립중앙과학관은 다양한 과학 전시와 체험 프로그램을 통해 어린이부터 성인까지 즐길 수 있는 대전의 대표 과학 문화 공간입니다.",
+        "eng": "The National Science Museum offers hands-on exhibits and programs for all ages, making it one of Daejeon's leading science and culture destinations.",
+    },
+    "fallback-eunhaeng-dong": {
+        "kor": "은행동 스카이로드는 대전 원도심의 중심 상권 거리로, 아케이드 조명과 다양한 상점이 어우러진 산책과 야간 나들이의 명소입니다.",
+        "eng": "Eunhaeng-dong Sky Road is the heart of Daejeon's old downtown shopping street, known for its arcade lighting and lively evening atmosphere.",
+    },
+    "fallback-sungsimdang": {
+        "kor": "성심당 본점은 대전을 대표하는 베이커리로, 튀김소보로 등 지역 명물 빵을 맛보려는 방문객들이 늘 찾는 곳입니다.",
+        "eng": "Sungsimdang's flagship store is Daejeon's most iconic bakery, famous for its fried soboro bread and other local specialties.",
+    },
+    "fallback-tashu-station": {
+        "kor": "타슈 중앙로 거점은 대전의 공공자전거 타슈를 대여할 수 있는 도심 거점으로, 자전거로 원도심을 둘러보기 좋은 출발점입니다.",
+        "eng": "The Tashu Jungang-ro station is a public bike-share hub in downtown Daejeon, a convenient starting point for exploring the old town by bicycle.",
+    },
+    "fallback-bomunsan-observatory": {
+        "kor": "보문산 전망대는 대전 시내와 야경을 한눈에 내려다볼 수 있는 명소로, 해질 무렵 방문객들에게 특히 인기가 많습니다.",
+        "eng": "Bomunsan Observatory offers a sweeping view of downtown Daejeon and its night skyline, especially popular around sunset.",
+    },
+}
 
 
 # 변수 의미: Questbook 내부 카테고리별 fallback 필터 이름이다.
@@ -171,6 +225,7 @@ def with_distances(places: list[TourPlaceCandidate], latitude: float, longitude:
                 place.summary,
                 round(distance_meters, 1),
                 place.source,
+                place.content_type_id,
             )
         )
     return places_with_distances
@@ -234,6 +289,51 @@ def normalize_service_key(raw_service_key: str) -> str:
     if not stripped_key:
         return ""
     return unquote(stripped_key)
+
+
+def build_operation_url(service_host: str, operation: str) -> str:
+    """
+    입력: TourAPI 서비스 호스트(KorService2 등)와 오퍼레이션 이름.
+    출력: 실제 호출할 TourAPI 엔드포인트 URL.
+    역할: 언어별 호스트가 달라지는 오퍼레이션 URL 조립을 한 곳에서 관리한다.
+    호출 예시: url = build_operation_url("EngService2", "detailCommon2")
+    """
+    return f"{TOURAPI_BASE_URL}/{service_host}/{operation}"
+
+
+def strip_html_tags(raw_html: str) -> str:
+    """
+    입력: TourAPI 개요(overview)처럼 HTML 태그가 섞인 문자열.
+    출력: 태그를 제거한 순수 텍스트.
+    역할: 화면에 그대로 보여줄 수 있는 설명 문장을 만든다.
+    호출 예시: description = strip_html_tags("<p>설명입니다.</p>")
+    """
+    # 변수 의미: <br> 계열 태그를 줄바꿈으로 바꾼 중간 결과다.
+    with_line_breaks = re.sub(r"<br\s*/?>", "\n", raw_html or "", flags=re.IGNORECASE)
+    # 변수 의미: 나머지 HTML 태그를 제거한 결과다.
+    without_tags = re.sub(r"<[^>]+>", "", with_line_breaks)
+    return without_tags.strip()
+
+
+def normalize_match_text(text: str) -> str:
+    """
+    입력: 장소 이름 문자열.
+    출력: 소문자와 영숫자·한글만 남긴 비교용 문자열.
+    역할: 언어 호스트 사이의 표기 차이(공백, 특수문자)를 무시하고 이름을 비교한다.
+    호출 예시: normalize_match_text("한밭 수목원!") == normalize_match_text("한밭수목원")
+    """
+    return re.sub(r"[^0-9a-zA-Z가-힣]", "", (text or "")).lower()
+
+
+def extract_parenthetical_name(title: str) -> str:
+    """
+    입력: "Translated Name (국문명)" 형태의 TourAPI 번역 제목.
+    출력: 괄호 안 국문명. 없으면 빈 문자열.
+    역할: 영문 서비스 결과에서 매칭 기준이 되는 국문 이름을 뽑아낸다.
+    호출 예시: extract_parenthetical_name("Hanbat Arboretum (한밭수목원)") == "한밭수목원"
+    """
+    match = re.search(r"\(([^()]+)\)\s*$", title or "")
+    return match.group(1).strip() if match else ""
 
 
 def extract_result_code(payload: dict[str, Any]) -> str:
@@ -512,6 +612,290 @@ class TourApiClient:
             break
         return self._filter_places(list(places_by_id.values()), category_key, strict=True), source_status
 
+    def fetch_detail(self, content_id: str, content_type_id: str) -> dict[str, Any]:
+        """
+        입력: TourAPI contentId와 contentTypeId.
+        출력: 국문 기준 장소 상세(제목, 설명, 편의 정보, 출처).
+        역할: fallback 장소는 정적 텍스트로, 그 외는 detailCommon2/detailIntro2로 상세를 만든다.
+        호출 예시: detail = client.fetch_detail("126508", "12")
+        """
+        if not content_id:
+            raise ValueError("content_id is required.")
+        fallback_place = FALLBACK_PLACES_BY_ID.get(content_id)
+        if not self.service_key or fallback_place is not None:
+            return self._fallback_detail(content_id, fallback_place)
+        if self._is_circuit_open():
+            return self._fallback_detail(content_id, fallback_place)
+        try:
+            description, title = self._fetch_detail_overview(content_id, "KorService2")
+            amenities = self._fetch_detail_amenities(content_id, content_type_id, "KorService2")
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return self._fallback_detail(content_id, fallback_place)
+        return {
+            "contentId": content_id,
+            "title": title,
+            "description": description or "관광지 설명을 아직 준비 중입니다.",
+            "amenities": amenities,
+            "source": "live",
+        }
+
+    def find_localized_place(
+        self, language: str, latitude: float, longitude: float, kor_title: str,
+    ) -> tuple[str, str] | None:
+        """
+        입력: 요청 언어, 기준 좌표, 국문 장소명.
+        출력: 해당 언어 서비스에서 같은 장소로 확인된 (contentId, contentTypeId). 없으면 None.
+        역할: 언어별 서비스가 서로 다른 contentId 체계를 쓰는 문제를 이름+거리 매칭으로 해결한다.
+        호출 예시: match = client.find_localized_place("eng", 36.367, 127.388, "한밭수목원")
+        """
+        service_host = LANGUAGE_SERVICE_HOSTS.get(language)
+        if not service_host or service_host == "KorService2" or not kor_title:
+            return None
+        try:
+            candidates = self._search_nearby_raw(service_host, latitude, longitude, LANGUAGE_MATCH_SEARCH_RADIUS_METERS)
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+
+        # 변수 의미: 비교에 사용할 정규화된 국문 장소명이다.
+        normalized_kor_title = normalize_match_text(kor_title)
+        best_match: tuple[str, str] | None = None
+        best_distance = float("inf")
+        for candidate in candidates:
+            # 변수 의미: "Translated Name (국문명)" 형태에서 뽑은 국문명이다.
+            parenthetical_name = extract_parenthetical_name(str(candidate.get("title", "")))
+            if not parenthetical_name or normalize_match_text(parenthetical_name) != normalized_kor_title:
+                continue
+            candidate_content_id = str(candidate.get("contentid", "")).strip()
+            if not candidate_content_id:
+                continue
+            try:
+                candidate_longitude = float(candidate.get("mapx"))
+                candidate_latitude = float(candidate.get("mapy"))
+                distance = haversine_meters(latitude, longitude, candidate_latitude, candidate_longitude)
+            except (TypeError, ValueError):
+                distance = 0.0
+            if distance < best_distance:
+                best_distance = distance
+                best_match = (candidate_content_id, str(candidate.get("contenttypeid", "")).strip())
+        return best_match
+
+    def fetch_localized_detail(
+        self,
+        content_id: str,
+        content_type_id: str,
+        language: str,
+        latitude: float | None,
+        longitude: float | None,
+    ) -> dict[str, Any]:
+        """
+        입력: contentId/contentTypeId, 요청 언어, 오디오 가이드 검색에 쓸 좌표.
+        출력: 요청 언어 상세와 오디오 가이드, 번역 가능 여부.
+        역할: 국문 상세를 기준으로 요청 언어가 국문이 아니면 해당 언어 서비스에서 같은 장소를 찾아 대체한다.
+        호출 예시: detail = client.fetch_localized_detail("126508", "12", "eng", 36.367, 127.388)
+        """
+        audio_guide = self.find_audio_guide(latitude, longitude) if latitude is not None and longitude is not None else None
+        normalized_language = language if language in LANGUAGE_SERVICE_HOSTS else "kor"
+
+        # 변수 의미: fallback 장소인지 여부다. fallback은 실시간 언어 매칭을 시도하지 않고
+        # 미리 준비한 국문/영문 텍스트를 그대로 쓴다.
+        fallback_place = FALLBACK_PLACES_BY_ID.get(content_id)
+        if fallback_place is not None:
+            fallback_texts = FALLBACK_PLACE_DETAILS.get(content_id, {})
+            description = fallback_texts.get(normalized_language) or fallback_texts.get("kor", fallback_place.summary)
+            return {
+                "contentId": content_id,
+                "title": fallback_place.title,
+                "description": description,
+                "amenities": [],
+                "source": "fallback",
+                "language": normalized_language,
+                "translationAvailable": True,
+                "audioGuide": audio_guide,
+            }
+
+        kor_detail = self.fetch_detail(content_id, content_type_id)
+
+        if normalized_language == "kor":
+            return {**kor_detail, "language": "kor", "translationAvailable": True, "audioGuide": audio_guide}
+
+        if not self.service_key or latitude is None or longitude is None:
+            return {**kor_detail, "language": normalized_language, "translationAvailable": False, "audioGuide": audio_guide}
+
+        match = self.find_localized_place(normalized_language, latitude, longitude, kor_detail.get("title", ""))
+        if match is None:
+            return {**kor_detail, "language": normalized_language, "translationAvailable": False, "audioGuide": audio_guide}
+
+        matched_content_id, matched_content_type_id = match
+        service_host = LANGUAGE_SERVICE_HOSTS[normalized_language]
+        try:
+            description, _matched_title = self._fetch_detail_overview(matched_content_id, service_host)
+            amenities = self._fetch_detail_amenities(matched_content_id, matched_content_type_id, service_host)
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return {**kor_detail, "language": normalized_language, "translationAvailable": False, "audioGuide": audio_guide}
+
+        return {
+            "contentId": content_id,
+            "language": normalized_language,
+            "description": description or kor_detail["description"],
+            "amenities": amenities,
+            "source": "live",
+            "translationAvailable": True,
+            "audioGuide": audio_guide,
+        }
+
+    def find_audio_guide(self, latitude: float, longitude: float) -> dict[str, Any] | None:
+        """
+        입력: 기준 좌표.
+        출력: 근처 오디오 가이드 대본 정보. 없으면 None.
+        역할: TourAPI Odii 스토리 API에서 근처 대본을 찾는다. 실제 음성 파일이 아니라 텍스트 대본이다.
+        호출 예시: guide = client.find_audio_guide(36.367, 127.388)
+        """
+        if not self.service_key:
+            return None
+        query_params = {
+            "serviceKey": self.service_key,
+            "MobileOS": "ETC",
+            "MobileApp": "QuestbookDaejeon",
+            "_type": "json",
+            "numOfRows": "20",
+            "pageNo": "1",
+            "langCode": "ko",
+            "mapX": f"{longitude:.7f}",
+            "mapY": f"{latitude:.7f}",
+            "radius": str(ODII_SEARCH_RADIUS_METERS),
+        }
+        request_url = f"{build_operation_url('Odii', 'storyLocationBasedList')}?{urlencode(query_params)}"
+        try:
+            with urlopen(request_url, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+        if extract_result_code(payload) != TOURAPI_SUCCESS_RESULT_CODE:
+            return None
+
+        best_story: dict[str, Any] | None = None
+        best_distance = ODII_STORY_MATCH_RADIUS_METERS
+        for candidate in extract_response_items(extract_response_body(payload)):
+            script = str(candidate.get("script", "")).strip()
+            if not script:
+                continue
+            try:
+                candidate_longitude = float(candidate.get("mapX"))
+                candidate_latitude = float(candidate.get("mapY"))
+            except (TypeError, ValueError):
+                continue
+            distance = haversine_meters(latitude, longitude, candidate_latitude, candidate_longitude)
+            if distance > best_distance:
+                continue
+            best_distance = distance
+            play_time_raw = str(candidate.get("playTime", "")).strip()
+            best_story = {
+                "title": str(candidate.get("title", "")).strip(),
+                "audioTitle": str(candidate.get("audioTitle", "")).strip(),
+                "script": script,
+                "playTimeSeconds": int(play_time_raw) if play_time_raw.isdigit() else None,
+            }
+        return best_story
+
+    def _search_nearby_raw(
+        self, service_host: str, latitude: float, longitude: float, radius_meters: int,
+    ) -> list[dict[str, Any]]:
+        """
+        입력: TourAPI 서비스 호스트, 기준 좌표, 검색 반경.
+        출력: 최소 필드로 정리하기 전의 원본 item 딕셔너리 목록.
+        역할: 언어 매칭처럼 원본 필드(contenttypeid, title 원문)가 그대로 필요한 호출에 쓴다.
+        호출 예시: candidates = self._search_nearby_raw("EngService2", 36.367, 127.388, 1000)
+        """
+        query_params = {
+            "serviceKey": self.service_key,
+            "MobileOS": "ETC",
+            "MobileApp": "QuestbookDaejeon",
+            "_type": "json",
+            "mapX": f"{longitude:.7f}",
+            "mapY": f"{latitude:.7f}",
+            "radius": str(radius_meters),
+            "numOfRows": "20",
+            "pageNo": "1",
+            "arrange": "E",
+        }
+        request_url = f"{build_operation_url(service_host, 'locationBasedList2')}?{urlencode(query_params)}"
+        with urlopen(request_url, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if extract_result_code(payload) != TOURAPI_SUCCESS_RESULT_CODE:
+            return []
+        return [item for item in extract_response_items(extract_response_body(payload)) if isinstance(item, dict)]
+
+    def _fetch_detail_overview(self, content_id: str, service_host: str = "KorService2") -> tuple[str, str]:
+        """
+        입력: contentId와 조회할 서비스 호스트.
+        출력: (설명, 제목) 튜플.
+        역할: detailCommon2에서 개요와 제목을 읽는다.
+        호출 예시: description, title = self._fetch_detail_overview("126508", "EngService2")
+        """
+        # defaultYN/overviewYN 플래그를 넣으면 이 API 버전에서 INVALID_REQUEST_PARAMETER_ERROR가 나서
+        # 일부러 넣지 않는다. overview는 기본으로 포함된다.
+        query_params = {
+            "serviceKey": self.service_key,
+            "MobileOS": "ETC",
+            "MobileApp": "QuestbookDaejeon",
+            "_type": "json",
+            "contentId": content_id,
+        }
+        request_url = f"{build_operation_url(service_host, 'detailCommon2')}?{urlencode(query_params)}"
+        with urlopen(request_url, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        items = extract_response_items(extract_response_body(payload))
+        item = items[0] if items else {}
+        return strip_html_tags(str(item.get("overview", ""))), str(item.get("title", "")).strip()
+
+    def _fetch_detail_amenities(
+        self, content_id: str, content_type_id: str, service_host: str = "KorService2",
+    ) -> list[dict[str, str]]:
+        """
+        입력: contentId, contentTypeId, 조회할 서비스 호스트.
+        출력: {key, label, value} 편의 정보 목록.
+        역할: detailIntro2에서 주차/이용시간/휴무일/문의처 등 값이 있는 필드만 뽑는다.
+        호출 예시: amenities = self._fetch_detail_amenities("126508", "12")
+        """
+        if not content_type_id:
+            return []
+        query_params = {
+            "serviceKey": self.service_key,
+            "MobileOS": "ETC",
+            "MobileApp": "QuestbookDaejeon",
+            "_type": "json",
+            "contentId": content_id,
+            "contentTypeId": content_type_id,
+        }
+        request_url = f"{build_operation_url(service_host, 'detailIntro2')}?{urlencode(query_params)}"
+        with urlopen(request_url, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        items = extract_response_items(extract_response_body(payload))
+        item = items[0] if items else {}
+        amenities: list[dict[str, str]] = []
+        for field_name, label in DETAIL_AMENITY_FIELD_LABELS:
+            value = str(item.get(field_name, "")).strip()
+            if value:
+                amenities.append({"key": field_name, "label": label, "value": value})
+        return amenities
+
+    def _fallback_detail(self, content_id: str, fallback_place: TourPlaceCandidate | None) -> dict[str, Any]:
+        """
+        입력: contentId와 알려진 fallback 장소(없으면 None).
+        출력: 정적 fallback 상세.
+        역할: TourAPI를 호출할 수 없을 때도 상세 모달이 항상 무언가를 보여주게 한다.
+        호출 예시: detail = self._fallback_detail("fallback-hanbat-arboretum", place)
+        """
+        return {
+            "contentId": content_id,
+            "title": fallback_place.title if fallback_place else "",
+            "description": FALLBACK_PLACE_DETAILS.get(content_id, {}).get(
+                "kor", fallback_place.summary if fallback_place else "관광지 설명을 아직 준비 중입니다.",
+            ),
+            "amenities": [],
+            "source": "fallback",
+        }
+
     def status(self) -> dict[str, Any]:
         """
         입력: 없음.
@@ -628,6 +1012,8 @@ class TourApiClient:
                 continue
             # 변수 의미: 내부 카테고리 코드와 이름이다.
             category_code, category_name = map_tourapi_category(raw_item)
+            # 변수 의미: 장소 상세(detailIntro2) 조회에 필요한 TourAPI 콘텐츠 타입 ID다.
+            content_type_id = str(raw_item.get("contenttypeid") or "").strip()
             places.append(
                 TourPlaceCandidate(
                     content_id,
@@ -639,6 +1025,7 @@ class TourApiClient:
                     f"{category_name} 퀘스트 후보로 추천된 관광지입니다.",
                     None,
                     "tourapi",
+                    content_type_id,
                 )
             )
         return places
