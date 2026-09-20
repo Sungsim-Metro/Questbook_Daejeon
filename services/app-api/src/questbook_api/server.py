@@ -4,14 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from questbook_api.application.baseline_service import BaselineQuestbookService
+from questbook_api.application.quest_generation import build_localized_quest_text
 from questbook_api.domain.auth.tokens import create_access_token, verify_access_token
 from questbook_api.infrastructure.cache import TourPlaceRedisCache
 from questbook_api.infrastructure.oauth_state import OAuthStateError, OAuthStateStore
@@ -20,17 +22,27 @@ from questbook_api.integrations.object_storage.client import ObjectStorageClient
 from questbook_api.integrations.ocr.client import OcrClient, normalize_ocr_image_format
 from questbook_api.integrations.oauth import client as oauth_client
 from questbook_api.integrations.tourapi.client import TourApiClient
+from questbook_api.integrations.translation.client import TranslationClient
 from questbook_api.settings import AppSettings
 
 
-# 변수 의미: NAVER Maps REST API 기본 URL이다.
-NAVER_OPENAPI_BASE_URL = "https://naveropenapi.apigw.ntruss.com"
+# 변수 의미: NAVER Maps REST API 기본 URL이다. naveropenapi.apigw.ntruss.com은 구버전
+# "AI·NAVER API" 상품 도메인이라, 신버전 통합 "Maps" 상품(Application Services > Maps)에서
+# 만든 Application은 이 구버전 게이트웨이로는 구독 여부와 무관하게 계속 401을 돌려준다.
+# 실측으로 직접 확인(신버전 도메인은 200, 구버전은 동일 키로도 401)하고 이걸로 바꿨다.
+NAVER_OPENAPI_BASE_URL = "https://maps.apigw.ntruss.com"
 # 변수 의미: NAVER Geocoding API 경로다.
 NAVER_GEOCODE_PATH = "/map-geocode/v2/geocode"
 # 변수 의미: NAVER Reverse Geocoding API 경로다.
 NAVER_REVERSE_GEOCODE_PATH = "/map-reversegeocode/v2/gc"
 # 변수 의미: NAVER REST API 상위 요청 제한 시간 초 단위 값이다.
 NAVER_UPSTREAM_TIMEOUT_SECONDS = 8
+# 변수 의미: NAVER API HUB(2026-06-25 이후 검색 API 통합 플랫폼, developers.naver.com 대체) 기본 URL이다.
+NAVER_API_HUB_BASE_URL = "https://naverapihub.apigw.ntruss.com"
+# 변수 의미: 지역검색(상호명/장소명 검색) 경로다. Geocoding은 정형 주소만 매칭해서 별도로 둔다.
+NAVER_LOCAL_SEARCH_PATH = "/search/v1/local"
+# 변수 의미: 지역검색 mapx/mapy를 위경도(도) 단위로 바꾸는 나눗셈 값이다.
+NAVER_LOCAL_SEARCH_COORD_DIVISOR = 10_000_000
 # 변수 의미: Geocoding API에 허용할 언어 코드다.
 ALLOWED_GEOCODE_LANGUAGES = {"kor", "eng"}
 # 변수 의미: Reverse Geocoding API에 허용할 변환 대상이다.
@@ -60,6 +72,9 @@ class AppState:
     object_storage: ObjectStorageClient | None = None
     # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
     ocr: OcrClient | None = None
+    # 변수 의미: Google Cloud Translation 클라이언트다. 장소 상세 모달의 설명 텍스트에만
+    # 쓰인다(퀘스트 제목/설명은 translate_recommendation_texts()가 템플릿+장소명으로 조립).
+    translation: TranslationClient | None = None
 
 
 def build_json_bytes(payload: dict[str, Any]) -> bytes:
@@ -114,6 +129,65 @@ def first_query_value(query: dict[str, list[str]], name: str, default: str = "")
     # 변수 의미: 요청한 필드에 해당하는 모든 쿼리 값이다.
     values = query.get(name, [])
     return values[0].strip() if values else default
+
+
+def parse_optional_float_query(query: dict[str, list[str]], name: str) -> float | None:
+    """
+    입력: 파싱된 쿼리 딕셔너리와 필드 이름.
+    출력: 파싱된 실수 값. 값이 없거나 잘못되면 None.
+    역할: 장소 상세 조회에서 선택적인 lat/lng 파라미터를 안전하게 읽는다.
+    호출 예시: latitude = parse_optional_float_query(query, "lat")
+    """
+    values = query.get(name, [])
+    if not values:
+        return None
+    try:
+        return float(values[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def translate_recommendation_texts(
+    payload: dict[str, Any], repository: QuestbookRepository, language: str,
+) -> None:
+    """
+    입력: 추천 응답 딕셔너리, 저장소, 요청 언어.
+    출력: 없음. payload를 제자리에서 수정한다.
+    역할: 퀘스트 제목/설명은 카테고리별 6개 고정 템플릿 + 장소명 조합일 뿐이라(quest_generation.
+          QUEST_TEMPLATES), 매 요청마다 기계번역을 부르지 않고 영문 템플릿(QUEST_TEMPLATE_TEXT_EN)에
+          장소명만 끼워 재조립한다. 장소명 자체는 매일 배치(catalog_sync.sync_place_name_translations)가
+          미리 채워 둔 place_name_translations 캐시에서 읽는다 — 실시간 호출이 전혀 없다.
+          배치가 아직 못 채운 아주 새 장소는 국문 장소명을 그대로 영문 템플릿에 끼워 넣어
+          완전히 빈 텍스트가 되는 것만 피한다(다음 배치에서 자연히 채워짐).
+    호출 예시: translate_recommendation_texts(payload, state.repository, "eng")
+    """
+    if language != "eng":
+        return
+    recommendations = payload.get("recommendations", [])
+    # 변수 의미: 이번 응답에 등장하는 장소의 contentId 목록이다. 한 번의 배치 조회로 끝낸다.
+    content_ids = [
+        str(item["place"]["contentId"])
+        for item in recommendations
+        if isinstance(item.get("place"), dict) and item["place"].get("contentId")
+    ]
+    translations = repository.get_place_name_translations(content_ids)
+    for item in recommendations:
+        place = item.get("place")
+        if not isinstance(place, dict) or not place.get("title"):
+            continue
+        content_id = str(place.get("contentId", ""))
+        cached = translations.get(content_id)
+        # 변수 의미: 캐시에 없으면 다음 배치가 채울 때까지 국문 장소명을 그대로 쓴다.
+        english_place_name = cached["nameEng"] if cached else place["title"]
+        place["title"] = english_place_name
+        quest = item.get("quest")
+        if isinstance(quest, dict) and quest.get("categoryCode"):
+            title, description = build_localized_quest_text(quest["categoryCode"], english_place_name)
+            quest["title"] = title
+            quest["description"] = description
+            place_reference = quest.get("placeReference")
+            if isinstance(place_reference, dict):
+                place_reference["placeName"] = english_place_name
 
 
 def is_safe_oauth_nonce(value: str) -> bool:
@@ -191,19 +265,20 @@ def build_naver_headers(settings: AppSettings, accept: str | None = None) -> dic
     return headers
 
 
-def request_naver_upstream(settings: AppSettings, path: str, params: dict[str, Any]) -> tuple[bytes, str, int]:
+def request_naver_json(base_url: str, path: str, params: dict[str, Any], headers: dict[str, str]) -> tuple[bytes, str, int]:
     """
-    입력: 앱 설정, NAVER API 경로, 쿼리 파라미터.
+    입력: NAVER API 기본 URL, 경로, 쿼리 파라미터, 인증 헤더.
     출력: 응답 바이트, 콘텐츠 타입, 상위 HTTP 상태 코드.
-    역할: NAVER Open API에 제한 시간 안에서 서버 측 요청을 보낸다.
-    호출 예시: body, content_type, status = request_naver_upstream(settings, NAVER_GEOCODE_PATH, params)
+    역할: Maps(Geocoding)와 API HUB(지역검색)가 도메인·인증키는 다르지만 요청/오류 처리
+          로직은 같아서 공유한다.
+    호출 예시: body, content_type, status = request_naver_json(NAVER_OPENAPI_BASE_URL, NAVER_GEOCODE_PATH, params, headers)
     """
     # 변수 의미: 인코딩된 쿼리 문자열이다.
     query_string = urlencode(params, doseq=True)
     # 변수 의미: 완성된 NAVER 상위 API URL이다.
-    upstream_url = f"{NAVER_OPENAPI_BASE_URL}{path}?{query_string}"
+    upstream_url = f"{base_url}{path}?{query_string}"
     # 변수 의미: 준비된 상위 API 요청 객체다.
-    request = Request(upstream_url, headers=build_naver_headers(settings, "application/json"))
+    request = Request(upstream_url, headers=headers)
 
     try:
         with urlopen(request, timeout=NAVER_UPSTREAM_TIMEOUT_SECONDS) as response:
@@ -221,7 +296,90 @@ def request_naver_upstream(settings: AppSettings, path: str, params: dict[str, A
         error_content_type = error.headers.get("Content-Type", "application/json; charset=utf-8")
         return error_body, error_content_type, error.code
     except URLError as error:
-        raise RuntimeError(f"NAVER Maps upstream request failed: {error.reason}") from error
+        raise RuntimeError(f"NAVER upstream request failed: {error.reason}") from error
+
+
+def request_naver_upstream(settings: AppSettings, path: str, params: dict[str, Any]) -> tuple[bytes, str, int]:
+    """
+    입력: 앱 설정, NAVER Maps API 경로, 쿼리 파라미터.
+    출력: 응답 바이트, 콘텐츠 타입, 상위 HTTP 상태 코드.
+    역할: NAVER Maps(Geocoding/Reverse Geocoding)에 제한 시간 안에서 서버 측 요청을 보낸다.
+    호출 예시: body, content_type, status = request_naver_upstream(settings, NAVER_GEOCODE_PATH, params)
+    """
+    return request_naver_json(
+        NAVER_OPENAPI_BASE_URL, path, params, build_naver_headers(settings, "application/json"),
+    )
+
+
+def build_naver_api_hub_headers(settings: AppSettings) -> dict[str, str]:
+    """
+    입력: 앱 설정.
+    출력: NAVER API HUB에 필요한 인증 헤더.
+    역할: Maps와 별개로 발급받은 API HUB Application의 Client ID/Secret을 사용한다.
+    호출 예시: headers = build_naver_api_hub_headers(settings)
+    """
+    if not settings.naver_api_hub_key_id or not settings.naver_api_hub_key:
+        raise RuntimeError("NAVER API HUB credentials are missing.")
+    return {
+        "X-NCP-APIGW-API-KEY-ID": settings.naver_api_hub_key_id,
+        "X-NCP-APIGW-API-KEY": settings.naver_api_hub_key,
+        "Accept": "application/json",
+    }
+
+
+def request_naver_local_search(settings: AppSettings, query_text: str) -> tuple[bytes, str, int]:
+    """
+    입력: 앱 설정, 검색어.
+    출력: 응답 바이트, 콘텐츠 타입, 상위 HTTP 상태 코드.
+    역할: 상호명/장소명 검색(지역검색)을 NAVER API HUB에 요청한다. Geocoding과 달리 정형
+          주소가 아니어도("성심당 본점") 매칭된다.
+    호출 예시: body, content_type, status = request_naver_local_search(settings, "성심당 본점")
+    """
+    return request_naver_json(
+        NAVER_API_HUB_BASE_URL,
+        NAVER_LOCAL_SEARCH_PATH,
+        {"query": query_text, "display": 5, "start": 1, "sort": "random"},
+        build_naver_api_hub_headers(settings),
+    )
+
+
+def strip_html_tags(text: str) -> str:
+    """
+    입력: HTML 태그가 섞여 있을 수 있는 텍스트.
+    출력: 태그를 제거한 순수 텍스트.
+    역할: NAVER 지역검색 title이 일치 구간에 <b> 태그를 감싸서 오는 것을 정리한다.
+    호출 예시: strip_html_tags("<b>성심당</b> 본점") == "성심당 본점"
+    """
+    return re.sub(r"<[^>]+>", "", text or "")
+
+
+def normalize_local_search_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    입력: NAVER 지역검색 원본 JSON.
+    출력: Geocoding 응답과 같은 모양({roadAddress, jibunAddress, label, x, y})의 목록.
+    역할: 프런트가 이미 Geocoding 응답을 파싱하는 로직(roadAddress/jibunAddress/label,
+          x/y)을 그대로 재사용할 수 있도록 두 API의 결과 모양을 하나로 맞춘다. mapx/mapy는
+          위경도*10^7 정수로 온다(레거시 지역검색 API와 동일한 관례로 확인됨).
+    호출 예시: addresses = normalize_local_search_results(payload)
+    """
+    results = []
+    for item in payload.get("items", []):
+        try:
+            longitude = float(item.get("mapx", 0)) / NAVER_LOCAL_SEARCH_COORD_DIVISOR
+            latitude = float(item.get("mapy", 0)) / NAVER_LOCAL_SEARCH_COORD_DIVISOR
+        except (TypeError, ValueError):
+            continue
+        if not (-90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0):
+            continue
+        results.append({
+            "label": strip_html_tags(str(item.get("title", ""))),
+            "roadAddress": str(item.get("roadAddress", "")),
+            "jibunAddress": str(item.get("address", "")),
+            "category": str(item.get("category", "")),
+            "x": longitude,
+            "y": latitude,
+        })
+    return results
 
 
 def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
@@ -304,18 +462,19 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     radius_meters = parse_int_query(query, "radiusMeters", 5000, 100, 20000)
                     # 변수 의미: 명시적 새로고침 여부다.
                     force_refresh = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
-                    self._send_json(
-                        HTTPStatus.OK,
-                        state.service.get_recommendations(
-                            user_id,
-                            latitude,
-                            longitude,
-                            category_key,
-                            radius_meters,
-                            force_refresh,
-                            mode,
-                        ),
+                    # 변수 의미: 장소명·퀘스트 텍스트 표시 언어다. 국문+영문만 지원한다.
+                    language = first_query_value(query, "lang", "kor")
+                    recommendations_payload = state.service.get_recommendations(
+                        user_id,
+                        latitude,
+                        longitude,
+                        category_key,
+                        radius_meters,
+                        force_refresh,
+                        mode,
                     )
+                    translate_recommendation_texts(recommendations_payload, state.repository, language)
+                    self._send_json(HTTPStatus.OK, recommendations_payload)
                     return
                 if path == "/api/places/recommendations":
                     # 변수 의미: 토큰에서 검증한 사용자 ID다.
@@ -324,10 +483,18 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     category_key = query.get("category", ["all"])[0]
                     # 변수 의미: 사용자별 대전 관광지 캐시를 우회할지 여부다.
                     force_refresh = query.get("refresh", ["0"])[0] in {"1", "true", "yes"}
-                    self._send_json(
-                        HTTPStatus.OK,
-                        state.service.get_place_recommendations(user_id, category_key, force_refresh),
+                    # 변수 의미: 장소명 표시 언어다. 국문+영문만 지원한다.
+                    language = first_query_value(query, "lang", "kor")
+                    place_recommendations_payload = state.service.get_place_recommendations(
+                        user_id, category_key, force_refresh,
                     )
+                    translate_recommendation_texts(place_recommendations_payload, state.repository, language)
+                    self._send_json(HTTPStatus.OK, place_recommendations_payload)
+                    return
+                # 변수 의미: 장소 상세 조회 경로 토큰이다. (/api/places/{contentId}/detail)
+                place_parts = [part for part in path.split("/") if part]
+                if len(place_parts) == 4 and place_parts[:2] == ["api", "places"] and place_parts[3] == "detail":
+                    self._handle_place_detail(unquote(place_parts[2]), query)
                     return
                 if path == "/api/badges":
                     user_id = self._required_user_id()
@@ -990,6 +1157,59 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
+        def _handle_place_detail(self, content_id: str, query: dict[str, list[str]]) -> None:
+            """
+            입력: TourAPI contentId와 쿼리 파라미터(contentTypeId, lang, lat, lng).
+            출력: 없음. 장소 상세 JSON 응답을 직접 전송한다.
+            역할: TourAPI 언어별 매칭을 우선 쓰고, 실패하면 Papago 기계번역으로 폴백한다.
+            호출 예시: GET /api/places/126508/detail?lang=eng&lat=36.367&lng=127.388
+            """
+            if not content_id:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "content_id is required."})
+                return
+            content_type_id = first_query_value(query, "contentTypeId")
+            language = first_query_value(query, "lang", "kor")
+            latitude = parse_optional_float_query(query, "lat")
+            longitude = parse_optional_float_query(query, "lng")
+            detail = state.service.tour_client.fetch_localized_detail(
+                content_id, content_type_id, language, latitude, longitude,
+            )
+            if not detail.get("translationAvailable", True) and language != "kor" and state.translation is not None:
+                translated_text, machine_translated = state.translation.translate_description(
+                    content_id, detail.get("description", ""), language,
+                )
+                detail["description"] = translated_text
+                detail["machineTranslated"] = machine_translated
+                # 변수 의미: 편의 정보 값이다. "이용 시간"처럼 자유 문장인 값은 프런트 사전
+                # (UI_STRINGS_EN)의 고정 단어 치환만으로는 못 잡으므로, description과 같은
+                # 방식으로(콘텐츠ID+필드 단위 Redis 캐시) 번역해 섞인 텍스트가 남지 않게 한다.
+                amenities = detail.get("amenities")
+                if isinstance(amenities, list):
+                    for amenity in amenities:
+                        if not isinstance(amenity, dict) or not amenity.get("value"):
+                            continue
+                        translated_value, value_machine_translated = state.translation.translate_description(
+                            f"{content_id}:amenity:{amenity.get('key', '')}", amenity["value"], language,
+                        )
+                        amenity["value"] = translated_value
+                        detail["machineTranslated"] = detail["machineTranslated"] or value_machine_translated
+            else:
+                detail["machineTranslated"] = False
+            # 변수 의미: Odii 오디오 가이드 대본이다. Odii는 언어 파라미터 없이 국문 전용으로만
+            # 조회하므로(find_audio_guide의 langCode="ko" 고정), EngService2 매칭 성공 여부와
+            # 무관하게 항상 국문이다 — translationAvailable 분기와 별개로 매번 번역이 필요하다.
+            audio_guide = detail.get("audioGuide")
+            if isinstance(audio_guide, dict) and language != "kor" and state.translation is not None:
+                for field_name in ("title", "audioTitle", "script"):
+                    if not audio_guide.get(field_name):
+                        continue
+                    translated_field, field_machine_translated = state.translation.translate_description(
+                        f"{content_id}:audioGuide:{field_name}", audio_guide[field_name], language,
+                    )
+                    audio_guide[field_name] = translated_field
+                    detail["machineTranslated"] = detail.get("machineTranslated", False) or field_machine_translated
+            self._send_json(HTTPStatus.OK, detail)
+
         def _handle_naver_geocode(self, query: dict[str, list[str]]) -> None:
             """
             입력: 주소 검색어가 포함된 쿼리 딕셔너리.
@@ -1007,6 +1227,39 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             language = first_query_value(query, "language", "kor").lower()
             if language not in ALLOWED_GEOCODE_LANGUAGES:
                 language = "kor"
+
+            # 변수 의미: 상호명/장소명 검색을 먼저 시도한다. Geocoding은 정형 주소만
+            # 매칭해서 "성심당 본점" 같은 검색어는 못 찾지만, 지역검색(API HUB)은 찾을 수
+            # 있다. API HUB 키가 없거나 결과가 없으면 조용히 기존 Geocoding으로 넘어간다.
+            if state.settings.naver_api_hub_key_id and state.settings.naver_api_hub_key:
+                try:
+                    local_body, _local_content_type, local_status = request_naver_local_search(
+                        state.settings, query_text,
+                    )
+                    if local_status == 200:
+                        local_payload = json.loads(local_body.decode("utf-8"))
+                        addresses = normalize_local_search_results(local_payload)
+                        if addresses:
+                            # 변수 의미: 지역검색은 언어 파라미터가 없어 상호명·주소가 항상
+                            # 국문으로 온다. 영문 모드에서는 place-detail과 같은 방식(원문
+                            # 자체를 캐시 키로 쓰는 기계번역)으로 화면에 보이는 필드만 번역한다.
+                            if language == "eng" and state.translation is not None:
+                                for address in addresses:
+                                    for field_name in ("label", "roadAddress", "jibunAddress"):
+                                        original_value = address.get(field_name, "")
+                                        if not original_value:
+                                            continue
+                                        translated_value, _machine_translated = state.translation.translate_description(
+                                            f"geocode:{field_name}:{original_value}", original_value, language,
+                                        )
+                                        address[field_name] = translated_value
+                            self._send_json(
+                                HTTPStatus.OK,
+                                {"status": "OK", "addresses": addresses, "source": "localSearch"},
+                            )
+                            return
+                except (RuntimeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                    pass
 
             # 변수 의미: Geocoding 요청 파라미터다.
             upstream_params: dict[str, Any] = {
@@ -1067,6 +1320,21 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 response_body, content_type, status_code = request_naver_upstream(state.settings, path, params)
             except RuntimeError as error:
                 self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(error)})
+                return
+
+            if status_code in (401, 403):
+                # NAVER 쪽 키/구독 인증 실패다. 그대로 돌려주면 프런트의 fetchJson()이 "우리
+                # 서비스 로그인 세션 만료"로 오인해 정상 로그인된 사용자를 강제 로그아웃시킨다
+                # (isUnauthorizedError()가 상태 코드 401만 보고 판단하기 때문). 사용자 세션과는
+                # 무관한 업스트림 인증 실패이므로 502로 구분해 돌려준다.
+                self._send_json(
+                    HTTPStatus.BAD_GATEWAY,
+                    {
+                        "error": "naver_upstream_unauthorized",
+                        "message": "NAVER Maps API 인증에 실패했습니다.",
+                        "upstreamStatus": status_code,
+                    },
+                )
                 return
 
             self.send_response(status_code)
@@ -1166,6 +1434,8 @@ def build_state(settings: AppSettings) -> AppState:
     object_storage = ObjectStorageClient(settings)
     # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
     ocr = OcrClient(settings)
+    # 변수 의미: NAVER Papago 번역 클라이언트다.
+    translation = TranslationClient(settings)
     return AppState(
         settings=settings,
         repository=repository,
@@ -1174,6 +1444,7 @@ def build_state(settings: AppSettings) -> AppState:
         oauth_state=oauth_state,
         object_storage=object_storage,
         ocr=ocr,
+        translation=translation,
     )
 
 

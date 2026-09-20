@@ -28,6 +28,11 @@ const FALLBACK_LOCATION = {
   measured: false,
 };
 
+// 화면 전체 표시 언어로 지원하는 값입니다. 국문+영문만 지원합니다.
+const SUPPORTED_UI_LANGUAGES = ["kor", "eng"];
+// 화면 언어 선택을 저장하는 localStorage 키입니다.
+const UI_LANGUAGE_KEY = "questbook:user-web:ui-language";
+
 // 화면에서 선택할 수 있는 관광 카테고리 이름입니다. (명세 §4.1 카테고리 8종)
 const CATEGORY_LABELS = {
   all: "전체",
@@ -94,6 +99,23 @@ const PLAN_LOCATION_PRESETS = [
   { label: "국립중앙과학관", lat: 36.3752, lng: 127.3764 },
   { label: "한밭수목원", lat: 36.3664, lng: 127.3881 },
 ];
+
+/**
+ * 입력: 두 장소명.
+ * 출력: 같은 장소로 볼 수 있는지 여부.
+ * 역할: 공백 차이 등을 무시하고 상호명 검색 결과와 추천 항목의 장소명이 같은 곳을
+ *       가리키는지 판정한다(반경이 아니라 이름으로 "그 장소만" 걸러내기 위해 쓴다).
+ * 호출 예시: isSamePlaceName("성심당 본점", "성심당본점") === true
+ */
+function isSamePlaceName(nameA, nameB) {
+  // 변수 의미: 공백을 없앤 비교용 문자열입니다.
+  const normalizedA = String(nameA || "").replace(/\s+/g, "");
+  const normalizedB = String(nameB || "").replace(/\s+/g, "");
+  if (!normalizedA || !normalizedB) {
+    return false;
+  }
+  return normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA);
+}
 
 
 // 최상위 다섯 화면의 메타데이터입니다. (명세 §7.1)
@@ -433,6 +455,25 @@ const QUEST_STATUS_KEY = "questbook:user-web:quest-status";
 // 브라우저에 저장할 선택 꿈돌이 키입니다.
 const SELECTED_GGUMDORI_KEY = "questbook:user-web:selected-ggumdori";
 
+// 계획 모드에서 사용자가 지도에서 골라 담은 퀘스트 목록을 저장하는 키입니다(1단계: 로컬
+// 상태만, 서버 저장 없음). 경로/드래그 정렬은 다음 단계에서 추가한다.
+const PLANNED_QUEST_LIST_KEY = "questbook:user-web:planned-quest-list";
+
+/**
+ * 입력: 없음.
+ * 출력: 저장된 계획 퀘스트 목록(없거나 깨졌으면 빈 배열).
+ * 역할: 새로고침해도 계획 모드에서 담아 둔 목록을 잃지 않게 한다.
+ * 호출 예시: const list = readPlannedQuestList()
+ */
+function readPlannedQuestList() {
+  try {
+    const parsed = JSON.parse(readStorageValue(PLANNED_QUEST_LIST_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
 // 마이페이지의 앱 설정 전체를 저장하는 키입니다. (명세 §10 S12)
 const APP_SETTINGS_KEY = "questbook:user-web:app-settings";
 
@@ -469,6 +510,11 @@ const OAUTH_INTENT_KEY = "questbook:user-web:oauth-intent";
 // 닉네임 자동 추천에 쓰는 조각입니다. 중복을 허용하므로 확인 API를 부르지 않습니다. (명세 §9.4)
 const NICKNAME_PREFIXES = ["씩씩한", "느긋한", "호기심 많은", "부지런한", "용감한", "다정한", "엉뚱한", "꼼꼼한"];
 const NICKNAME_NOUNS = ["꿈돌이", "탐험가", "기록가", "산책러", "미식가", "수집가", "여행자", "모험가"];
+// NICKNAME_PREFIXES/NICKNAME_NOUNS와 같은 순서로 대응하는 영문 닉네임 조각입니다.
+// 조합이 랜덤이라 applyUiLanguage()의 문자열 정확 일치로는 못 잡아, suggestNickname()이
+// 뽑을 때 인덱스를 맞춰 직접 영문/국문 중 하나를 고른다.
+const NICKNAME_PREFIXES_EN = ["Brave", "Easygoing", "Curious", "Diligent", "Bold", "Kind", "Quirky", "Meticulous"];
+const NICKNAME_NOUNS_EN = ["Dreamdol", "Explorer", "Recorder", "Stroller", "Foodie", "Collector", "Traveler", "Adventurer"];
 
 // 사진 증빙 기본 업로드 제한 바이트 값입니다.
 const DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -488,6 +534,10 @@ const NOTE_ENTRY_BODY_MAX_LENGTH = 2000;
 const state = {
   apiHealthy: false,
   activeView: readInitialView(),
+  // 뒤로가기 버튼이 돌아갈 이전 화면 스택입니다. 최근 방문이 배열 끝입니다.
+  viewHistory: [],
+  // 시작 화면 로딩이 끝나 TAP TO START로 바뀌었는지 여부입니다.
+  startScreenReady: false,
   dataSource: "fallback",
   recommendationMeta: {
     sourceStatus: "fallback:not_loaded",
@@ -501,7 +551,10 @@ const state = {
   plannedCategory: "all",
   location: { ...FALLBACK_LOCATION },
   user: { ...FALLBACK_USER },
-  plannedLocation: { ...FALLBACK_LOCATION, label: "계획 위치를 설정해주세요" },
+  plannedLocation: {
+    ...FALLBACK_LOCATION,
+    label: readStoredUiLanguage() === "eng" ? "Please set a planned location" : "계획 위치를 설정해주세요",
+  },
   recommendations: [...FALLBACK_RECOMMENDATIONS],
   preference: { categories: [], categoriesSetAt: "", isConfigured: false },
   interestDraft: [],
@@ -549,6 +602,16 @@ const state = {
   questSheetFallbackText: "",
   // 시트를 열기 직전에 포커스가 있던 요소입니다.
   questSheetReturnFocus: null,
+  // 관광지 상세 모달 상태입니다. null이면 닫힘입니다.
+  placeDetailSheet: null,
+  // 상세 조회 경합을 막는 요청 토큰입니다.
+  placeDetailRequestToken: 0,
+  // 오디오 가이드(Web Speech API) 재생 여부입니다.
+  audioGuidePlaying: false,
+  // 관광지 상세 모달을 열기 직전에 포커스가 있던 요소입니다.
+  placeDetailReturnFocus: null,
+  // 화면 전체 표시 언어입니다. 국문/영문만 지원합니다. 드로어 상단 드롭다운에서 바꿉니다.
+  uiLanguage: readStoredUiLanguage(),
   // S12 앱 설정입니다. 소리·진동·알림·모션. (명세 §10 S12)
   appSettings: readAppSettings(),
   // 설정 영역에 알릴 문구입니다.
@@ -599,6 +662,10 @@ const state = {
   accountStep: "consent",
   // 닉네임 입력 칸의 현재 값입니다. (명세 §9.4)
   nicknameDraft: "",
+  // 지금 nicknameDraft가 suggestNickname()이 뽑아 둔 제안값 그대로인지 추적하는 인덱스입니다.
+  // 사용자가 직접 입력칸을 고치면 null로 지워, 언어 토글이 사용자가 입력한 커스텀 닉네임을
+  // 건드리지 않게 합니다. 제안값 그대로일 때만 언어 토글 시 같은 조합을 다른 언어로 다시 조립합니다.
+  nicknameSuggestionIndices: null,
   // 소셜 연결(승계) 진행 상태입니다. idle | pending | failed. (명세 §9.3)
   accountLinkState: "idle",
   // 마이페이지 계정 영역에 알릴 문구입니다.
@@ -628,6 +695,17 @@ const state = {
   // 탐색 컨텍스트입니다. 현위치와 계획 모드를 명시적으로 구분합니다. (명세 §6.1)
   explorationMode: "current",
   plannedDate: "",
+  // 직접 그린 날짜 필드(buildDateField)의 펼침 상태입니다. ""면 닫혀 있고, "plan"/"home"처럼
+  // 필드 식별자가 들어가면 그 필드의 달력 팝오버가 열려 있는 것입니다.
+  activeDatePickerField: "",
+  // 열린 달력 팝오버가 보여주는 달입니다("YYYY-MM"). 월 이동 버튼을 누르면 바뀝니다.
+  datePickerViewMonth: "",
+  // 계획 모드 1단계: 지도에서 담은 퀘스트 목록입니다.
+  plannedQuestList: readPlannedQuestList(),
+  // 지도에 "검색 결과"를 보여줄지 "내 일정"만 보여줄지입니다. "내 일정"으로 전환하기
+  // 전의 지도 중심/줌을 mapViewModeSavedView에 잠깐 저장해 뒀다가, 되돌아갈 때 복원한다.
+  mapViewMode: "search",
+  mapViewModeSavedView: null,
   selectedMapInstanceId: FALLBACK_RECOMMENDATIONS[0]?.instanceId || "",
   accessToken: readStorageValue(ACCESS_TOKEN_KEY) || (IS_DESIGN_PREVIEW ? "design-preview" : ""),
   naverMapConfigured: false,
@@ -641,6 +719,9 @@ const state = {
   naverMapInstance: null,
   naverMapMarkers: [],
   naverPositionMarker: null,
+  // 지도를 마지막으로 센터링한 기준 좌표입니다. 모달 열고 닫기 등 위치 변경과 무관한
+  // 재렌더링에서는 이 값이 그대로라 사용자가 손으로 옮겨 둔 지도 위치를 건드리지 않습니다.
+  naverMapCenteredLocation: null,
 };
 
 /**
@@ -720,6 +801,826 @@ function readStorageValue(key) {
     return localStorage.getItem(key);
   } catch (error) {
     return null;
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 저장된 화면 언어. 없거나 지원하지 않으면 "kor".
+ * 역할: 새로고침 후에도 사용자가 고른 화면 언어를 유지한다.
+ * 호출 예시: const language = readStoredUiLanguage()
+ */
+function readStoredUiLanguage() {
+  const storedLanguage = readStorageValue(UI_LANGUAGE_KEY);
+  return SUPPORTED_UI_LANGUAGES.includes(storedLanguage) ? storedLanguage : "kor";
+}
+
+/**
+ * 입력: 국문 문구, 영문 문구.
+ * 출력: 현재 화면 언어에 맞는 문구.
+ * 역할: 정확도 "87m"처럼 동적 숫자가 끼워져 있어 UI_STRINGS_EN의 텍스트 노드 정확 일치
+ *       방식(applyUiLanguage)으로는 못 잡는 조합 문구를, 만들어지는 순간 언어에 맞게 고른다.
+ *       이 앱은 매 렌더마다 새로 만들기 때문에 언어를 토글하면 다음 렌더에서 바로 반영된다.
+ * 호출 예시: localize(`정확도 ${n}m`, `Accuracy ${n}m`)
+ */
+function localize(korean, english) {
+  return state.uiLanguage === "eng" ? english : korean;
+}
+
+// 화면 전체 영문화용 고정 UI 텍스트 사전입니다. 값의 가짓수가 정해진 텍스트(버튼, 헤딩,
+// 카테고리명 등)만 여기서 다루고, 장소명·퀘스트 제목/설명처럼 장소명이 문장에 끼워져
+// 조합이 무한한 텍스트는 백엔드 Papago 번역(lang=eng 파라미터)이 담당합니다.
+// 값이 없는 문자열은 안전하게 국문 그대로 남습니다.
+const UI_STRINGS_EN = {
+  // 공용
+  "확인 중": "Checking",
+  "닫기": "Close",
+  "더 보기": "Show more",
+  "접기": "Show less",
+  "전체": "All",
+  "새로고침": "Refresh",
+  "저장": "Save",
+  "취소": "Cancel",
+  "확인": "Confirm",
+  "관광정보 제공: 한국관광공사(TourAPI)": "Tourism data provided by Korea Tourism Organization (TourAPI)",
+
+  // 앱 헤더 / 상단바
+  "모험가 홈": "Adventurer Home",
+  "본문으로 이동": "Skip to content",
+
+  // 로그인/동의 화면
+  "시작 전 확인": "Before you start",
+  "모험가 등록": "Adventurer sign-up",
+  "추천과 퀘스트 인증을 위해 닉네임, 활동 기록, 현재 위치를 필요한 순간에만 사용합니다.":
+    "We only use your nickname, activity history, and current location when needed, for recommendations and quest verification.",
+  "만 14세 이상입니다. (필수)": "I am 14 years or older. (Required)",
+  "서비스 이용약관에 동의합니다. (필수)": "I agree to the Terms of Service. (Required)",
+  "개인정보 수집·이용에 동의합니다. (필수)": "I agree to the collection and use of personal information. (Required)",
+  "위치기반서비스 이용약관에 동의합니다. (필수)": "I agree to the Location-Based Service Terms. (Required)",
+  "공용 체험 계정으로 시작": "Start with a shared demo account",
+  "네이버로 시작": "Continue with Naver",
+  "구글로 시작": "Continue with Google",
+  "체험 계정은 공용 데이터로 동작합니다. 개인 기록이 필요한 경우 네이버 또는 구글 계정으로 로그인해주세요.":
+    "The demo account uses shared data. Sign in with Naver or Google if you need personal records.",
+  "닉네임을 정해주세요": "Choose a nickname",
+  "닉네임": "Nickname",
+  "같은 닉네임을 여러 명이 써도 괜찮아요. 홈에는 닉네임만 표시됩니다.":
+    "It's fine if several people share the same nickname. Only the nickname is shown on the home screen.",
+  "다시 추천": "Suggest another",
+  "이 이름으로 시작": "Start with this name",
+
+  // 드로어 네비 부제 (VIEW_META.description)
+  "현위치·계획 지도와 주변 퀘스트": "Current/planned location map and nearby quests",
+  "진행 중인 퀘스트": "Ongoing quests",
+  "탐색 컨텍스트 기준 추천": "Recommendations based on your exploration context",
+  "꿈돌이와 연결 뱃지": "Ggumdori and linked badges",
+  "계정·기록·설정·권한": "Account, log, settings, permissions",
+
+  // 서비스워커 업데이트 배너
+  "새 버전이 준비됐어요.": "A new version is ready.",
+  "나중에": "Later",
+
+  // 홈 화면
+  "현위치": "Current location",
+  "계획 모드": "Plan mode",
+  "계획 중": "Planning",
+  "날씨 연동 준비 중": "Weather integration coming soon",
+  "대전광역시청": "Daejeon City Hall",
+  "대전광역시청 기준": "Based on Daejeon City Hall",
+  "GPS 확인 중": "Checking GPS",
+  "GPS ON": "GPS ON",
+  "기본 좌표": "Default coordinates",
+  "위치 확인 불가, 대전광역시청 기준": "Location unavailable, using Daejeon City Hall",
+  "계획 날짜": "Plan date",
+  "위치 검색": "Search location",
+  "대전광역시청 기준 좌표로 추천을 준비합니다.": "Preparing recommendations based on Daejeon City Hall coordinates.",
+  "연결 확인 중": "Checking connection",
+  "현재 위치": "Current location",
+  "대표 꿈돌이": "Featured Ggumdori",
+  "내 위치로 추천": "Recommend near me",
+  "도감에서 대표 바꾸기 →": "Change featured one in the collection →",
+  "탐험 상태": "Exploration status",
+  "주변 퀘스트": "Nearby quests",
+  "지도 장소": "Map places",
+  "최근 획득 뱃지": "Recently earned badges",
+  "선택한 장소 정보": "Selected place info",
+  "시트 높이 변경": "Change sheet height",
+  "이 위치에는 추천 퀘스트가 없습니다.": "There are no recommended quests at this location.",
+  "퀘스트 보기": "View quest",
+  "지도만 연결": "Map only",
+  "NAVER 지도": "NAVER Map",
+  "NAVER Dynamic Map 연결 준비": "NAVER Dynamic Map ready to connect",
+  "목업 지도 표시": "Showing mock map",
+  "목업": "Mock data",
+  "기본 꿈돌이 선택 중": "Default Ggumdori selected",
+  "계획 위치": "Planned location",
+  "현재 위치 후보": "Current location candidate",
+  "획득 뱃지": "Badges earned",
+  "뱃지": "Badges",
+  "추천 데이터": "Recommendation data",
+  "아직 획득한 뱃지가 없습니다.": "No badges earned yet.",
+  "맨 아래로": "To bottom",
+  "맨 위로": "To top",
+  "화면 이동": "Scroll",
+
+  // 퀘스트 상태/가용성 라벨
+  "완료": "Completed",
+  "완료됨": "Completed",
+  "진행 중": "In progress",
+  "행사 종료": "Event ended",
+  "선택일 수행 불가": "Not available on selected date",
+  "추천 가능": "Recommended",
+  "추천됨": "Recommended",
+  "진행 중인 퀘스트가 없습니다.": "No quests in progress.",
+  "퀘스트 찾아보기": "Browse quests",
+  "표시할 퀘스트가 없습니다.": "No quests to show.",
+  "지금 참여 가능": "Available now",
+  "주소 복사": "Copy address",
+
+  // 모험 중 화면
+  "진행 중인 모험": "Ongoing adventures",
+  "수락한 퀘스트를 가까운 순 또는 시작한 순으로 정렬해 봅니다.": "Sort accepted quests by distance or by when you started them.",
+  "가까운 순": "Nearest first",
+  "시작 순": "Started first",
+  "보드 요약": "Board summary",
+
+  // 퀘스트 화면
+  "퀘스트 탐색": "Explore quests",
+  "현위치 · 대전광역시청 · 오늘 기준": "Current location · Daejeon City Hall · as of today",
+  "오늘 기준": "as of today",
+  "소요시간 미정": "Duration TBD",
+  "탐험 뱃지": "Explore Badge",
+  "추후 제공 예정": "Coming soon",
+  "현 단계에서는 야경 카테고리로 조회합니다": "Currently queried under the Night View category",
+  "현 단계에서는 야경 카테고리입니다": "Currently the Night View category",
+  "거리는 계획 위치 기준입니다.": "Distance is based on the planned location.",
+  "카드형": "Card view",
+  "목록형": "List view",
+  "정렬 기준": "Sort by",
+  "짧은 순": "Shortest first",
+  "보상 높은 순": "Highest reward first",
+  "카테고리": "Category",
+  "과학·우주": "Science & Space",
+  "빵·미식 · 준비 중": "Bakery & Food · Coming soon",
+  "자연·산책": "Nature & Walks",
+  "원도심·역사": "Old Town & History",
+  "문화·예술(현 단계 야경)": "Culture & Arts (currently Night View)",
+  "시장·상권": "Markets & Shops",
+  "이동·타슈": "Mobility & Tashu",
+  "축제·이벤트 · 준비 중": "Festivals & Events · Coming soon",
+  "난이도": "Difficulty",
+  "발견": "Discover",
+  "탐험": "Explore",
+  "정복": "Conquer",
+  "퀘스트": "Quests",
+
+  // 도감 화면
+  "꿈돌이 도감": "Ggumdori Collection",
+  "카테고리 XP를 쌓아 꿈돌이와 뱃지를 해금하세요.": "Earn category XP to unlock Ggumdori characters and badges.",
+  "대표 미설정": "No featured character set",
+  "사진 찍기": "Take a photo",
+  "꿈돌이": "Ggumdori",
+  "대전 탐험가": "Daejeon Explorer",
+  "모험가": "Adventurer",
+  "대표": "Featured",
+  "꿈돌이 또는 퀘스트 이름": "Ggumdori or quest name",
+  "획득": "Earned",
+  "미획득": "Not earned",
+
+  // 마이페이지
+  "마이페이지": "My Page",
+  "계정": "Account",
+  "변경": "Change",
+  "같은 닉네임을 여러 명이 써도 괜찮아요.": "It's fine if several people share the same nickname.",
+  "공용 체험 계정": "Shared demo account",
+  "여러 사용자가 같은 체험 데이터를 사용합니다. 소셜 로그인 시 해당 계정의 기록을 불러옵니다.":
+    "Multiple users share the same demo data. Signing in with a social account loads that account's own records.",
+  "공용 체험 계정의 기록은 소셜 계정으로 이전되지 않습니다.": "Shared demo account records are not transferred to a social account.",
+  "네이버 계정으로 로그인": "Sign in with Naver",
+  "구글 계정으로 로그인": "Sign in with Google",
+  "네이버 로그인 · 준비 중": "Naver login · Coming soon",
+  "구글 로그인 · 준비 중": "Google login · Coming soon",
+  "서버 OAuth 설정이 완료된 뒤 사용할 수 있습니다.": "This will be available once server OAuth setup is complete.",
+  "관심사": "Interests",
+  "관심사는 주변 추천과 대전 전체 관광지 탐색에 사용합니다.": "Interests are used for nearby recommendations and browsing all Daejeon attractions.",
+  "관심사 저장": "Save interests",
+  "대전 전체 관광지": "All Daejeon attractions",
+  "로그아웃": "Log out",
+  "회원 탈퇴 · 준비 중": "Delete account · Coming soon",
+  "계정 삭제 기능은 현재 제공하지 않습니다.": "Account deletion is not available yet.",
+
+  // 설정
+  "소리와 진동": "Sound & vibration",
+  "앱에서 나는 소리만 조절해요. 기기 전체 음량은 바뀌지 않습니다.": "This only adjusts sounds within the app; your device's overall volume is unaffected.",
+  "전체 음량": "Overall volume",
+  "배경음": "Background music",
+  "배경음 켜기": "Turn on background music",
+  "배경음 끄기": "Turn off background music",
+  "효과음 켜기": "Turn on sound effects",
+  "효과음 끄기": "Turn off sound effects",
+  "화면을 눌러 시작하기": "Tap the screen to start",
+  "효과음": "Sound effects",
+  "진동": "Vibration",
+  "알림": "Notifications",
+  "알림을 켜는 순간에만 브라우저 권한을 요청해요.": "Browser permission is requested only when you turn a notification on.",
+  "퀘스트 알림": "Quest notifications",
+  "행사·축제 알림": "Event & festival notifications",
+  "보상 알림": "Reward notifications",
+  "화면": "Display",
+  "모션 줄이기": "Reduce motion",
+  "허용됨": "Granted",
+  "거부됨": "Denied",
+  "요청 전": "Not requested",
+  "확인 불가": "Unavailable",
+  "위치": "Location",
+  "카메라": "Camera",
+  "퀘스트 추천과 완료 인증에 씁니다.": "Used for quest recommendations and completion verification.",
+  "사진 인증과 꿈돌이 촬영에 씁니다.": "Used for photo verification and taking Ggumdori photos.",
+  "퀘스트·행사·보상 알림에 씁니다.": "Used for quest, event, and reward notifications.",
+  "권한은 해당 기능을 실제로 쓸 때 요청해요. 브라우저 설정에서 언제든 바꿀 수 있습니다.":
+    "Permission is requested only when you actually use that feature. You can change it anytime in your browser settings.",
+  "나의 모험 기록": "My adventure log",
+  "완료한 퀘스트를 월별로 모아 봅니다.": "See completed quests grouped by month.",
+  "기록 보기": "View log",
+  "설정": "Settings",
+  "권한": "Permissions",
+  "약관과 정책": "Terms & Policies",
+  "서비스 이용약관": "Terms of Service",
+  "개인정보 처리방침": "Privacy Policy",
+  "위치기반서비스 이용약관": "Location-Based Service Terms",
+  "오픈소스 라이선스": "Open Source Licenses",
+  "정보": "Information",
+  "지도: NAVER Maps · 계획 날짜는 일정 메모이며 날씨·행사 연동은 준비 중입니다.":
+    "Map: NAVER Maps · The plan date is a schedule note; weather and event integration are coming soon.",
+  "영수증 사진은 상호명 확인에만 사용하고 인증 후 원본을 보관하지 않습니다.":
+    "Receipt photos are used only to verify the store name and are not kept after verification.",
+
+  // 드로어 메뉴
+  "모험 수첩 목차": "Adventure Notebook menu",
+  "메뉴 열기": "Open menu",
+  "홈": "Home",
+  "모험 중": "Adventure",
+  "도감": "Collection",
+
+  // 관광지 상세 모달 (신규 이식 기능)
+  "추가 정보": "Additional info",
+  "이용 시간": "Hours",
+  "이용 요금": "Admission fee",
+  "영업시간": "Business hours",
+  "체크인": "Check-in",
+  "체크아웃": "Check-out",
+  "공연 시간": "Show time",
+  "휴무일": "Closed on",
+  "주차": "Parking",
+  "문의처": "Contact",
+  "예약": "Reservation",
+  "유모차 대여": "Stroller rental",
+  "반려동물 동반": "Pets allowed",
+  "행사 장소": "Event venue",
+  "행사 시작일": "Event start date",
+  "행사 종료일": "Event end date",
+  // 편의 정보 값(TourAPI 원문에 자주 나오는 짧고 고정된 단어). 이용시간처럼 자유 문장인 값은
+  // 백엔드가 번역해서 내려주지만(server.py _handle_place_detail), 이런 짧은 고정 단어는
+  // 프런트 사전으로 바로 잡는 게 더 빠르고 API 호출도 없다.
+  "가능": "Available",
+  "불가": "Not available",
+  "불가능": "Not available",
+  "무료": "Free",
+  "유료": "Paid",
+  "연중무휴": "Open year-round",
+  "년중무휴": "Open year-round",
+  "매일": "Daily",
+  "없음": "None",
+  "있음": "Available",
+  "월요일": "Monday",
+  "화요일": "Tuesday",
+  "수요일": "Wednesday",
+  "목요일": "Thursday",
+  "금요일": "Friday",
+  "토요일": "Saturday",
+  "일요일": "Sunday",
+  "API 연결됨": "API Connected",
+  "목업 모드": "Mock Mode",
+  // 브랜드명은 직역이 아니라 원래 영문 서비스명으로 대응한다.
+  "모험가의 수첩": "Travel-Qbook",
+  "기간": "Period",
+  "계획한 퀘스트": "Planned Quests",
+  "등록된 편의 정보가 아직 없습니다.": "No amenity information registered yet.",
+  "🔊 이 장소는 아직 오디오 가이드가 없습니다.": "🔊 There is no audio guide for this place yet.",
+  "▶ 오디오 가이드 재생": "▶ Play audio guide",
+  "⏸ 오디오 가이드 정지": "⏸ Stop audio guide",
+  "설명을 불러오는 중입니다.": "Loading description...",
+  "설명을 준비 중입니다.": "Description coming soon.",
+  "상세 정보를 불러오지 못했습니다.": "Failed to load details.",
+  "실시간 정보 연결 전 장소입니다 · 기본 설명을 보여드려요.": "This place isn't connected to live data yet · showing a basic description.",
+  "실시간 정보 준비 중 · 기본 설명을 보여드려요.": "Live info is not ready yet · showing a basic description.",
+  "이 장소는 아직 영문 관광 정보가 없어 자동 번역으로 보여드려요.": "There is no English tourism info for this place yet, so we're showing an automatic translation.",
+  "이 장소는 아직 영문 관광 정보가 없어 국문 설명을 보여드려요.": "There is no English tourism info for this place yet, so we're showing the Korean description.",
+  "상세 닫기": "Close details",
+  "이전 화면으로": "Back",
+  "날씨 상세 보기": "View weather details",
+  "불러오는 중...": "Loading...",
+  // 꿈돌이 이름(백엔드 seed, infrastructure/repository.py GGUMDORI_SEEDS 8종)
+  "기본 꿈돌이": "Default Ggumdori",
+  "제빵 꿈돌이": "Baker Ggumdori",
+  "안경 꿈돌이": "Glasses Ggumdori",
+  "플라스크 꿈돌이": "Flask Ggumdori",
+  "숲 탐험 꿈돌이": "Forest Explorer Ggumdori",
+  "타슈 꿈돌이": "Tashu Ggumdori",
+  "야경 꿈돌이": "Night View Ggumdori",
+  "온천 꿈돌이": "Hot Spring Ggumdori",
+  // 꿈돌이 이름(프런트 fallback 목업 데이터 전용, API 실패 시에만 노출)
+  "연구원 꿈돌이": "Researcher Ggumdori",
+  "빵집 꿈돌이": "Bakery Ggumdori",
+  "산책 꿈돌이": "Stroll Ggumdori",
+  "축제 꿈돌이": "Festival Ggumdori",
+  // 뱃지 이름(백엔드 seed, infrastructure/repository.py BADGE_SEEDS 12종)
+  "초록 탐험가": "Green Explorer",
+  "숲 탐험 꿈나무": "Forest Explorer Sprout",
+  "과학 탐험가": "Science Explorer",
+  "실험실 탐험가": "Lab Explorer",
+  "대전 워커": "Daejeon Walker",
+  "원도심 산책가": "Old Downtown Stroller",
+  "빵지순례자": "Bakery Pilgrim",
+  "상권 탐험가": "Market Explorer",
+  "타슈 라이더": "Tashu Rider",
+  "도시 연결자": "City Connector",
+  "전망 수집가": "View Collector",
+  "야경 기록가": "Night View Recorder",
+  // 계획 위치 프리셋(PLAN_LOCATION_PRESETS)
+  "대전역": "Daejeon Station",
+  "유성온천역": "Yuseong Spa Station",
+  "국립중앙과학관": "National Science Museum",
+  "한밭수목원": "Hanbat Arboretum",
+  // 위치 라벨 고정 문구(동적 숫자가 끼워지는 정확도 라벨은 localize()로 별도 처리)
+  "계획 위치를 설정해주세요": "Please set a planned location",
+  "지도에서 선택한 위치": "Location selected on the map",
+
+  // 카테고리/인증 타입 라벨 보강 (CATEGORY_LABELS / QUEST_TYPE_LABELS 일부 누락분)
+  "기본": "Default",
+  "빵·미식": "Food & Bakeries",
+  "문화·예술": "Culture & Arts",
+  "축제·이벤트": "Festivals & Events",
+  "방문형": "Visit",
+  "이동형": "Move",
+  "활동형": "Activity",
+  "소비형": "Spend",
+  "테마형": "Theme",
+
+  // 로그인/동의 화면 보강
+  "세션이 만료되었습니다. 다시 동의 후 시작하세요.": "Your session has expired. Please agree again to start.",
+  "다시 로그인 필요": "Sign-in required again",
+  "체험 모드": "Demo mode",
+  "네이버 로그인 · 연동 준비 중": "Naver Login · Integration in progress",
+  "구글 로그인 · 연동 준비 중": "Google Login · Integration in progress",
+  "앱 서버와 OAuth 키를 연결한 뒤 사용할 수 있습니다.": "Available once the app server is connected with OAuth keys.",
+  "네 항목을 모두 확인해야 시작할 수 있습니다.": "You must check all four items to start.",
+  "꼬마 탐험가": "Little Explorer",
+  "로그인 처리에 실패했습니다. 잠시 뒤 다시 시도하세요.": "Sign-in failed. Please try again shortly.",
+  "네이버": "Naver",
+  "구글": "Google",
+  "네 항목을 모두 확인해야 로그인할 수 있습니다.": "You must check all four items to sign in.",
+  "현재 브라우저에서는 보안 로그인 상태를 저장할 수 없습니다.": "This browser can't save secure sign-in state.",
+  "로그인 페이지로 이동합니다.": "Taking you to the sign-in page.",
+  "로그인 시작에 필요한 이동 주소를 받지 못했습니다.": "Didn't receive the redirect address needed to start sign-in.",
+  "로그인 시작에 실패했습니다. 잠시 뒤 다시 시도하세요.": "Failed to start sign-in. Please try again shortly.",
+  "로그인 검증 정보가 만료되었습니다. 다시 시도하세요.": "Sign-in verification info has expired. Please try again.",
+  "소셜 계정으로 로그인했습니다.": "Signed in with your social account.",
+  "로그인 검증에 실패했습니다. 다시 시도하세요.": "Sign-in verification failed. Please try again.",
+  "로그인을 검증하는 중입니다.": "Verifying your sign-in…",
+  "동의 대기": "Awaiting consent",
+  "이 로그인 방식은 서버 설정이 완료된 뒤 사용할 수 있어요.": "This sign-in method will be available once the server is configured.",
+  "새 계정으로 로그인합니다. 공용 체험 기록은 이전되지 않습니다.": "Signing in with a new account. Shared demo records won't be carried over.",
+  "이메일 없음": "No email",
+  "소셜 계정": "Social account",
+
+  // 추천/퀘스트 공용
+  "추천 장소": "Recommended place",
+  "방문 퀘스트": "Visit quest",
+  "장소를 방문하고 수첩에 기록을 남깁니다.": "Visit the place and leave a record in your notebook.",
+  "영수증": "Receipt",
+  "사진": "Photo",
+  "이동": "Move",
+  "타슈": "Tashu",
+  "체크리스트": "Checklist",
+  "테마": "Theme",
+  "퀘스트 완료 기록": "Quest completion record",
+  "대전 관광지": "Daejeon attraction",
+  "완료한 퀘스트가 수첩에 기록되었습니다.": "The completed quest has been recorded in your notebook.",
+  "뱃지 조건 달성": "Badge condition met",
+  "서비스워커 등록 실패": "Service worker registration failed",
+  "(현재 화면)": "(current screen)",
+  "표시할 추천 퀘스트가 없습니다.": "No recommended quests to show.",
+  "NAVER 로딩": "Loading NAVER",
+  "목업 지도": "Mock map",
+  "영수증 사진": "Receipt photo",
+  "인증 사진": "Verification photo",
+  "OCR 확인: 상호명·품목·시간 일치": "OCR check: business name, item, and time match",
+  "OCR 확인: 일부 요구사항 불일치": "OCR check: some requirements didn't match",
+  "사진을 제출하면 완료 요청에 함께 첨부됩니다.": "Submitting a photo attaches it to your completion request.",
+  "사진 업로드 중": "Uploading photo",
+  "사진 업로드 실패": "Photo upload failed",
+  "업로드 완료, OCR 확인 중": "Upload complete, checking OCR",
+  "업로드 완료, OCR 확인은 실패했습니다.": "Upload complete, but the OCR check failed.",
+  "업로드 완료": "Upload complete",
+  "추천": "Recommended",
+  "처리 중": "Processing",
+  "직선 거리": "Straight-line distance",
+  "소요 시간": "Time required",
+  "퀘스트 수행 방법": "How to complete the quest",
+  "주소 정보가 없습니다.": "No address information.",
+  "장소명과 도로명주소를 함께 복사합니다.": "Copies the place name together with the road address.",
+  "주소를 복사했어요": "Address copied",
+  "주소를 복사하지 못했어요. 다시 시도해주세요.": "Couldn't copy the address. Please try again.",
+  "카테고리 진행 보상": "Category progress rewards",
+  "완료 XP가 카테고리에 누적되며 단계 조건을 달성할 때 뱃지와 꿈돌이가 해금됩니다.": "Completion XP accumulates per category, unlocking badges and Ggumdori when you reach each stage.",
+  "보유 뱃지": "Badges owned",
+  "보유 꿈돌이": "Ggumdori owned",
+  "현재 이 카테고리에서 해금한 보상은 없습니다.": "No rewards unlocked in this category yet.",
+  "획득함": "Earned",
+  "완료 인증 조건": "Completion verification requirements",
+  "이동 중 위치를 계속 추적하지 않아요.": "We don't keep tracking your location while you move.",
+  "금액·카드번호·승인번호는 저장하지 않습니다.": "We don't store amounts, card numbers, or approval numbers.",
+  "계획 모드입니다. 완료 인증은 현장의 실제 위치에서만 할 수 있어요.": "You're in plan mode. Completion can only be verified at the actual location.",
+  "지정 반경 안에서 현재 위치로 인증합니다.": "Verified by your current location within the set radius.",
+  "출발지와 도착지에서 각각 위치를 확인합니다.": "Checks your location at both the start and destination.",
+  "현장에서 사진을 촬영하거나 파일을 선택합니다.": "Take a photo on site or choose a file.",
+  "영수증 또는 간판 사진에서 상호명을 확인합니다.": "Confirms the business name from a receipt or signage photo.",
+  "연결된 하위 퀘스트를 모두 완료합니다.": "Complete all linked sub-quests.",
+  "추가 방문 기록": "Additional visit recorded",
+  "완료 인증": "Verify completion",
+  "행사가 끝났어요": "This event has ended",
+  "선택일에는 할 수 없어요": "Not available on the selected date",
+  "인증 검토 중": "Verification under review",
+  "모험 시작": "Start adventure",
+  "오프라인입니다. 마지막으로 받은 퀘스트를 보여 줍니다.": "You're offline. Showing the last quests we received.",
+  "이 카테고리와 난이도에 맞는 퀘스트가 없습니다. 필터를 넓혀 보세요.": "No quests match this category and difficulty. Try widening the filters.",
+  "이 카테고리의 퀘스트가 아직 없습니다.": "No quests in this category yet.",
+  "이 난이도의 퀘스트가 아직 없습니다.": "No quests at this difficulty yet.",
+  "참여 가능한 행사를 확인하세요": "Check which events you can join",
+  "갑천": "Gapcheon",
+  "대전 탐험권": "Daejeon Explore Zone",
+
+  // 인증 사진 / 수첩(일기·리뷰) 기록
+  "사진을 불러오지 못했습니다.": "Couldn't load the photo.",
+  "사진 주소가 만료되었거나 이미지를 표시할 수 없습니다.": "The photo link has expired or the image can't be shown.",
+  "퀘스트 인증 사진": "Quest verification photo",
+  "퀘스트 완료 시 첨부한 인증 사진": "The verification photo attached when the quest was completed",
+  "원본 사진 열기": "Open original photo",
+  "사진 다시 불러오기": "Reload photo",
+  "인증 사진을 불러오는 중입니다…": "Loading verification photo…",
+  "아직 작성한 일기나 리뷰가 없습니다.": "No diary entries or reviews written yet.",
+  "나의 리뷰": "My reviews",
+  "나의 일기": "My diary",
+  "리뷰": "Review",
+  "일기": "Diary",
+  "일기 또는 리뷰 본문을 작성하세요.": "Please write the diary or review text.",
+  "리뷰 별점을 1점부터 5점 사이에서 선택하세요.": "Choose a review rating between 1 and 5 stars.",
+  "기록을 저장하는 중입니다…": "Saving your record…",
+  "일기·리뷰 기록을 저장했습니다.": "Your diary/review record has been saved.",
+  "이 수첩 기록을 찾을 수 없습니다. 목록을 새로고침하세요.": "Couldn't find this notebook record. Please refresh the list.",
+  "기록을 저장하지 못했습니다. 잠시 뒤 다시 시도하세요.": "Couldn't save the record. Please try again shortly.",
+  "일기·리뷰 작성 또는 수정": "Write or edit a diary/review",
+  "기록 종류": "Record type",
+  "제목 (선택)": "Title (optional)",
+  "탐험에서 기억하고 싶은 제목": "A title you'd like to remember from this adventure",
+  "본문 (필수)": "Body (required)",
+  "오늘의 탐험, 느낀 점, 다시 찾고 싶은 이유를 남겨보세요.": "Write about today's adventure, how you felt, and why you'd like to come back.",
+  "별점 (필수)": "Rating (required)",
+  "별점을 선택하세요": "Choose a rating",
+  "저장 중…": "Saving…",
+  "기록 저장": "Save record",
+  "아직 탐험 기록이 없습니다": "No adventure records yet",
+  "퀘스트를 완료하면 인증 사진과 일기·리뷰를 이곳에 차곡차곡 남길 수 있습니다.": "Complete quests to build up verification photos and diary/review entries here.",
+  "API에 연결하면 실제 탐험 기록에 일기와 리뷰를 남길 수 있습니다.": "Once connected to the API, you can add diary entries and reviews to your real adventure records.",
+
+  // 도감 / 꿈돌이
+  "연결된 퀘스트를 완료하면 얻을 수 있어요.": "You can earn this by completing the linked quest.",
+  "조건에 맞는 꿈돌이가 없습니다.": "No Ggumdori match these conditions.",
+  "불러오는 중": "Loading",
+  "현재 획득 불가": "Not currently obtainable",
+  "도감 상세 닫기": "Close collection details",
+  "연결 퀘스트": "Linked quest",
+  "획득 기록": "Earned record",
+  "해금 조건": "Unlock condition",
+  "보유한 꿈돌이입니다.": "You already have this Ggumdori.",
+  "현재 홈 대표": "Current home display",
+  "홈 대표 꿈돌이로 설정": "Set as home display Ggumdori",
+  "이 퀘스트 보기": "View this quest",
+  "아직 연결된 퀘스트가 없어요.": "No linked quest yet.",
+  "대표 꿈돌이를 저장하는 중입니다.": "Saving your display Ggumdori…",
+  "대표 꿈돌이를 저장하지 못했어요.": "Couldn't save your display Ggumdori.",
+  "홈 대표 꿈돌이를 바꿨어요.": "Changed your home display Ggumdori.",
+  "대표 꿈돌이를 서버에 저장하지 못했어요": "Couldn't save your display Ggumdori to the server",
+  "새 보상": "New reward",
+  "도감에서 보기": "View in collection",
+
+  // 마이페이지 / 닉네임
+  "닉네임을 입력하거나 추천을 받아주세요.": "Enter a nickname or get a suggestion.",
+  "닉네임을 저장하는 중입니다.": "Saving your nickname…",
+  "닉네임을 바꿨어요.": "Nickname changed.",
+  "닉네임을 저장하지 못했어요. 20자 이내로 입력하고 다시 시도해주세요.": "Couldn't save the nickname. Enter 20 characters or fewer and try again.",
+  "닉네임을 입력해주세요.": "Please enter a nickname.",
+  "관광지 더 보기": "See more attractions",
+  "관심사를 저장하는 중입니다.": "Saving your interests…",
+  "관심사를 저장했어요.": "Your interests have been saved.",
+  "관심사를 저장하지 못했어요.": "Couldn't save your interests.",
+  "관광지를 불러오는 중입니다.": "Loading attractions…",
+  "관광지": "Attractions",
+  "조건에 맞는 관광지가 없어요.": "No attractions match these conditions.",
+  "관광지를 불러오지 못했어요.": "Couldn't load attractions.",
+  "빵·미식과 축제·이벤트 분류는 준비 중입니다.": "The Food & Bakeries and Festivals & Events categories are coming soon.",
+  "현재 서버에서 이 분류를 준비 중입니다.": "The server is preparing this category.",
+
+  // 날씨
+  "계획 날짜는 일정 메모이며 현재 날씨·행사 조회에는 사용되지 않습니다.": "The plan date is just a schedule note — it isn't used for the current weather or event lookup.",
+  "날씨 연동은 준비 중입니다.": "Weather integration is coming soon.",
+  "날씨 확인 중": "Checking weather",
+  "날씨 불러오기 실패": "Failed to load weather",
+  "날씨 정보 없음": "No weather information",
+  "날씨": "Weather",
+  "날씨 상세 닫기": "Close weather details",
+  "아직 예보가 제공되지 않아요": "No forecast available yet",
+  "날씨를 불러오지 못했어요.": "Couldn't load the weather.",
+  "다시 시도": "Try again",
+  "날씨를 불러오는 중이에요.": "Loading weather…",
+  "기온": "Temperature",
+  "정보 없음": "No information",
+  "강수확률": "Chance of rain",
+  "상태": "Condition",
+  "시간대별": "By time of day",
+  "시간대별 예보가 없어요.": "No hourly forecast available.",
+  "야외활동 참고": "Outdoor activity notes",
+
+  // 계획 모드 시트(위치/날짜 검색)
+  "선택일 개최": "Held on the selected date",
+  "찾을 장소나 지역을 입력해주세요.": "Enter a place or area to find.",
+  "검색 중입니다.": "Searching…",
+  "검색 결과가 없어요.": "No results found.",
+  "위치를 검색하지 못했어요. 다시 시도해주세요.": "Couldn't search for the location. Please try again.",
+  "올바른 위도와 경도를 입력해주세요.": "Please enter a valid latitude and longitude.",
+  "선택한 계획 위치": "Selected plan location",
+  "계획 위치와 날짜": "Plan location and date",
+  "계획 설정 닫기": "Close plan settings",
+  "장소, 주소, 지역": "Place, address, area",
+  "계획 위치 검색": "Search plan location",
+  "검색": "Search",
+  "계획 위치 위도": "Plan location latitude",
+  "위도": "Latitude",
+  "계획 위치 경도": "Plan location longitude",
+  "경도": "Longitude",
+  "좌표 적용": "Apply",
+  "계획 모드에서는 지도에서 지점을 눌러 위치를 정할 수도 있습니다.": "In plan mode, you can also set a location by tapping a point on the map.",
+  "날짜": "Date",
+  "날짜는 일정 메모로 저장됩니다. 추천은 계획 위치를 기준으로 하며 완료 인증은 현장의 실제 GPS와 현재 시각만 사용합니다.": "The date is saved as a schedule note. Recommendations are based on the plan location, and completion is verified only with your actual on-site GPS and current time.",
+
+  // 행사/축제
+  "행사": "Event",
+  "참여할 행사 고르기": "Choose an event to join",
+  "공통 보상은 이미 받았어요. 다른 행사는 추가 방문으로 기록되고 새 뱃지·꿈돌이·XP는 지급되지 않아요.": "You've already received the shared reward. Other events are recorded as additional visits, and no new badges, Ggumdori, or XP are granted.",
+  "선택한 날짜에 참여할 수 있는 행사가 없어요.": "No events available to join on the selected date.",
+  "참여할 행사 선택": "Select an event to join",
+  "방문함": "Visited",
+  "참여 가능": "Available to join",
+  "선택한 행사의 개최 기간·운영시간·위치를 현장의 실제 GPS와 확인해요.": "Verify the event's dates, hours, and location against your actual on-site GPS.",
+  "개최일 미정": "Date to be announced",
+  "축제": "Festival",
+
+  // 사진 합성(꿈돌이 인증샷)
+  "이 브라우저에서는 카메라를 쓸 수 없어요. 사진을 골라 합성할 수 있어요.": "This browser can't use the camera. You can choose a photo to compose instead.",
+  "카메라 권한이 없어요. 설정에서 권한을 허용하거나 사진을 골라 합성할 수 있어요.": "No camera permission. Allow it in settings, or choose a photo to compose instead.",
+  "합성할 사진이 없어요. 카메라를 켜거나 사진을 골라주세요.": "No photo to compose. Turn on the camera or choose a photo.",
+  "사진을 아직 불러오는 중이에요.": "Still loading the photo…",
+  "꿈돌이 그림을 불러오지 못했어요.": "Couldn't load the Ggumdori artwork.",
+  "PNG 로 저장했어요.": "Saved as PNG.",
+  "공유했어요.": "Shared.",
+  "공유를 지원하지 않아 PNG 로 저장했어요.": "Sharing isn't supported, so it was saved as PNG instead.",
+  "촬영 닫기": "Close camera",
+  "합성한 사진": "Composed photo",
+  "고른 사진": "Chosen photo",
+  "카메라를 켜거나 사진을 골라주세요.": "Turn on the camera or choose a photo.",
+  "캐릭터 조절": "Adjust character",
+  "크기": "Size",
+  "좌우 위치": "Horizontal position",
+  "인증 사진은 여기에 자동으로 불러오지 않아요. 합성은 기기 안에서만 처리합니다.": "Verification photos aren't automatically loaded here. Composing happens only on your device.",
+  "다시 찍기": "Retake",
+  "PNG로 저장": "Save as PNG",
+  "공유하기": "Share",
+  "사진 고르기": "Choose photo",
+  "촬영": "Shoot",
+
+  // 알림 / 완료 인증 플로우 / 기타
+  "알림 권한이 없어 켤 수 없어요. 브라우저 설정에서 알림을 허용해주세요.": "No notification permission, so this can't be turned on. Please allow notifications in browser settings.",
+  "날짜 미상": "Date unknown",
+  "목록으로": "Back to list",
+  "기록 닫기": "Close record",
+  "아직 완료한 퀘스트가 없어요.": "No completed quests yet.",
+  "획득 XP": "XP earned",
+  "완료 기록": "Completion record",
+  "방문한 행사": "Visited event",
+  "장소 미상": "Place unknown",
+  "획득 보상": "Rewards earned",
+  "본인만 볼 수 있어요. 공유 카드에는 들어가지 않습니다.": "Only you can see this. It won't appear on the share card.",
+  "기록 내용": "Record content",
+  "공유 카드": "Share card",
+  "닉네임·장소·뱃지·꿈돌이만 담습니다. 인증 사진은 공유되지 않아요.": "Only includes your nickname, place, badge, and Ggumdori. Verification photos aren't shared.",
+  "이 브라우저에서는 위치 기능을 사용할 수 없습니다.": "This browser can't use location features.",
+  "위치 정보가 대전 지역과 너무 멀어 확인할 수 없습니다. 위치 서비스를 다시 확인해주세요.": "The location is too far from the Daejeon area to verify. Please check your location service again.",
+  "세션이 만료되어 사진을 업로드하지 않았습니다.": "The session expired, so the photo wasn't uploaded.",
+  "Object Storage 또는 OCR 설정이 필요합니다.": "Object Storage or OCR configuration is required.",
+  "사진 업로드에 실패했습니다.": "Photo upload failed.",
+  "OCR 확인 완료": "OCR check complete",
+  "사진은 업로드됐고 OCR 확인은 실패했습니다.": "The photo was uploaded, but the OCR check failed.",
+  "현재 위치 확인 중": "Checking current location",
+  "현재 위치를 확인할 수 없어 완료하지 않았습니다.": "Couldn't confirm your current location, so this wasn't completed.",
+  "GPS 정확도가 80m를 넘어 완료하지 않았습니다.": "GPS accuracy exceeded 80m, so this wasn't completed.",
+  "장소 좌표를 다시 확인하지 못해 완료하지 않았습니다.": "Couldn't re-verify the place coordinates, so this wasn't completed.",
+  "장소 반경 50m 밖으로 판정되어 완료하지 않았습니다.": "You were judged to be outside the 50m place radius, so this wasn't completed.",
+  "이미 완료된 퀘스트입니다.": "This quest is already completed.",
+  "퀘스트를 찾을 수 없습니다.": "Couldn't find the quest.",
+  "GPS 완료 기준을 충족하지 못해 상태를 변경하지 않았습니다.": "The GPS completion criteria weren't met, so the status wasn't changed.",
+  "퀘스트 요청을 처리하지 못했습니다.": "Couldn't process the quest request.",
+  "세션이 만료되어 상태를 변경하지 않았습니다.": "The session expired, so the status wasn't changed.",
+  "현재 위치 권한이 필요합니다. 위치 권한을 허용한 뒤 다시 시도하세요.": "Current location permission is required. Allow location access and try again.",
+  "GPS 완료 요청에 실패해 상태를 변경하지 않았습니다.": "The GPS completion request failed, so the status wasn't changed.",
+  "요청에 실패해 상태를 변경하지 않았습니다.": "The request failed, so the status wasn't changed.",
+  "장소 정보 없음": "No place information",
+  "확인됨": "Confirmed",
+  "공통 보상은 이미 받았어요. 새 뱃지·꿈돌이·XP는 지급되지 않습니다.": "You've already received the shared reward. No new badges, Ggumdori, or XP will be granted.",
+  "추가 방문 기록됨": "Additional visit recorded",
+  "퀘스트 완료 확인": "Confirm quest completion",
+  "퀘스트 수락 확인": "Confirm quest acceptance",
+  "퀘스트 처리 실패": "Failed to process quest",
+  "버튼 입력이 정상 처리되었습니다.": "The button action was processed successfully.",
+  "요청이 처리되지 않았습니다.": "The request wasn't processed.",
+  "추가 방문으로 기록했어요": "Recorded as an additional visit",
+  "GPS 기준 완료됨": "Completed via GPS",
+  "퀘스트 수락됨": "Quest accepted",
+  "오늘": "Today",
+  "오늘 개최 중": "Being held today",
+  "GPS 방문": "GPS Visit",
+  "영수증 OCR": "Receipt OCR",
+  "사진 인증": "Photo Verification",
+};
+
+// UI_STRINGS_EN의 역방향 사전이다. 영문에서 국문으로 되돌아갈 때 쓴다.
+// 여러 국문 키가 같은 영문 값으로 매핑된 경우(예: "완료"/"완료됨" 모두 "Completed") 마지막
+// 항목이 우선한다 — 되돌아갈 때 원문과 정확히 같은 국문 문구가 아닐 수 있지만 의미는 같다.
+const UI_STRINGS_KOR = Object.fromEntries(
+  Object.entries(UI_STRINGS_EN).map(([korean, english]) => [english, korean]),
+);
+
+/**
+ * 입력: 번역을 적용할 루트 노드. 기본값은 document.body.
+ * 출력: 없음.
+ * 역할: 텍스트 노드와 일부 속성을 사전에 있는 값으로 치환한다. 이 앱은 매 렌더마다
+ *       DOM을 국문 리터럴로 새로 만들기 때문에, 되돌리는 로직 없이 다시 렌더하면
+ *       자연스럽게 국문으로 복원된다.
+ * 호출 예시: applyUiLanguage(document.body)
+ */
+function applyUiLanguage(root = document.body) {
+  // 변수 의미: 지금 방향에 맞는 사전이다. 국문 리터럴을 새로 만드는 render*() 함수들과
+  // 달리, 정적 index.html 텍스트나 별도 스크립트(scroll-fab 등)가 건드리는 속성은
+  // 국문으로 돌아갈 때 아무도 되돌려주지 않으므로, kor 방향에서도 역방향 사전으로
+  // 명시적으로 되돌려야 한다.
+  const dictionary = state.uiLanguage === "eng" ? UI_STRINGS_EN : state.uiLanguage === "kor" ? UI_STRINGS_KOR : null;
+  if (!dictionary || !root) {
+    return;
+  }
+
+  // 텍스트 노드를 순회하며 정확히 일치하는 항목만 치환합니다.
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  // 변수 의미: 순회 중 즉시 수정하면 TreeWalker가 불안정해질 수 있어 먼저 모아둡니다.
+  const textNodes = [];
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    textNodes.push(currentNode);
+    currentNode = walker.nextNode();
+  }
+  textNodes.forEach((node) => {
+    // 변수 의미: 앞뒤 공백을 포함한 원본 텍스트입니다.
+    const original = node.nodeValue;
+    const trimmed = original.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (dictionary[trimmed]) {
+      node.nodeValue = original.replace(trimmed, dictionary[trimmed]);
+      return;
+    }
+    // 변수 의미: "대전광역시청 기준 · 36.3504, 127.3845 · NAVER Dynamic Map 연결 준비"처럼
+    // " · "로 이어붙인 상태 문구는 조각 단위로 사전을 찾아본다.
+    if (trimmed.includes(" · ")) {
+      const segments = trimmed.split(" · ");
+      const translatedSegments = segments.map((segment) => dictionary[segment] || segment);
+      if (translatedSegments.some((segment, index) => segment !== segments[index])) {
+        node.nodeValue = original.replace(trimmed, translatedSegments.join(" · "));
+      }
+    }
+  });
+
+  // 스크린리더 전용 라벨과 툴팁도 함께 치환합니다.
+  const attributeSelector = "[aria-label], [title], [placeholder]";
+  root.querySelectorAll(attributeSelector).forEach((element) => {
+    ["aria-label", "title", "placeholder"].forEach((attributeName) => {
+      const value = element.getAttribute(attributeName);
+      if (value && dictionary[value]) {
+        element.setAttribute(attributeName, dictionary[value]);
+      }
+    });
+  });
+  if (root.hasAttribute?.("aria-label") && dictionary[root.getAttribute("aria-label")]) {
+    root.setAttribute("aria-label", dictionary[root.getAttribute("aria-label")]);
+  }
+}
+
+// 언어 번역 재적용이 겹치지 않도록 다음 애니메이션 프레임까지 미루는 예약 플래그입니다.
+let uiLanguageApplyScheduled = false;
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: document.body에 MutationObserver를 한 번 걸어, 화면이 다시 그려질 때마다
+ *       영문 모드면 자동으로 번역을 재적용한다. 기존 렌더 함수들을 일일이 고치지 않기 위한 장치다.
+ * 호출 예시: setupUiLanguageObserver()
+ */
+function setupUiLanguageObserver() {
+  const observer = new MutationObserver(() => {
+    // 변수 의미: 탭이 백그라운드에 있으면 requestAnimationFrame 콜백이 아예 실행되지
+    // 않아 예약 플래그가 영영 풀리지 않을 수 있다. setTimeout은 백그라운드 탭에서도
+    // (지연될 뿐) 반드시 실행되므로 이걸 대신 쓴다.
+    if (state.uiLanguage !== "eng" || uiLanguageApplyScheduled) {
+      return;
+    }
+    uiLanguageApplyScheduled = true;
+    window.setTimeout(() => {
+      uiLanguageApplyScheduled = false;
+      applyUiLanguage(document.body);
+    }, 0);
+  });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["aria-label", "title", "placeholder"],
+  });
+}
+
+/**
+ * 입력: 사용자가 드로어에서 고른 다음 화면 언어.
+ * 출력: 없음.
+ * 역할: 화면 언어를 바꾸고, 정적 UI·동적 추천 텍스트·열려 있는 상세 모달을 모두 새 언어로 갱신한다.
+ * 호출 예시: handleUiLanguageChange("eng")
+ */
+function handleUiLanguageChange(nextLanguage) {
+  const normalizedLanguage = SUPPORTED_UI_LANGUAGES.includes(nextLanguage) ? nextLanguage : "kor";
+  if (normalizedLanguage === state.uiLanguage) {
+    return;
+  }
+  state.uiLanguage = normalizedLanguage;
+  writeStorageValue(UI_LANGUAGE_KEY, normalizedLanguage);
+
+  // 닉네임 입력칸이 아직 사용자가 손대지 않은 제안값 그대로면(nicknameSuggestionIndices가
+  // 남아 있으면), 같은 조합을 새 언어 단어로 다시 조립한다. <input>의 value는 텍스트 노드가
+  // 아니라 applyUiLanguage()의 DOM 스윕으로는 못 잡기 때문에 여기서 직접 갱신해야 한다.
+  // 사용자가 직접 입력칸을 고친 경우에는 이미 null이라 건드리지 않는다.
+  if (state.nicknameSuggestionIndices) {
+    state.nicknameDraft = formatNicknameSuggestion(
+      state.nicknameSuggestionIndices.prefixIndex,
+      state.nicknameSuggestionIndices.nounIndex,
+    );
+  }
+
+  renderAll();
+  // renderAll()에는 온보딩 닉네임 단계가 없다(진입 액션에서만 그려짐). <input>의 value는
+  // applyUiLanguage()의 DOM 스윕으로도 못 잡으니, 지금 그 단계가 보이는 중이면 직접 다시 그린다.
+  renderAccountStep();
+  applyUiLanguage(document.body);
+  // 네이티브 <input type="date"> 달력 팝업/플레이스홀더 언어를 문서 lang 속성으로 맞춘다.
+  document.documentElement.lang = normalizedLanguage === "eng" ? "en" : "ko";
+
+  // 온보딩 화면과 드로어 메뉴, 두 드롭다운이 같은 값을 보여주도록 맞춥니다.
+  // 둘 다 정적 HTML 요소라 renderAll()이 값을 다시 맞춰주지 않습니다.
+  ["#onboarding-language-select", "#ui-language-select"].forEach((selector) => {
+    const languageSelect = select(selector);
+    if (languageSelect) {
+      languageSelect.value = normalizedLanguage;
+    }
+  });
+
+  // 장소명/퀘스트 제목·설명(Papago 번역)을 새 언어로 다시 받아옵니다.
+  // TourAPI 캐시까지 강제로 무시하면(refresh=1) 매번 느린 실시간 조회가 걸리니,
+  // 캐시는 그대로 쓰고 번역만 새로 받도록 강제 새로고침 없이 호출한다.
+  // ensureSessionReady()는 미로그인 시 동의 화면으로 강제 전환하는 부작용이 있어
+  // 언어 전환 같은 무관한 동작에서는 쓰지 않고 토큰 존재 여부만 직접 확인한다.
+  if (state.accessToken) {
+    loadRecommendations(false);
+  }
+
+  // 열려 있는 관광지 상세 모달도 새 언어로 다시 불러옵니다.
+  if (state.placeDetailSheet?.place) {
+    loadPlaceDetail(state.placeDetailSheet.place);
   }
 }
 
@@ -927,10 +1828,10 @@ function formatDate(value) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return "날짜 미정";
+    return localize("날짜 미정", "Date unset");
   }
 
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat(state.uiLanguage === "eng" ? "en-US" : "ko-KR", {
     month: "long",
     day: "numeric",
     hour: "2-digit",
@@ -1581,31 +2482,62 @@ function getTourApiStatusText() {
   const meta = state.recommendationMeta;
 
   // 캐시 사용 여부 표시 문구입니다.
-  const cacheText = meta.cacheHit ? "30분 캐시 사용" : "새 조회";
+  const cacheText = meta.cacheHit ? localize("30분 캐시 사용", "cached for 30 min") : localize("새 조회", "fresh lookup");
 
   if (state.dataSource !== "api") {
-    return "앱 API 연결 실패로 브라우저 목업 데이터를 표시합니다.";
+    return localize(
+      "앱 API 연결 실패로 브라우저 목업 데이터를 표시합니다.",
+      "Couldn't reach the app API, showing browser mock data.",
+    );
   }
 
   if (meta.sourceStatus === "live") {
-    return `${meta.attribution}. 실제 TourAPI 응답 · ${cacheText}.`;
+    return localize(
+      `${meta.attribution}. 실제 TourAPI 응답 · ${cacheText}.`,
+      `${meta.attribution}. Live TourAPI response · ${cacheText}.`,
+    );
   }
 
   if (meta.sourceStatus.startsWith("fallback:result_code_")) {
-    return `TourAPI가 오류 resultCode를 반환해 대전 fallback 장소 데이터로 표시합니다. ${cacheText}.`;
+    return localize(
+      `TourAPI가 오류 resultCode를 반환해 대전 fallback 장소 데이터로 표시합니다. ${cacheText}.`,
+      `TourAPI returned an error resultCode, showing Daejeon fallback place data. ${cacheText}.`,
+    );
   }
 
   // fallback 상태별 사용자 안내 문구입니다.
   const fallbackMessages = {
-    "fallback:not_configured": "현재 기본 대전 장소 정보를 표시합니다.",
-    "fallback:circuit_open": "TourAPI 연속 실패로 잠시 대전 fallback 장소 데이터로 표시합니다.",
-    "fallback:empty": "TourAPI 주변 장소 결과가 비어 있어 대전 fallback 장소 데이터로 표시합니다.",
-    "fallback:upstream_4xx": "TourAPI 요청이 인증 또는 요청 오류를 반환해 대전 fallback 장소 데이터로 표시합니다.",
-    "fallback:upstream_error": "TourAPI 호출 오류로 대전 fallback 장소 데이터로 표시합니다.",
-    "fallback:client_error": "추천 API 응답을 사용할 수 없어 브라우저 목업 데이터를 표시합니다.",
+    "fallback:not_configured": localize(
+      "현재 기본 대전 장소 정보를 표시합니다.",
+      "Showing default Daejeon place information.",
+    ),
+    "fallback:circuit_open": localize(
+      "TourAPI 연속 실패로 잠시 대전 fallback 장소 데이터로 표시합니다.",
+      "TourAPI failed repeatedly, showing Daejeon fallback place data for now.",
+    ),
+    "fallback:empty": localize(
+      "TourAPI 주변 장소 결과가 비어 있어 대전 fallback 장소 데이터로 표시합니다.",
+      "TourAPI returned no nearby places, showing Daejeon fallback place data.",
+    ),
+    "fallback:upstream_4xx": localize(
+      "TourAPI 요청이 인증 또는 요청 오류를 반환해 대전 fallback 장소 데이터로 표시합니다.",
+      "TourAPI returned an authentication or request error, showing Daejeon fallback place data.",
+    ),
+    "fallback:upstream_error": localize(
+      "TourAPI 호출 오류로 대전 fallback 장소 데이터로 표시합니다.",
+      "TourAPI call failed, showing Daejeon fallback place data.",
+    ),
+    "fallback:client_error": localize(
+      "추천 API 응답을 사용할 수 없어 브라우저 목업 데이터를 표시합니다.",
+      "The recommendations API response is unavailable, showing browser mock data.",
+    ),
   };
 
-  return `${fallbackMessages[meta.sourceStatus] || "TourAPI 응답을 사용할 수 없어 대전 fallback 장소 데이터로 표시합니다."} ${cacheText}.`;
+  const fallbackDefault = localize(
+    "TourAPI 응답을 사용할 수 없어 대전 fallback 장소 데이터로 표시합니다.",
+    "TourAPI's response is unavailable, showing Daejeon fallback place data.",
+  );
+  return `${fallbackMessages[meta.sourceStatus] || fallbackDefault} ${cacheText}.`;
 }
 
 /**
@@ -1642,6 +2574,9 @@ function normalizeRecommendation(rawItem) {
     ),
     placeLatitude: toNumber(item.latitude || place.latitude, getRecommendationLocation().lat),
     placeLongitude: toNumber(item.longitude || place.longitude, getRecommendationLocation().lng),
+    // 관광지 상세 모달 조회에 쓰는 TourAPI 식별자입니다.
+    placeContentId: String(item.placeContentId || place.contentId || item.contentId || ""),
+    placeContentTypeId: String(item.placeContentTypeId || place.contentTypeId || item.contentTypeId || ""),
     category: normalizeCategory(
       item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
     ),
@@ -1801,7 +2736,21 @@ function toServerCategory(category) {
  * 호출 예시: const location = getRecommendationLocation()
  */
 function getRecommendationLocation() {
-  return state.explorationMode === "planned" ? state.plannedLocation : state.location;
+  // 변수 의미: 현재 탐색 모드가 가리키는 원본 위치 객체입니다.
+  const location = state.explorationMode === "planned" ? state.plannedLocation : state.location;
+  if (!location.measured) {
+    return location;
+  }
+  // 실측 GPS 위치의 라벨은 정확도(m)가 끼워진 동적 문구라 UI_STRINGS_EN 사전(정확 일치)으로
+  // 못 잡는다. normalizeMeasuredLocation()이 만들 때 고정해 둔 국문 라벨 대신, 조회 시점의
+  // 화면 언어로 매번 새로 만들어 돌려준다.
+  return {
+    ...location,
+    label: localize(
+      `현재 위치 기준, 정확도 ${Math.round(toNumber(location.accuracyMeters, 0))}m`,
+      `Current location, accuracy ${Math.round(toNumber(location.accuracyMeters, 0))}m`,
+    ),
+  };
 }
 
 /**
@@ -2069,7 +3018,10 @@ function loadNaverMapsSdk(keyId) {
 
     // 새로 삽입할 NAVER SDK 스크립트입니다.
     const script = document.createElement("script");
-    script.src = `${NAVER_MAPS_SDK_URL}?ncpKeyId=${encodeURIComponent(keyId)}`;
+    // 변수 의미: 지도 도로명/POI 라벨 언어입니다. SDK 로딩 시점에 고정되므로 이후 언어를
+    // 바꾸면 다음 새로고침부터 반영됩니다.
+    const mapLanguage = state.uiLanguage === "eng" ? "en" : "ko";
+    script.src = `${NAVER_MAPS_SDK_URL}?ncpKeyId=${encodeURIComponent(keyId)}&language=${mapLanguage}`;
     script.async = true;
     script.dataset.naverMapsSdk = "true";
     script.onload = () => {
@@ -2108,15 +3060,20 @@ function toNaverLatLng(recommendation) {
  * 역할: 기존 목업 지도와 같은 배지형 마커를 실제 NAVER 지도 위에 올린다.
  * 호출 예시: const icon = buildNaverPlaceMarkerIcon(place, true)
  */
-function buildNaverPlaceMarkerIcon(place, isSelected) {
+function buildNaverPlaceMarkerIcon(place, isSelected, itineraryOrder) {
   // 선택 상태 클래스입니다.
   const selectedClass = isSelected ? " is-selected" : "";
+  // 변수 의미: 계획한 퀘스트 목록에 담긴 순번(1부터)입니다. 없으면 null입니다.
+  const itineraryClass = itineraryOrder ? " is-itinerary" : "";
   // HTML 마커에 넣을 안전한 장소명입니다.
   const safePlaceName = escapeHtml(place.placeName);
+  // 변수 의미: 뱃지 안에 넣을 내용입니다. 일정에 담긴 장소는 순번을, 그 외에는 카테고리
+  // 아이콘을 보여줘서 지도에서 바로 몇 번째 방문지인지 알 수 있게 한다.
+  const badgeContent = itineraryOrder ? String(itineraryOrder) : getCategoryIcon(place.category);
   // NAVER Maps가 렌더링할 HTML 마커입니다.
   const content = `
-    <button class="naver-marker${selectedClass}" type="button" aria-label="${safePlaceName}">
-      <span class="map-badge">${getCategoryIcon(place.category)}</span>
+    <button class="naver-marker${selectedClass}${itineraryClass}" type="button" aria-label="${safePlaceName}">
+      <span class="map-badge">${badgeContent}</span>
       <span class="naver-marker-label">${safePlaceName}</span>
     </button>
   `;
@@ -2134,6 +3091,9 @@ function buildNaverPlaceMarkerIcon(place, isSelected) {
  * 호출 예시: marker.setIcon(buildNaverPositionMarkerIcon())
  */
 function buildNaverPositionMarkerIcon() {
+  // 계획 모드에서 검색한 구체적인 장소는 이제 추천 API가 좁은 반경으로 돌려주는 실제
+  // 결과라, 다른 추천 장소와 똑같은 마커(buildNaverPlaceMarkerIcon)로 자연스럽게 뜬다.
+  // 이 아이콘은 "지금 기준으로 삼은 좌표" 자체를 나타내는 점 표시로만 쓴다.
   return {
     content: '<div class="naver-position-marker" aria-label="현재 위치"><span></span></div>',
     anchor: new window.naver.maps.Point(13, 13),
@@ -2313,6 +3273,12 @@ function renderAppHeader() {
   // 현재 화면의 메타데이터입니다.
   const meta = VIEW_META[state.activeView] || VIEW_META.home;
 
+  // 뒤로가기 버튼입니다. 돌아갈 화면이 있을 때만 보여줍니다.
+  const backButton = select("#app-back-button");
+  if (backButton) {
+    backButton.hidden = state.viewHistory.length === 0;
+  }
+
   // 헤더 아이콘 요소입니다.
   const iconElement = select("[data-app-icon]");
   // 헤더 상단 라벨 요소입니다.
@@ -2421,7 +3387,7 @@ function renderDrawerProfile() {
     const meta = createElement("div", "drawer-profile__meta");
     const nameRow = createElement("div", "context-row");
     nameRow.append(
-      createElement("span", "nav-link__label", state.user.nickname || "모험가"),
+      createElement("span", "nav-link__label", displayNickname(state.user.nickname) || localize("모험가", "Adventurer")),
       createElement("span", "level-pill px-counter", `Lv.${toNumber(state.user.level, 1)}`),
     );
     meta.append(nameRow, createElement("span", "nav-link__desc", state.user.title || "대전 탐험가"));
@@ -2589,18 +3555,25 @@ function prefersReducedMotion() {
 }
 
 /**
- * 입력: 전환할 화면 ID와 URL 해시 갱신 여부.
+ * 입력: 전환할 화면 ID, URL 해시 갱신 여부, 뒤로가기 버튼이 호출한 것인지 여부.
  * 출력: 없음.
  * 역할: 단일 PWA 안에서 다섯 최상위 메뉴를 책장 넘김으로 전환한다. (명세 §7.3)
+ *       뒤로가기가 아닌 일반 이동일 때만 이전 화면을 뒤로가기 스택에 쌓는다.
  * 호출 예시: setActiveView("quests")
  */
-function setActiveView(viewId, shouldUpdateHash = true) {
+function setActiveView(viewId, shouldUpdateHash = true, isBackNavigation = false) {
   if (!VIEW_META[viewId]) {
     return;
   }
 
   // 같은 화면을 다시 고른 경우인지 여부입니다. 연출을 반복하지 않습니다.
   const isSameView = state.activeView === viewId;
+
+  // 초기 로드·로그아웃 복원(shouldUpdateHash=false)과 뒤로가기 자체는 스택에 쌓지 않습니다.
+  // 그 외의 명시적 화면 이동만 "돌아갈 곳"으로 기록합니다.
+  if (!isSameView && shouldUpdateHash && !isBackNavigation && VIEW_META[state.activeView]) {
+    state.viewHistory.push(state.activeView);
+  }
 
   state.activeView = viewId;
 
@@ -2655,6 +3628,21 @@ function setActiveView(viewId, shouldUpdateHash = true) {
 /**
  * 입력: 없음.
  * 출력: 없음.
+ * 역할: 뒤로가기 스택에서 바로 이전 화면을 꺼내 그 화면으로 돌아간다.
+ * 호출 예시: goToPreviousView()
+ */
+function goToPreviousView() {
+  // 스택에서 꺼낸 이전 화면입니다. 없으면 아무 것도 하지 않습니다.
+  const previousView = state.viewHistory.pop();
+  if (!previousView) {
+    return;
+  }
+  setActiveView(previousView, true, true);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
  * 역할: 프로필, 레벨, 요약 통계를 홈 화면에 표시한다.
  * 호출 예시: renderProfile()
  */
@@ -2678,16 +3666,21 @@ function renderProfile() {
   const main = createElement("div", "profile-main");
   const avatar = createGgumdoriFigure(selectedGgumdori);
   const profileText = createElement("div");
-  const name = createElement("p", "profile-name", state.user.nickname || FALLBACK_USER.nickname);
+  const name = createElement("p", "profile-name", displayNickname(state.user.nickname) || displayNickname(FALLBACK_USER.nickname));
   const meta = createElement(
     "p",
     "profile-meta",
     `Lv.${toNumber(state.user.level, 1)} · ${toNumber(state.user.xp).toLocaleString("ko-KR")} XP`,
   );
+  // 변수 의미: 대표로 선택된 꿈돌이 이름입니다(고정된 이름 집합이라 UI_STRINGS_EN에도 등록돼 있음).
+  const selectedGgumdoriName = selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이";
   const selectedName = createElement(
     "span",
     "selected-ggumdori-name",
-    `${selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이"} 선택 중`,
+    localize(
+      `${selectedGgumdoriName} 선택 중`,
+      `${UI_STRINGS_EN[selectedGgumdoriName] || selectedGgumdoriName} selected`,
+    ),
   );
   const customizeLink = createElement("button", "profile-customize-link", "도감에서 대표 바꾸기 →");
   customizeLink.type = "button";
@@ -2699,7 +3692,11 @@ function renderProfile() {
   // 레벨 진행률 설명입니다.
   const progressCaption = createElement("div", "progress-caption");
   progressCaption.append(
-    createElement("span", "", `Lv.${toNumber(state.user.level, 1) + 1}까지`),
+    createElement(
+      "span",
+      "",
+      localize(`Lv.${toNumber(state.user.level, 1) + 1}까지`, `Until Lv.${toNumber(state.user.level, 1) + 1}`),
+    ),
     createElement("span", "", `${Math.round(progressPercent)}%`),
   );
 
@@ -2722,8 +3719,8 @@ function renderProfile() {
   const statRow = createElement("div", "stat-row");
   [
     ["XP", `${toNumber(state.user.xp).toLocaleString("ko-KR")}`],
-    ["완료", `${toNumber(state.user.completedQuestCount)}개`],
-    ["뱃지", `${toNumber(state.user.badgeCount)}개`],
+    ["완료", localize(`${toNumber(state.user.completedQuestCount)}개`, `${toNumber(state.user.completedQuestCount)}`)],
+    ["뱃지", localize(`${toNumber(state.user.badgeCount)}개`, `${toNumber(state.user.badgeCount)}`)],
   ].forEach(([label, value]) => {
     // 통계 한 칸을 표시하는 요소입니다.
     const statItem = createElement("div", "stat-item");
@@ -2754,8 +3751,8 @@ function renderHomeMetrics() {
   // 표시할 지표 목록입니다.
   const metrics = [
     ["📍", getRecommendationLocation().label.replace(" 기준", ""), state.explorationMode === "planned" ? "계획 위치" : "현재 위치 후보"],
-    ["🏷️", `${earnedBadges.length}개`, "획득 뱃지"],
-    ["🗺️", `${state.recommendations.length}개`, "주변 퀘스트"],
+    ["🏷️", localize(`${earnedBadges.length}개`, `${earnedBadges.length}`), "획득 뱃지"],
+    ["🗺️", localize(`${state.recommendations.length}개`, `${state.recommendations.length}`), "주변 퀘스트"],
     ["🎁", getRecommendationDataLabel(), "추천 데이터"],
   ];
 
@@ -3117,17 +4114,23 @@ function createAdventureCardActions(recommendation, questStatus) {
  */
 function formatStartTime(startedAt) {
   if (!startedAt) {
-    return "시작시각 기록 없음";
+    return localize("시작시각 기록 없음", "No start time recorded");
   }
 
   // 시작 시각입니다. 파싱에 실패하면 원문 대신 안내 문구를 씁니다.
   const started = new Date(startedAt);
 
   if (Number.isNaN(started.getTime())) {
-    return "시작시각 기록 없음";
+    return localize("시작시각 기록 없음", "No start time recorded");
   }
 
-  return `${started.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 시작`;
+  const formatted = started.toLocaleString(state.uiLanguage === "eng" ? "en-US" : "ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return localize(`${formatted} 시작`, `Started ${formatted}`);
 }
 
 /**
@@ -3236,6 +4239,379 @@ function renderQuestSheet() {
   // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
   trapFocus(panel);
   panel.querySelector("#quest-sheet-title")?.focus({ preventScroll: true });
+}
+
+// 관광지 상세 모달 설명을 미리 보기/전체 보기로 나눌 때 미리 보여줄 문장 수입니다.
+const DESCRIPTION_PREVIEW_SENTENCE_COUNT = 3;
+// 상세 모달 상태 문구에 쓰는 언어 이름입니다. 국문+영문만 지원합니다.
+const UI_LANGUAGE_LABELS = { kor: "국문", eng: "영문" };
+
+/**
+ * 입력: 지도에서 선택한 추천 항목.
+ * 출력: 없음.
+ * 역할: 관광지 상세 모달을 열고 상세 정보를 비동기로 불러온다.
+ * 호출 예시: openPlaceDetailSheet(selectedPlace)
+ */
+function openPlaceDetailSheet(place) {
+  if (!place) {
+    return;
+  }
+  stopAudioGuidePlayback();
+  state.placeDetailReturnFocus = document.activeElement;
+  state.placeDetailSheet = {
+    place,
+    status: "loading",
+    description: place.questDescription || "",
+    amenities: [],
+    source: "",
+    language: state.uiLanguage,
+    translationAvailable: true,
+    machineTranslated: false,
+    descriptionExpanded: false,
+    audioGuide: null,
+  };
+  renderPlaceDetailSheet();
+  loadPlaceDetail(place);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 관광지 상세 모달을 닫고 포커스를 되돌린다.
+ * 호출 예시: closePlaceDetailSheet()
+ */
+function closePlaceDetailSheet() {
+  if (!state.placeDetailSheet) {
+    return;
+  }
+  stopAudioGuidePlayback();
+  state.placeDetailSheet = null;
+  renderPlaceDetailSheet();
+
+  const target = state.placeDetailReturnFocus;
+  if (target instanceof HTMLElement && target.isConnected) {
+    target.focus({ preventScroll: true });
+  }
+  state.placeDetailReturnFocus = null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 설명 더 보기/접기 상태를 토글한다.
+ * 호출 예시: togglePlaceDetailDescription()
+ */
+function togglePlaceDetailDescription() {
+  if (!state.placeDetailSheet) {
+    return;
+  }
+  state.placeDetailSheet.descriptionExpanded = !state.placeDetailSheet.descriptionExpanded;
+  renderPlaceDetailSheet();
+}
+
+/**
+ * 입력: 설명 문단.
+ * 출력: 문장 단위로 나눈 목록.
+ * 역할: 마침표/물음표/느낌표 뒤에서 문장을 나눠 미리 보기를 만든다.
+ * 호출 예시: splitDescriptionSentences("설명입니다. 두 번째 문장입니다.")
+ */
+function splitDescriptionSentences(description) {
+  return String(description || "")
+    .split(/(?<=[.!?。])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 입력: 정보 출처, 요청 언어, 번역 가능 여부, 기계번역 적용 여부.
+ * 출력: 모달 하단에 보여줄 상태 문구.
+ * 역할: 실시간 여부와 번역 가능 여부를 하나의 문구로 안내한다.
+ * 호출 예시: buildPlaceDetailStatusText("live", "eng", false, true)
+ */
+function buildPlaceDetailStatusText(source, language, translationAvailable, machineTranslated) {
+  const languageLabel = UI_LANGUAGE_LABELS[language] || "";
+  if (language && language !== "kor" && translationAvailable === false) {
+    if (machineTranslated) {
+      return `이 장소는 아직 ${languageLabel} 관광 정보가 없어 자동 번역으로 보여드려요.`;
+    }
+    return `이 장소는 아직 ${languageLabel} 관광 정보가 없어 국문 설명을 보여드려요.`;
+  }
+  if (source !== "live") {
+    return "실시간 정보 준비 중 · 기본 설명을 보여드려요.";
+  }
+  return "";
+}
+
+/**
+ * 입력: 지도에서 선택한 추천 항목.
+ * 출력: 없음.
+ * 역할: 장소 상세 API를 호출해 모달 상태를 채운다. 경합은 요청 토큰으로 막는다.
+ * 호출 예시: loadPlaceDetail(place)
+ */
+async function loadPlaceDetail(place) {
+  state.placeDetailRequestToken += 1;
+  const requestToken = state.placeDetailRequestToken;
+
+  if (!place.placeContentId) {
+    if (state.placeDetailSheet?.place === place) {
+      state.placeDetailSheet = {
+        place,
+        status: "unavailable",
+        description: place.questDescription || "",
+        amenities: [],
+        source: "",
+        language: state.uiLanguage,
+        translationAvailable: true,
+        machineTranslated: false,
+        descriptionExpanded: false,
+        audioGuide: null,
+      };
+      renderPlaceDetailSheet();
+    }
+    return;
+  }
+
+  try {
+    const query = new URLSearchParams({
+      contentTypeId: place.placeContentTypeId || "",
+      lang: state.uiLanguage,
+      lat: String(place.placeLatitude),
+      lng: String(place.placeLongitude),
+    });
+    const payload = await fetchJson(`/api/places/${encodeURIComponent(place.placeContentId)}/detail?${query.toString()}`);
+    if (requestToken !== state.placeDetailRequestToken) {
+      return;
+    }
+    state.placeDetailSheet = {
+      place,
+      status: "ready",
+      description: payload.description || place.questDescription || "",
+      amenities: Array.isArray(payload.amenities) ? payload.amenities : [],
+      source: payload.source || "",
+      language: payload.language || state.uiLanguage,
+      translationAvailable: payload.translationAvailable !== false,
+      machineTranslated: Boolean(payload.machineTranslated),
+      descriptionExpanded: false,
+      audioGuide: payload.audioGuide || null,
+    };
+  } catch (error) {
+    if (requestToken !== state.placeDetailRequestToken) {
+      return;
+    }
+    state.placeDetailSheet = {
+      place,
+      status: "error",
+      description: place.questDescription || "",
+      amenities: [],
+      source: "",
+      language: state.uiLanguage,
+      translationAvailable: false,
+      machineTranslated: false,
+      descriptionExpanded: false,
+      audioGuide: null,
+    };
+  }
+  renderPlaceDetailSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: Web Speech API(TTS) 오디오 가이드 재생을 멈춘다.
+ * 호출 예시: stopAudioGuidePlayback()
+ */
+function stopAudioGuidePlayback() {
+  // 오디오 가이드 재생 중 배경음악을 낮췄다면, 재생이 끝나는 순간 되돌립니다.
+  const wasPlaying = state.audioGuidePlaying;
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  state.audioGuidePlaying = false;
+  if (wasPlaying) {
+    startBackgroundMusic();
+  }
+}
+
+/**
+ * 입력: 오디오 가이드 대본 객체.
+ * 출력: 없음.
+ * 역할: 재생 중이면 멈추고, 아니면 Web Speech API로 대본을 읽어준다.
+ * 호출 예시: toggleAudioGuidePlayback(audioGuide)
+ */
+function toggleAudioGuidePlayback(audioGuide) {
+  if (!window.speechSynthesis) {
+    return;
+  }
+  if (state.audioGuidePlaying) {
+    stopAudioGuidePlayback();
+    renderPlaceDetailSheet();
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  // 오디오 가이드 내레이션과 겹치지 않도록 배경음악을 잠시 멈춥니다.
+  pauseBackgroundMusic();
+  const utterance = new SpeechSynthesisUtterance(audioGuide.script);
+  // 백엔드가 영문 모드에서 script 자체를 이미 번역해서 내려주므로(_handle_place_detail),
+  // 읽어 줄 음성도 그 언어에 맞춰야 자연스럽게 들린다.
+  utterance.lang = state.uiLanguage === "eng" ? "en-US" : "ko-KR";
+  utterance.onend = () => {
+    stopAudioGuidePlayback();
+    renderPlaceDetailSheet();
+  };
+  utterance.onerror = () => {
+    stopAudioGuidePlayback();
+    renderPlaceDetailSheet();
+  };
+
+  state.audioGuidePlaying = true;
+  window.speechSynthesis.speak(utterance);
+  renderPlaceDetailSheet();
+}
+
+/**
+ * 입력: 오디오 가이드 대본 객체 또는 null.
+ * 출력: 오디오 가이드 슬롯 HTMLElement.
+ * 역할: 대본이 있으면 재생 버튼을, 없으면 안내 문구를 보여준다.
+ * 호출 예시: createAudioGuideSlot(audioGuide)
+ */
+function createAudioGuideSlot(audioGuide) {
+  if (!audioGuide) {
+    return createElement("div", "place-detail__audio", "🔊 이 장소는 아직 오디오 가이드가 없습니다.");
+  }
+
+  const slot = createElement("div", "place-detail__audio place-detail__audio--ready");
+  const playButton = createElement(
+    "button",
+    "place-detail__audio-button",
+    state.audioGuidePlaying ? "⏸ 오디오 가이드 정지" : "▶ 오디오 가이드 재생",
+  );
+  playButton.type = "button";
+  playButton.addEventListener("click", () => toggleAudioGuidePlayback(audioGuide));
+  slot.append(playButton, createElement("span", "place-detail__audio-label", audioGuide.audioTitle || audioGuide.title));
+  return slot;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 관광지 상세 모달을 그린다. 열려 있지 않으면 컨테이너를 비운다.
+ * 호출 예시: renderPlaceDetailSheet()
+ */
+function renderPlaceDetailSheet() {
+  const sheet = select("#place-detail-sheet");
+  if (!sheet) {
+    return;
+  }
+
+  if (!state.placeDetailSheet) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    delete document.body.dataset.placeDetailSheetOpen;
+    return;
+  }
+
+  const {
+    place,
+    status,
+    description,
+    amenities,
+    source,
+    language,
+    translationAvailable,
+    machineTranslated,
+    descriptionExpanded,
+    audioGuide,
+  } = state.placeDetailSheet;
+
+  sheet.hidden = false;
+  document.body.dataset.placeDetailSheetOpen = "true";
+  sheet.replaceChildren();
+
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closePlaceDetailSheet);
+
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "place-detail-sheet-title");
+
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement("h2", "px-label", place.placeName);
+  title.id = "place-detail-sheet-title";
+  title.tabIndex = -1;
+  titleGroup.append(title, createElement("p", "place-detail__sub", place.questTitle || ""));
+
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "상세 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closePlaceDetailSheet);
+  head.append(titleGroup, closeButton);
+
+  const body = createElement("div", "quest-sheet__body");
+
+  // 설명을 문장 단위로 나눠 미리 보기와 전체 보기를 구분합니다.
+  const descriptionSentences = splitDescriptionSentences(description);
+  const shouldTruncateDescription = status !== "loading" && descriptionSentences.length > DESCRIPTION_PREVIEW_SENTENCE_COUNT;
+  const visibleSentences = shouldTruncateDescription && !descriptionExpanded
+    ? descriptionSentences.slice(0, DESCRIPTION_PREVIEW_SENTENCE_COUNT)
+    : descriptionSentences;
+
+  const descriptionGroup = createElement("div", "place-detail__description-group");
+  if (status === "loading") {
+    descriptionGroup.append(createElement("p", "place-detail__description", "설명을 불러오는 중입니다."));
+  } else if (visibleSentences.length === 0) {
+    descriptionGroup.append(createElement("p", "place-detail__description", "설명을 준비 중입니다."));
+  } else {
+    visibleSentences.forEach((sentence) => {
+      descriptionGroup.append(createElement("p", "place-detail__description", sentence));
+    });
+  }
+  body.append(descriptionGroup);
+
+  if (shouldTruncateDescription) {
+    const descriptionToggle = createElement(
+      "button",
+      "place-detail__description-toggle",
+      descriptionExpanded ? "접기" : "더 보기",
+    );
+    descriptionToggle.type = "button";
+    descriptionToggle.addEventListener("click", togglePlaceDetailDescription);
+    body.append(descriptionToggle);
+  }
+
+  const amenitiesSection = createElement("div", "place-detail__amenities-section");
+  amenitiesSection.append(createElement("div", "place-detail__section-title", "추가 정보"));
+  const amenitiesList = createElement("div", "place-detail__amenities");
+  if (amenities.length > 0) {
+    amenities.forEach((amenity) => {
+      amenitiesList.append(createElement("span", "place-detail__amenity", `${amenity.label} · ${amenity.value}`));
+    });
+  } else {
+    amenitiesList.append(createElement("span", "place-detail__empty", "등록된 편의 정보가 아직 없습니다."));
+  }
+  amenitiesSection.append(amenitiesList);
+  body.append(amenitiesSection);
+
+  body.append(createAudioGuideSlot(audioGuide));
+
+  const statusMessages = {
+    loading: "불러오는 중...",
+    error: "상세 정보를 불러오지 못했습니다.",
+    unavailable: "실시간 정보 연결 전 장소입니다 · 기본 설명을 보여드려요.",
+    ready: buildPlaceDetailStatusText(source, language, translationAvailable, machineTranslated),
+  };
+  body.append(createElement("p", "place-detail__status", statusMessages[status] || ""));
+
+  panel.append(head, body);
+  sheet.append(scrim, panel);
+
+  trapFocus(panel);
+  panel.querySelector("#place-detail-sheet-title")?.focus({ preventScroll: true });
 }
 
 /**
@@ -3750,6 +5126,8 @@ function renderAdventure() {
   // S02 닉네임 단계 컨트롤입니다. (명세 §9.4, §10 S02)
   select("#nickname-input")?.addEventListener("input", (event) => {
     state.nicknameDraft = event.target.value || "";
+    // 사용자가 직접 고친 값이니, 언어 토글 때 제안값으로 되돌려 조립하지 않도록 잊습니다.
+    state.nicknameSuggestionIndices = null;
   });
   select("#nickname-suggest")?.addEventListener("click", () => {
     state.nicknameDraft = suggestNickname();
@@ -4031,7 +5409,7 @@ function renderQuestsContext() {
  */
 function formatContextDate(dateKey) {
   if (!dateKey) {
-    return "오늘";
+    return localize("오늘", "Today");
   }
 
   // 표시할 날짜입니다. 파싱에 실패하면 원문을 그대로 씁니다.
@@ -4041,7 +5419,164 @@ function formatContextDate(dateKey) {
     return dateKey;
   }
 
-  return parsed.toLocaleDateString("ko-KR", { month: "long", day: "numeric" });
+  return parsed.toLocaleDateString(state.uiLanguage === "eng" ? "en-US" : "ko-KR", { month: "long", day: "numeric" });
+}
+
+// 요일 라벨(일요일부터), 직접 그린 달력 그리드 헤더에 씁니다.
+const CALENDAR_WEEKDAY_LABELS_KOR = ["일", "월", "화", "수", "목", "금", "토"];
+const CALENDAR_WEEKDAY_LABELS_ENG = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// 월 이름 라벨(1월부터), 달력 헤더에 씁니다.
+const CALENDAR_MONTH_LABELS_KOR = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
+const CALENDAR_MONTH_LABELS_ENG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * 입력: "YYYY-MM-DD" 문자열 또는 빈 문자열.
+ * 출력: 날짜 필드 토글 버튼에 보여줄 짧은 문구.
+ * 호출 예시: formatDateFieldDisplay("2026-09-21")
+ */
+function formatDateFieldDisplay(dateKey) {
+  if (!dateKey) {
+    return localize("날짜 선택", "Select date");
+  }
+  const parsed = new Date(`${dateKey}T00:00:00+09:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return dateKey;
+  }
+  const monthLabels = state.uiLanguage === "eng" ? CALENDAR_MONTH_LABELS_ENG : CALENDAR_MONTH_LABELS_KOR;
+  const month = monthLabels[parsed.getMonth()];
+  const day = parsed.getDate();
+  const year = parsed.getFullYear();
+  return state.uiLanguage === "eng" ? `${month} ${day}, ${year}` : `${year}년 ${month} ${day}일`;
+}
+
+/**
+ * 입력: 달력을 펼칠 필드 식별자, 현재 선택된 "YYYY-MM-DD" 값, 값이 바뀔 때 호출할 콜백,
+ *       팝오버 상태가 바뀐 뒤 다시 그릴 때 호출할 콜백.
+ * 출력: 날짜 필드 컨테이너 DOM 엘리먼트.
+ * 역할: 네이티브 <input type="date">를 대체하는, 직접 그린 달력 위젯이다. 네이티브
+ *       위젯은 달력 팝업/placeholder 언어가 방문자 브라우저·OS 로케일(navigator.language)을
+ *       그대로 따라가 버려서, 페이지 lang 속성이나 앱의 화면 언어(state.uiLanguage)로는
+ *       바꿀 수 없다(의도된 브라우저 동작) — 그래서 직접 그려서 화면 언어를 그대로 따르게 한다.
+ * 호출 예시: buildDateField("plan", state.plannedDate, (next) => {...}, renderPlanSheet)
+ */
+function buildDateField(fieldId, value, onChange, rerender) {
+  const wrapper = createElement("div", "date-field");
+  const isOpen = state.activeDatePickerField === fieldId;
+
+  const toggleButton = createElement(
+    "button",
+    "px-button px-button--ghost date-field__toggle",
+    formatDateFieldDisplay(value),
+  );
+  toggleButton.type = "button";
+  toggleButton.setAttribute("aria-haspopup", "dialog");
+  toggleButton.setAttribute("aria-expanded", String(isOpen));
+  toggleButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (state.activeDatePickerField === fieldId) {
+      state.activeDatePickerField = "";
+    } else {
+      state.activeDatePickerField = fieldId;
+      // 변수 의미: 처음 열 때 보여줄 달입니다 — 선택된 값이 있으면 그 달, 없으면 이번 달.
+      const base = value ? new Date(`${value}T00:00:00+09:00`) : new Date();
+      state.datePickerViewMonth = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`;
+    }
+    rerender();
+  });
+  wrapper.append(toggleButton);
+
+  if (isOpen) {
+    wrapper.append(buildDateFieldPopover(value, onChange, rerender));
+  }
+  return wrapper;
+}
+
+/**
+ * 입력: 현재 선택된 "YYYY-MM-DD" 값, 값이 바뀔 때 호출할 콜백, 다시 그릴 때 호출할 콜백.
+ * 출력: 달력 팝오버 DOM 엘리먼트.
+ * 역할: buildDateField()의 펼침 상태일 때 붙는 월 이동 헤더 + 요일 + 날짜 그리드다.
+ * 호출 예시: buildDateFieldPopover(state.plannedDate, onChange, renderPlanSheet)
+ */
+function buildDateFieldPopover(value, onChange, rerender) {
+  const popover = createElement("div", "date-field__popover");
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", localize("날짜 선택", "Select date"));
+  popover.addEventListener("click", (event) => event.stopPropagation());
+
+  const todayKey = toKstDateKey(new Date());
+  const [viewYear, viewMonth] = (state.datePickerViewMonth || todayKey.slice(0, 7)).split("-").map(Number);
+
+  const header = createElement("div", "date-field__header");
+  const prevButton = createElement("button", "date-field__nav", "‹");
+  prevButton.type = "button";
+  prevButton.setAttribute("aria-label", localize("이전 달", "Previous month"));
+  prevButton.addEventListener("click", () => {
+    const prevDate = new Date(viewYear, viewMonth - 2, 1);
+    state.datePickerViewMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+    rerender();
+  });
+
+  const monthLabels = state.uiLanguage === "eng" ? CALENDAR_MONTH_LABELS_ENG : CALENDAR_MONTH_LABELS_KOR;
+  const heading = createElement(
+    "span",
+    "date-field__month-label",
+    state.uiLanguage === "eng" ? `${monthLabels[viewMonth - 1]} ${viewYear}` : `${viewYear}년 ${monthLabels[viewMonth - 1]}`,
+  );
+
+  const nextButton = createElement("button", "date-field__nav", "›");
+  nextButton.type = "button";
+  nextButton.setAttribute("aria-label", localize("다음 달", "Next month"));
+  nextButton.addEventListener("click", () => {
+    const nextDate = new Date(viewYear, viewMonth, 1);
+    state.datePickerViewMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
+    rerender();
+  });
+
+  header.append(prevButton, heading, nextButton);
+  popover.append(header);
+
+  const weekdayLabels = state.uiLanguage === "eng" ? CALENDAR_WEEKDAY_LABELS_ENG : CALENDAR_WEEKDAY_LABELS_KOR;
+  const weekdayRow = createElement("div", "date-field__weekdays");
+  weekdayLabels.forEach((label) => weekdayRow.append(createElement("span", "", label)));
+  popover.append(weekdayRow);
+
+  const grid = createElement("div", "date-field__grid");
+  const firstOfMonth = new Date(viewYear, viewMonth - 1, 1);
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+
+  const selectDate = (dateKey) => {
+    onChange(dateKey);
+    state.activeDatePickerField = "";
+    rerender();
+  };
+
+  for (let i = 0; i < firstOfMonth.getDay(); i += 1) {
+    grid.append(createElement("span", "date-field__cell date-field__cell--empty"));
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dateKey = `${viewYear}-${String(viewMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayButton = createElement("button", "date-field__cell date-field__day", String(day));
+    dayButton.type = "button";
+    if (dateKey === value) {
+      dayButton.classList.add("is-selected");
+    }
+    if (dateKey === todayKey) {
+      dayButton.classList.add("is-today");
+    }
+    dayButton.addEventListener("click", () => selectDate(dateKey));
+    grid.append(dayButton);
+  }
+  popover.append(grid);
+
+  const todayButton = createElement("button", "px-button px-button--ghost date-field__today", localize("오늘", "Today"));
+  todayButton.type = "button";
+  todayButton.addEventListener("click", () => selectDate(todayKey));
+  popover.append(todayButton);
+
+  return popover;
 }
 
 /**
@@ -4169,11 +5704,12 @@ function renderQuestBoard() {
 
   board.replaceChildren();
 
-  // 퀘스트 상태 그룹 정의입니다.
+  // 퀘스트 상태 그룹 정의입니다. 영문 라벨은 카운트 숫자와 한 텍스트 노드로 합쳐지므로
+  // (예: "추천됨 3") UI_STRINGS_EN의 완전 일치 방식으로는 못 잡아, localize()로 직접 고른다.
   const groups = [
-    { key: "recommended", title: "추천됨" },
-    { key: "accepted", title: "진행 중" },
-    { key: "completed", title: "완료" },
+    { key: "recommended", title: localize("추천됨", "Recommended") },
+    { key: "accepted", title: localize("진행 중", "In Progress") },
+    { key: "completed", title: localize("완료", "Completed") },
   ];
 
   groups.forEach((group) => {
@@ -4317,14 +5853,27 @@ async function renderNaverMapView(canvas, places) {
         position: window.naver.maps.Position.TOP_RIGHT,
       },
     });
+    state.naverMapCenteredLocation = { lat: getRecommendationLocation().lat, lng: getRecommendationLocation().lng };
     window.naver.maps.Event.addListener(state.naverMapInstance, "click", (event) => {
       if (state.explorationMode !== "planned") {
         return;
       }
-      setPlanningLocation(event.coord.lat(), event.coord.lng(), "지도에서 선택한 위치");
+      setPlanningLocation(event.coord.lat(), event.coord.lng(), localize("지도에서 선택한 위치", "Location selected on the map"));
     });
   } else {
-    state.naverMapInstance.setCenter(center);
+    // 추천 기준 위치가 실제로 바뀐 경우(GPS 갱신, 계획 위치 변경, 현위치/계획 모드 전환)에만
+    // 센터를 옮긴다. 모달을 열고 닫는 것처럼 위치와 무관한 재렌더링마다 센터를 리셋하면
+    // 사용자가 손으로 확대/이동해 둔 지도 위치가 자꾸 원점으로 튕겨 나가 불편해진다.
+    const referenceLocation = getRecommendationLocation();
+    const lastCenteredLocation = state.naverMapCenteredLocation;
+    const locationChanged =
+      !lastCenteredLocation ||
+      lastCenteredLocation.lat !== referenceLocation.lat ||
+      lastCenteredLocation.lng !== referenceLocation.lng;
+    if (locationChanged) {
+      state.naverMapInstance.setCenter(center);
+      state.naverMapCenteredLocation = { lat: referenceLocation.lat, lng: referenceLocation.lng };
+    }
   }
 
   syncNaverPositionMarker();
@@ -4360,6 +5909,24 @@ function syncNaverPositionMarker() {
 }
 
 /**
+ * 입력: 되돌아갈 기준 위치.
+ * 출력: 없음.
+ * 역할: "현재 위치" 버튼처럼 사용자가 명시적으로 위치로 돌아가길 요청했을 때만 지도를
+ *       그 위치로 되돌린다. 좌표 값이 이전과 같아도(같은 GPS 캐시 결과 등) 항상 되돌아간다는
+ *       걸 보장한다 — renderNaverMapView()의 좌표-변경 감지는 모달 열고 닫기 같은 무관한
+ *       재렌더링에서 지도를 건드리지 않기 위한 것이라 이 경우엔 못 쓴다.
+ * 호출 예시: recenterNaverMapOnLocation(state.location)
+ */
+function recenterNaverMapOnLocation(location) {
+  if (!state.naverMapInstance || !hasNaverMaps()) {
+    return;
+  }
+  state.naverMapInstance.setCenter(new window.naver.maps.LatLng(location.lat, location.lng));
+  state.naverMapInstance.setZoom(NAVER_MAP_DEFAULT_ZOOM);
+  state.naverMapCenteredLocation = { lat: location.lat, lng: location.lng };
+}
+
+/**
  * 입력: 추천 장소 목록.
  * 출력: 없음.
  * 역할: NAVER 지도 위 퀘스트 마커를 추천 데이터와 선택 상태에 맞게 갱신한다.
@@ -4370,23 +5937,86 @@ function syncNaverPlaceMarkers(places) {
     return;
   }
 
+  // 변수 의미: "내 일정" 보기 모드면 검색 결과 대신 계획한 퀘스트 목록만 마커로 그린다.
+  // plannedQuestList 항목은 이미 placeName/category/좌표를 갖고 있어 그대로 쓸 수 있다.
+  const markerPlaces = state.mapViewMode === "itinerary" ? state.plannedQuestList : places;
+
   state.naverMapMarkers.forEach((entry) => entry.marker.setMap(null));
-  state.naverMapMarkers = places.map((place) => {
+  state.naverMapMarkers = markerPlaces.map((place) => {
+    // 변수 의미: 계획한 퀘스트 목록에서의 순번입니다(1부터). "내 일정" 보기일 때만 번호
+    // 뱃지를 쓴다 — 검색 결과 화면에서는 일정에 담긴 것만 번호가 섞여 나오면 오히려
+    // 더 지저분해 보인다는 피드백을 받아, 검색 결과에서는 항상 일반 카테고리 아이콘을 쓴다.
+    const itineraryIndex =
+      state.mapViewMode === "itinerary"
+        ? state.plannedQuestList.findIndex((item) => item.instanceId === place.instanceId)
+        : -1;
+    const itineraryOrder = itineraryIndex === -1 ? null : itineraryIndex + 1;
     // 장소 마커입니다.
     const marker = new window.naver.maps.Marker({
       map: state.naverMapInstance,
       position: toNaverLatLng(place),
-      icon: buildNaverPlaceMarkerIcon(place, place.instanceId === state.selectedMapInstanceId),
+      icon: buildNaverPlaceMarkerIcon(place, place.instanceId === state.selectedMapInstanceId, itineraryOrder),
+      // 일정에 담긴 마커를 다른 마커들 위로 올려서, 많은 추천 마커 사이에서도 겹치지 않고
+      // 클릭/식별이 쉽게 한다.
+      zIndex: itineraryOrder ? 90 : 10,
     });
 
     window.naver.maps.Event.addListener(marker, "click", () => {
+      // 마커를 눌러 모달을 열 때도 지도를 확대/이동시키지 않는다(사용자가 옮겨 둔 상태 보존).
       selectMapPlace(place.instanceId);
-      state.naverMapInstance.setCenter(toNaverLatLng(place));
-      state.naverMapInstance.setZoom(NAVER_MAP_FOCUSED_ZOOM);
     });
 
     return { marker, place };
   });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 지도에 "검색 결과"를 보여줄지 "내 일정"만 보여줄지 전환한다. 마커가 많을 때
+ *       흐리게 처리하는 대신, 아예 화면을 바꿔서 필요한 것만 보게 한다. 내 일정으로
+ *       넘어가기 전의 지도 위치를 저장해 뒀다가 돌아갈 때 그대로 복원한다.
+ * 호출 예시: toggleMapViewMode()
+ */
+function toggleMapViewMode() {
+  if (!state.naverMapInstance || !hasNaverMaps()) {
+    return;
+  }
+
+  if (state.mapViewMode === "search") {
+    // 변수 의미: "내 일정"으로 넘어가기 전, 마지막으로 보고 있던 검색 화면의 지도 위치입니다.
+    const center = state.naverMapInstance.getCenter();
+    state.mapViewModeSavedView = {
+      lat: center.lat(),
+      lng: center.lng(),
+      zoom: state.naverMapInstance.getZoom(),
+    };
+    state.mapViewMode = "itinerary";
+
+    if (state.plannedQuestList.length > 0) {
+      // 변수 의미: 담은 장소를 전부 화면 안에 담는 범위입니다.
+      const bounds = new window.naver.maps.LatLngBounds();
+      state.plannedQuestList.forEach((item) => {
+        bounds.extend(new window.naver.maps.LatLng(item.placeLatitude, item.placeLongitude));
+      });
+      state.naverMapInstance.fitBounds(bounds, { top: 60, right: 40, bottom: 60, left: 40 });
+    }
+  } else {
+    state.mapViewMode = "search";
+    if (state.mapViewModeSavedView) {
+      // 변수 의미: 되돌아갈 마지막 검색 화면의 지도 위치입니다.
+      const savedView = state.mapViewModeSavedView;
+      state.naverMapInstance.setCenter(new window.naver.maps.LatLng(savedView.lat, savedView.lng));
+      state.naverMapInstance.setZoom(savedView.zoom);
+      // renderNaverMapView()가 "위치가 안 바뀌었으면 센터를 안 건드리는" 로직을 쓰므로,
+      // 방금 복원한 위치를 기준점으로 맞춰 둬야 다음 렌더에서 다시 리셋되지 않는다.
+      state.naverMapCenteredLocation = { lat: savedView.lat, lng: savedView.lng };
+    }
+    state.mapViewModeSavedView = null;
+  }
+
+  renderMapView();
+  renderPlannedQuestList();
 }
 
 /**
@@ -4416,13 +6046,12 @@ function selectMapPlace(instanceId) {
   state.selectedMapInstanceId = instanceId;
   renderMapView();
 
-  if (state.naverMapInstance && hasNaverMaps()) {
-    // 선택한 추천 장소입니다.
-    const selectedPlace = state.recommendations.find((item) => item.instanceId === instanceId);
-    if (selectedPlace) {
-      state.naverMapInstance.setCenter(toNaverLatLng(selectedPlace));
-      state.naverMapInstance.setZoom(NAVER_MAP_FOCUSED_ZOOM);
-    }
+  // 선택한 추천 장소입니다.
+  const selectedPlace = state.recommendations.find((item) => item.instanceId === instanceId);
+  if (selectedPlace) {
+    // 모달을 여느라 지도를 확대/이동시키지 않는다. 사용자가 직접 옮겨 둔 지도 상태(확대/이동)를
+    // 그대로 보존해야 모달을 보고 나서도 하던 흐름을 이어갈 수 있다.
+    openPlaceDetailSheet(selectedPlace);
   }
 }
 
@@ -4534,7 +6163,231 @@ function createMapDetailCard(place) {
   questButton.addEventListener("click", () => setActiveView("quests"));
 
   card.append(head, createElement("p", "card-description", place.questDescription), meta, questButton);
+
+  // 계획 모드에서만 "일정에 추가" 버튼을 보여준다(계획 모드 1단계). (명세 §6.3 확장)
+  if (state.explorationMode === "planned") {
+    // 변수 의미: 이미 계획 목록에 담긴 항목인지 여부입니다.
+    const isPlanned = state.plannedQuestList.some((item) => item.instanceId === place.instanceId);
+    const planButton = createElement(
+      "button",
+      "secondary-action",
+      isPlanned ? localize("일정에서 빼기", "Remove from itinerary") : localize("일정에 추가", "Add to itinerary"),
+    );
+    planButton.type = "button";
+    planButton.addEventListener("click", () => {
+      if (isPlanned) {
+        removeFromPlannedQuestList(place.instanceId);
+      } else {
+        addToPlannedQuestList(place);
+      }
+    });
+    card.append(planButton);
+  }
+
   return card;
+}
+
+/**
+ * 입력: 추천 장소 항목.
+ * 출력: 없음.
+ * 역할: 계획 모드에서 고른 퀘스트를 목록에 담는다(계획 모드 1단계, 로컬 상태만). 같은
+ *       장소를 두 번 담지 않는다.
+ * 호출 예시: addToPlannedQuestList(place)
+ */
+function addToPlannedQuestList(place) {
+  if (state.plannedQuestList.some((item) => item.instanceId === place.instanceId)) {
+    return;
+  }
+  state.plannedQuestList.push({
+    instanceId: place.instanceId,
+    placeName: place.placeName,
+    questTitle: place.questTitle,
+    rewardXp: place.rewardXp,
+    category: place.category,
+    placeLatitude: place.placeLatitude,
+    placeLongitude: place.placeLongitude,
+  });
+  writeStorageValue(PLANNED_QUEST_LIST_KEY, JSON.stringify(state.plannedQuestList));
+  renderMapView();
+  renderPlannedQuestList();
+}
+
+/**
+ * 입력: 뺄 퀘스트의 instanceId.
+ * 출력: 없음.
+ * 역할: 계획 목록에서 항목 하나를 뺀다.
+ * 호출 예시: removeFromPlannedQuestList("uqi_x")
+ */
+function removeFromPlannedQuestList(instanceId) {
+  state.plannedQuestList = state.plannedQuestList.filter((item) => item.instanceId !== instanceId);
+  writeStorageValue(PLANNED_QUEST_LIST_KEY, JSON.stringify(state.plannedQuestList));
+  // 변수 의미: "내 일정" 보기 중에 마지막 항목까지 뺐으면, 더 보여줄 마커가 없으니
+  // 자동으로 검색 결과 화면으로 되돌린다.
+  if (state.plannedQuestList.length === 0 && state.mapViewMode === "itinerary") {
+    toggleMapViewMode();
+  }
+  renderMapView();
+  renderPlannedQuestList();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 계획 모드에서 담은 퀘스트 목록을 지도 아래에 그린다. 계획 모드가 아니면 숨긴다.
+ * 호출 예시: renderPlannedQuestList()
+ */
+function renderPlannedQuestList() {
+  const section = select("#planned-quest-section");
+  const container = select("#planned-quest-list");
+  if (!section || !container) {
+    return;
+  }
+
+  section.hidden = state.explorationMode !== "planned";
+  container.replaceChildren();
+
+  if (state.explorationMode !== "planned") {
+    return;
+  }
+
+  if (state.plannedQuestList.length === 0) {
+    container.append(
+      createElement("p", "empty-message", localize("지도에서 장소를 골라 일정에 담아보세요.", "Pick places on the map to add them to your itinerary.")),
+    );
+    return;
+  }
+
+  // 변수 의미: 지도에서 "내 일정"만 보기/"검색 결과"로 돌아가기를 전환하는 버튼입니다.
+  // 마커가 많을 때 흐리게 처리하는 대신, 화면 자체를 전환해서 필요한 것만 보게 한다.
+  const isItineraryView = state.mapViewMode === "itinerary";
+  const viewToggleButton = createElement(
+    "button",
+    "px-button px-button--ghost planned-quest-view-toggle",
+    isItineraryView
+      ? localize("검색 결과로 돌아가기", "Back to search results")
+      : localize("내 일정 지도에서 보기", "View my itinerary on map"),
+  );
+  viewToggleButton.type = "button";
+  viewToggleButton.addEventListener("click", toggleMapViewMode);
+  container.append(viewToggleButton);
+
+  state.plannedQuestList.forEach((item, index) => {
+    // 변수 의미: 담을 당시 스냅샷이 언어 전환 도중의 비동기 번역 경합으로 옛 언어로
+    // 고정될 수 있어(예: 담자마자 영문으로 전환), 지금도 추천 목록에 같은 항목이 있으면
+    // 항상 그 최신 번역 텍스트를 우선한다. 지도에 안 뜨는 오래된 항목만 스냅샷을 쓴다.
+    const liveItem = state.recommendations.find((candidate) => candidate.instanceId === item.instanceId);
+    const displayPlaceName = liveItem ? liveItem.placeName : item.placeName;
+    const displayQuestTitle = liveItem ? liveItem.questTitle : item.questTitle;
+
+    const row = createElement("div", "planned-quest-row");
+    row.dataset.instanceId = item.instanceId;
+
+    // 변수 의미: 드래그로 순서를 바꾸는 손잡이입니다(계획 모드 3단계).
+    const handle = createElement("button", "planned-quest-row__handle");
+    handle.type = "button";
+    handle.setAttribute("aria-label", localize("순서 바꾸기", "Reorder"));
+    const handleIcon = createElement("span", "px-icon", "drag_indicator");
+    handleIcon.setAttribute("aria-hidden", "true");
+    handle.append(handleIcon);
+    attachPlannedQuestDragHandle(handle, row, container);
+
+    const text = createElement("div", "planned-quest-row__text");
+    text.append(createElement("strong", "", displayQuestTitle), createElement("p", "", displayPlaceName));
+    row.append(
+      handle,
+      createElement("span", "planned-quest-row__index", String(index + 1)),
+      text,
+      createElement("span", "category-tag", `${item.rewardXp} XP`),
+    );
+    const removeButton = createElement("button", "px-button px-button--ghost", localize("빼기", "Remove"));
+    removeButton.type = "button";
+    removeButton.addEventListener("click", () => removeFromPlannedQuestList(item.instanceId));
+    row.append(removeButton);
+    container.append(row);
+  });
+}
+
+/**
+ * 입력: 손잡이 요소, 그 손잡이가 속한 행, 행들을 담은 목록 컨테이너.
+ * 출력: 없음.
+ * 역할: 손잡이를 눌러 끌면 행을 위아래로 옮기고, 놓으면 순서를 확정해 계획 목록과
+ *       지도 경로(점선)에 반영한다(계획 모드 3단계). 포인터 이벤트 기반이라 마우스와
+ *       터치 둘 다 같은 방식으로 동작한다.
+ * 호출 예시: attachPlannedQuestDragHandle(handle, row, container)
+ */
+function attachPlannedQuestDragHandle(handle, row, container) {
+  handle.addEventListener("pointerdown", (pointerDownEvent) => {
+    // 마우스 왼쪽 버튼이 아니거나 이미 다른 드래그가 진행 중이면 무시합니다.
+    if (pointerDownEvent.button !== undefined && pointerDownEvent.button !== 0) {
+      return;
+    }
+    pointerDownEvent.preventDefault();
+    handle.setPointerCapture(pointerDownEvent.pointerId);
+    row.classList.add("is-dragging");
+
+    // 변수 의미: 드래그 시작 시점의 포인터 Y와 행의 화면상 위치입니다.
+    let startY = pointerDownEvent.clientY;
+    let rowTop = row.getBoundingClientRect().top;
+
+    const onPointerMove = (moveEvent) => {
+      // 변수 의미: 드래그 시작 이후 포인터가 움직인 거리입니다.
+      const deltaY = moveEvent.clientY - startY;
+      row.style.transform = `translateY(${deltaY}px)`;
+
+      // 변수 의미: 드래그 중인 행의 현재 화면상 중심 Y입니다.
+      const draggedCenterY = rowTop + row.offsetHeight / 2 + deltaY;
+      // 변수 의미: 드래그 중인 행을 제외한 나머지 행들입니다(DOM 순서대로).
+      const siblings = Array.from(container.children).filter((el) => el !== row);
+
+      for (const sibling of siblings) {
+        const siblingRect = sibling.getBoundingClientRect();
+        const siblingCenterY = siblingRect.top + siblingRect.height / 2;
+        const draggedIsAfterSibling = row.compareDocumentPosition(sibling) === Node.DOCUMENT_POSITION_PRECEDING;
+
+        if (!draggedIsAfterSibling && draggedCenterY > siblingCenterY) {
+          // 드래그 중인 행이 뒤에 있는 sibling의 중심을 넘어섰으면, sibling 뒤로 옮긴다.
+          container.insertBefore(row, sibling.nextSibling);
+        } else if (draggedIsAfterSibling && draggedCenterY < siblingCenterY) {
+          // 드래그 중인 행이 앞에 있는 sibling의 중심보다 위로 올라갔으면, sibling 앞으로 옮긴다.
+          container.insertBefore(row, sibling);
+        } else {
+          continue;
+        }
+        // 변수 의미: DOM 위치를 옮긴 뒤 기준점을 다시 잡아, transform이 그 자리에서부터
+        // 이어지게 한다(자리 이동 때 시각적으로 튀지 않게 하기 위함).
+        row.style.transform = "translateY(0px)";
+        startY = moveEvent.clientY;
+        rowTop = row.getBoundingClientRect().top;
+        break;
+      }
+    };
+
+    const onPointerUp = () => {
+      handle.releasePointerCapture(pointerDownEvent.pointerId);
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", onPointerUp);
+      handle.removeEventListener("pointercancel", onPointerUp);
+      row.classList.remove("is-dragging");
+      row.style.transform = "";
+
+      // 변수 의미: 드래그로 재배치된 최종 DOM 순서입니다. instanceId로 원본 배열을 다시 정렬한다.
+      const orderedIds = Array.from(container.children)
+        .map((el) => el.dataset.instanceId)
+        .filter(Boolean);
+      const itemsById = new Map(state.plannedQuestList.map((item) => [item.instanceId, item]));
+      const reordered = orderedIds.map((id) => itemsById.get(id)).filter(Boolean);
+      if (reordered.length === state.plannedQuestList.length) {
+        state.plannedQuestList = reordered;
+        writeStorageValue(PLANNED_QUEST_LIST_KEY, JSON.stringify(state.plannedQuestList));
+      }
+      renderMapView();
+      renderPlannedQuestList();
+    };
+
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", onPointerUp);
+  });
 }
 
 /**
@@ -5413,7 +7266,9 @@ function renderCollection() {
     const featured = state.catalog.entries.find(
       (item) => item.ggumdoriId === state.selectedGgumdoriId && item.state === "earned",
     );
-    featuredElement.textContent = featured ? `대표 ${featured.ggumdoriName}` : "대표 미설정";
+    featuredElement.textContent = featured
+      ? localize(`대표 ${featured.ggumdoriName}`, `Featured ${UI_STRINGS_EN[featured.ggumdoriName] || featured.ggumdoriName}`)
+      : localize("대표 미설정", "No featured character set");
   }
 
   // 필터 버튼의 현재 선택을 반영합니다.
@@ -5676,7 +7531,9 @@ function renderCatalogSheet() {
   if (entry.ggumdoriImageRef) {
     const image = document.createElement("img");
     image.src = entry.ggumdoriImageRef;
-    image.alt = isEarned ? entry.ggumdoriName : `${entry.ggumdoriName} 미획득`;
+    image.alt = isEarned
+      ? entry.ggumdoriName
+      : localize(`${entry.ggumdoriName} 미획득`, `${UI_STRINGS_EN[entry.ggumdoriName] || entry.ggumdoriName} (not yet earned)`);
     figure.append(image);
   }
   if (!isEarned) {
@@ -5863,11 +7720,62 @@ async function saveFeaturedGgumdori(ggumdoriId) {
  * 호출 예시: const nickname = suggestNickname()
  */
 function suggestNickname() {
-  // 앞뒤 조각을 하나씩 골라 붙입니다.
-  const prefix = NICKNAME_PREFIXES[Math.floor(Math.random() * NICKNAME_PREFIXES.length)];
-  const noun = NICKNAME_NOUNS[Math.floor(Math.random() * NICKNAME_NOUNS.length)];
+  // 앞뒤 조각을 하나씩 골라 붙입니다. 국문/영문 배열은 같은 순서로 대응하므로 인덱스를
+  // 공유해서 현재 화면 언어에 맞는 쪽을 고릅니다.
+  const prefixIndex = Math.floor(Math.random() * NICKNAME_PREFIXES.length);
+  const nounIndex = Math.floor(Math.random() * NICKNAME_NOUNS.length);
+  // 뽑은 인덱스를 기억해 둡니다. 언어를 토글했을 때 새로 랜덤 추첨하지 않고, 같은 조합을
+  // 다른 언어 단어로만 다시 조립할 수 있게 하기 위해서입니다(formatNicknameSuggestion 참고).
+  state.nicknameSuggestionIndices = { prefixIndex, nounIndex };
+  return formatNicknameSuggestion(prefixIndex, nounIndex);
+}
 
+/**
+ * 입력: 형용사/명사 인덱스.
+ * 출력: 현재 화면 언어에 맞는 닉네임 제안 문자열.
+ * 역할: suggestNickname()과 언어 토글 재조립이 같은 조립 로직을 쓰게 한다.
+ * 호출 예시: formatNicknameSuggestion(0, 5)
+ */
+function formatNicknameSuggestion(prefixIndex, nounIndex) {
+  const prefix = localize(NICKNAME_PREFIXES[prefixIndex], NICKNAME_PREFIXES_EN[prefixIndex]);
+  const noun = localize(NICKNAME_NOUNS[nounIndex], NICKNAME_NOUNS_EN[nounIndex]);
   return `${prefix} ${noun}`;
+}
+
+/**
+ * 입력: 저장된 닉네임(국문 또는 영문 제안값 형태일 수 있음).
+ * 출력: 현재 화면 언어에 맞는 닉네임. 제안 조합이 아니면 원본 그대로.
+ * 역할: 확정해 저장한 닉네임이 "형용사 명사" 자동 제안 조합(64가지)과 정확히 일치하면
+ *       같은 조합을 현재 언어 단어로 다시 조립해 보여준다. 사용자가 직접 입력한 커스텀
+ *       닉네임은 어느 목록과도 안 맞으니 그대로 남는다(번역할 사전이 없어서 자연스러운 동작).
+ * 호출 예시: displayNickname(state.user.nickname)
+ */
+function displayNickname(nickname) {
+  const text = String(nickname || "").trim();
+  if (!text) {
+    return text;
+  }
+  // 변수 의미: (명사 목록, 그 명사 목록과 짝지어진 형용사 목록) 쌍입니다. 저장된 닉네임이
+  // 국문으로 됐던 영문으로 됐던 둘 다 검사해야 하므로 두 언어를 모두 확인합니다.
+  const nounLists = [
+    { nouns: NICKNAME_NOUNS, prefixes: NICKNAME_PREFIXES },
+    { nouns: NICKNAME_NOUNS_EN, prefixes: NICKNAME_PREFIXES_EN },
+  ];
+  for (const { nouns, prefixes } of nounLists) {
+    for (let nounIndex = 0; nounIndex < nouns.length; nounIndex += 1) {
+      const noun = nouns[nounIndex];
+      if (!text.endsWith(` ${noun}`)) {
+        continue;
+      }
+      // 변수 의미: 명사를 뗀 나머지, 형용사여야 합니다.
+      const prefixText = text.slice(0, text.length - noun.length - 1).trim();
+      const prefixIndex = prefixes.indexOf(prefixText);
+      if (prefixIndex !== -1) {
+        return formatNicknameSuggestion(prefixIndex, nounIndex);
+      }
+    }
+  }
+  return text;
 }
 
 /**
@@ -6108,7 +8016,7 @@ function renderAccountPanel() {
   const nicknameInput = document.createElement("input");
   nicknameInput.type = "text";
   nicknameInput.id = "me-nickname-input";
-  nicknameInput.value = state.user.nickname || "";
+  nicknameInput.value = displayNickname(state.user.nickname);
   nicknameInput.maxLength = 20;
   nicknameInput.setAttribute("aria-label", "닉네임");
 
@@ -6691,17 +8599,31 @@ async function searchPlanLocation(keyword) {
   renderPlanSheet();
 
   try {
-    const payload = await fetchJson(`/api/naver-map/geocode?query=${encodeURIComponent(query)}`);
+    // 변수 의미: NAVER Geocoding에 넘길 응답 언어입니다. 이 파라미터가 빠지면 백엔드가
+    // 항상 국문으로만 조회해서, 영문 모드에서 검색해도 매칭률이 떨어집니다.
+    const geocodeLanguage = state.uiLanguage === "eng" ? "eng" : "kor";
+    const payload = await fetchJson(
+      `/api/naver-map/geocode?query=${encodeURIComponent(query)}&language=${geocodeLanguage}`,
+    );
     if (!isCurrentRequest("planSearch", requestId, sessionVersion)) {
       return;
     }
     const addresses = Array.isArray(payload?.addresses) ? payload.addresses : unwrapList(payload);
+    // 변수 의미: 지역검색(상호명 검색) 결과인지 여부입니다. 반경으로는 "그 장소만" 보여주는 걸
+    // 못 만든다(이웃 가게가 항상 반경 안에 섞여 들어옴). 그래서 반경 대신 이름 일치로
+    // 거른다 — loadRecommendations()의 isSamePlaceName() 필터 참고.
+    const isPlaceSearch = payload?.source === "localSearch";
     state.planSearchResults = addresses
       .map((item) => ({
-        label: String(item.roadAddress || item.jibunAddress || item.label || item.name || query),
+        // 변수 의미: 목록 위쪽 굵은 줄입니다. "성심당 본점"처럼 실제 상호명/장소명이 있으면
+        // 그게 주소보다 훨씬 직관적이라 우선한다(지역검색 결과의 label). 상호명이 없는
+        // 순수 주소 결과(Geocoding)일 때만 주소 자체를 대표 텍스트로 쓴다.
+        label: String(item.label || item.name || item.roadAddress || item.jibunAddress || query),
+        // 변수 의미: 목록 아래쪽 작은 줄입니다. 도로명주소를 보조 정보로 항상 보여준다.
         address: String(item.roadAddress || item.jibunAddress || item.address || ""),
         lat: Number(item.y ?? item.latitude ?? item.lat),
         lng: Number(item.x ?? item.longitude ?? item.lng),
+        isPlaceSearch,
       }))
       .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng));
     state.planMessage = state.planSearchResults.length === 0 ? "검색 결과가 없어요." : "";
@@ -6734,8 +8656,11 @@ function applyPlanLocation(candidate) {
   state.plannedLocation = {
     lat,
     lng,
-    label: String(candidate?.label || "선택한 계획 위치"),
+    label: String(candidate?.label || localize("선택한 계획 위치", "Selected plan location")),
     measured: false,
+    // 변수 의미: 상호명 검색 결과로 잡은 위치인지 여부입니다. loadRecommendations()가 이걸
+    // 보고 "그 장소만" 남기는 이름 일치 필터를 적용할지 결정한다.
+    isPlaceSearch: Boolean(candidate?.isPlaceSearch),
   };
   state.explorationMode = "planned";
   state.selectedCategory = state.plannedCategory;
@@ -6752,7 +8677,7 @@ function applyPlanLocation(candidate) {
  * 역할: 프리셋, 직접 좌표와 지도 클릭을 같은 계획 위치 설정 흐름으로 연결합니다.
  * 호출 예시: setPlanningLocation(36.3321, 127.4344, "대전역")
  */
-function setPlanningLocation(lat, lng, label = "선택한 계획 위치") {
+function setPlanningLocation(lat, lng, label = localize("선택한 계획 위치", "Selected plan location")) {
   applyPlanLocation({ lat, lng, label });
 }
 
@@ -6867,7 +8792,11 @@ function renderPlanSheet() {
   searchRow.append(searchInput, searchButton);
   searchPanel.append(searchRow);
   searchPanel.append(
-    createElement("p", "data-note", `현재 계획 위치: ${state.plannedLocation.label}`),
+    createElement(
+      "p",
+      "data-note",
+      localize(`현재 계획 위치: ${state.plannedLocation.label}`, `Current plan location: ${state.plannedLocation.label}`),
+    ),
   );
   const presets = createElement("div", "chip-row");
   PLAN_LOCATION_PRESETS.forEach((preset) => {
@@ -6935,32 +8864,20 @@ function renderPlanSheet() {
   datePanel.append(createElement("h3", "section-title", "날짜"));
 
   const dateRow = createElement("div", "account-field__controls");
-  const dateInput = document.createElement("input");
-  dateInput.type = "date";
-  dateInput.id = "plan-date-input";
-  dateInput.value = state.plannedDate || toKstDateKey(new Date());
-  dateInput.setAttribute("aria-label", "계획 날짜");
-  dateInput.addEventListener("change", (event) => {
-    state.plannedDate = event.target.value || "";
-    persistPlanContext();
-    renderHomeContext();
-    renderRecommendations();
-    loadWeather(true);
-  });
-
-  // 오늘 바로가기입니다. (명세 §10 S15)
-  const todayButton = createElement("button", "px-button px-button--ghost", "오늘");
-  todayButton.type = "button";
-  todayButton.addEventListener("click", () => {
-    state.plannedDate = toKstDateKey(new Date());
-    persistPlanContext();
-    renderPlanSheet();
-    renderHomeContext();
-    renderRecommendations();
-    loadWeather(true);
-  });
-
-  dateRow.append(dateInput, todayButton);
+  dateRow.append(
+    buildDateField(
+      "plan",
+      state.plannedDate || toKstDateKey(new Date()),
+      (next) => {
+        state.plannedDate = next;
+        persistPlanContext();
+        renderHomeContext();
+        renderRecommendations();
+        loadWeather(true);
+      },
+      renderPlanSheet,
+    ),
+  );
   datePanel.append(dateRow);
   datePanel.append(
     createElement("p", "data-note", "날짜는 일정 메모로 저장됩니다. 추천은 계획 위치를 기준으로 하며 완료 인증은 현장의 실제 GPS와 현재 시각만 사용합니다."),
@@ -7628,7 +9545,13 @@ function renderPhotoSheet() {
   // 상단 고정 머리말입니다.
   const head = createElement("header", "quest-sheet__head px-dialog__bar");
   const titleGroup = createElement("div", "quest-sheet__title-group");
-  const title = createElement("h2", "px-label", `${entry?.ggumdoriName || "꿈돌이"}와 사진 찍기`);
+  // 변수 의미: 사진 찍기 대상 꿈돌이 이름입니다(고정된 이름 집합이라 UI_STRINGS_EN에도 등록돼 있음).
+  const photoGgumdoriName = entry?.ggumdoriName || "꿈돌이";
+  const title = createElement(
+    "h2",
+    "px-label",
+    localize(`${photoGgumdoriName}와 사진 찍기`, `Take a photo with ${UI_STRINGS_EN[photoGgumdoriName] || photoGgumdoriName}`),
+  );
   title.id = "photo-sheet-title";
   title.tabIndex = -1;
   titleGroup.append(title);
@@ -7785,6 +9708,221 @@ function createPhotoSlider(label, key, min, max, value) {
 }
 
 /* ──────────────────────────────────────────────
+   TAP-TO-START 시작 화면과 배경음악(BGM)
+   ────────────────────────────────────────────── */
+
+// 시작 화면 로딩 바가 추적하는 항목입니다. 전부 끝나야 TAP TO START로 바뀝니다.
+const START_SCREEN_TASKS = ["splashImage", "iconFont", "bgmReady", "authProviders", "geolocation"];
+// 느린 네트워크 등으로 항목 하나가 안 끝나도 화면이 멈추지 않도록 두는 최대 대기 시간입니다.
+const START_SCREEN_TASK_TIMEOUT_MS = 8000;
+// 로컬 서버 등에서는 실제 로딩이 순식간에 끝나 로딩 바가 스쳐 지나가듯 사라지므로,
+// 실제 로딩이 이보다 빨리 끝나도 최소 이 시간만큼은 로딩 연출을 보여준다.
+const START_SCREEN_MIN_DURATION_MS = 1500;
+// 진행률 갱신 주기입니다. 부드럽게 차오르도록 짧게 잡습니다.
+const START_SCREEN_TICK_MS = 80;
+
+// 시작 화면 로딩 항목별 완료 여부입니다.
+const startScreenTaskDone = Object.fromEntries(START_SCREEN_TASKS.map((task) => [task, false]));
+// 로딩을 시작한 시각(performance.now() 기준)입니다.
+let startScreenLoadStartedAt = 0;
+// 진행률 갱신 타이머 id입니다.
+let startScreenTickerId = null;
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 경과 시간과 실제 로딩 완료 여부를 함께 반영해 로딩 바를 갱신한다.
+ *       실제 로딩이 먼저 끝나도 최소 시간 전에는 99%에서 멈추고, 최소 시간이 지나도
+ *       실제 로딩이 안 끝났으면 100%를 보여주지 않는다. 둘 다 끝나야 TAP TO START로 바뀐다.
+ * 호출 예시: updateStartScreenDisplay()
+ */
+function updateStartScreenDisplay() {
+  // 변수 의미: 로딩 시작 이후 지난 시간(ms)입니다.
+  const elapsedMs = performance.now() - startScreenLoadStartedAt;
+  // 변수 의미: 항목 네 개가 모두 끝났는지 여부입니다.
+  const allTasksDone = Object.values(startScreenTaskDone).every(Boolean);
+  // 변수 의미: 시간 기준 진행률입니다. 실제 로딩이 안 끝났으면 99%를 넘지 않습니다.
+  const timePercent = Math.round((elapsedMs / START_SCREEN_MIN_DURATION_MS) * 100);
+  const percent = Math.max(0, Math.min(allTasksDone ? 100 : 99, timePercent));
+
+  const fill = select("#start-screen-progress-fill");
+  const bar = select("#start-screen-progress-bar");
+  const text = select("#start-screen-loading-text");
+  if (fill) {
+    fill.style.width = `${percent}%`;
+  }
+  if (bar) {
+    bar.setAttribute("aria-valuenow", String(percent));
+    bar.setAttribute("aria-label", `로딩 중 ${percent}퍼센트`);
+  }
+  if (text) {
+    text.textContent = `Loading... ${percent}%`;
+  }
+
+  if (percent >= 100 && allTasksDone) {
+    if (startScreenTickerId !== null) {
+      window.clearInterval(startScreenTickerId);
+      startScreenTickerId = null;
+    }
+    state.startScreenReady = true;
+    select("#start-screen-loading")?.setAttribute("hidden", "");
+    select("#start-screen-hint")?.removeAttribute("hidden");
+  }
+}
+
+/**
+ * 입력: 완료된 로딩 항목 이름.
+ * 출력: 없음.
+ * 역할: 로딩 항목 하나를 끝난 것으로 표시하고 화면을 갱신한다. 실제로 100%가 되는 시점은
+ *       updateStartScreenDisplay()가 최소 시간과 함께 판단한다.
+ * 호출 예시: markStartScreenTaskDone("splashImage")
+ */
+function markStartScreenTaskDone(taskName) {
+  if (!(taskName in startScreenTaskDone) || startScreenTaskDone[taskName]) {
+    return;
+  }
+  startScreenTaskDone[taskName] = true;
+  updateStartScreenDisplay();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 스플래시 이미지·폰트·배경음악·인증 서버 연결 네 가지 준비 상태를 각각 추적해 로딩 바에 반영한다.
+ *       하나가 너무 오래 걸려도(느린 네트워크 등) 정해진 시간 뒤 강제로 완료 처리해 화면이 멈추지 않게 한다.
+ * 호출 예시: setupStartScreenLoading()
+ */
+function setupStartScreenLoading() {
+  startScreenLoadStartedAt = performance.now();
+
+  // 스플래시 이미지입니다. 이미 캐시로 로드가 끝나 있을 수도 있습니다.
+  const splashImage = select(".start-screen__image");
+  if (splashImage?.complete) {
+    markStartScreenTaskDone("splashImage");
+  } else {
+    splashImage?.addEventListener("load", () => markStartScreenTaskDone("splashImage"), { once: true });
+    splashImage?.addEventListener("error", () => markStartScreenTaskDone("splashImage"), { once: true });
+  }
+
+  // 아이콘·본문 폰트입니다.
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => markStartScreenTaskDone("iconFont"));
+  } else {
+    markStartScreenTaskDone("iconFont");
+  }
+
+  // 배경음악입니다. 끊김 없이 재생할 수 있을 만큼 받아졌을 때 완료로 봅니다.
+  const bgmAudio = getBgmAudioElement();
+  if (bgmAudio && bgmAudio.readyState >= 3) {
+    markStartScreenTaskDone("bgmReady");
+  } else {
+    bgmAudio?.addEventListener("canplaythrough", () => markStartScreenTaskDone("bgmReady"), { once: true });
+    bgmAudio?.addEventListener("error", () => markStartScreenTaskDone("bgmReady"), { once: true });
+  }
+
+  // 느린 네트워크 등으로 항목 하나가 끝내 안 끝나도 화면이 멈추지 않도록 강제로 전부 완료 처리합니다.
+  window.setTimeout(() => {
+    START_SCREEN_TASKS.forEach((task) => markStartScreenTaskDone(task));
+  }, START_SCREEN_TASK_TIMEOUT_MS);
+
+  // 최소 노출 시간 동안 진행률이 부드럽게 차오르도록 주기적으로 갱신합니다.
+  // 실제 로딩이 다 끝나면 updateStartScreenDisplay()가 알아서 타이머를 멈춥니다.
+  updateStartScreenDisplay();
+  startScreenTickerId = window.setInterval(updateStartScreenDisplay, START_SCREEN_TICK_MS);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 시작 화면을 닫는다. 이때의 클릭/키 입력을 배경음악 자동재생 허용 계기로 그대로 쓴다.
+ *       로딩이 끝나기 전(state.startScreenReady가 false)에는 닫지 않는다.
+ * 호출 예시: dismissStartScreen()
+ */
+function dismissStartScreen() {
+  const startScreen = select("#start-screen");
+  if (!startScreen || startScreen.hidden || !state.startScreenReady) {
+    return;
+  }
+  startScreen.classList.add("is-dismissing");
+  window.setTimeout(() => {
+    startScreen.hidden = true;
+    startScreen.classList.remove("is-dismissing");
+  }, 350);
+
+  if (state.appSettings.musicEnabled) {
+    startBackgroundMusic();
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 배경음악 audio 엘리먼트 또는 null.
+ * 역할: 정적 HTML에 있는 배경음악 엘리먼트를 찾는다.
+ * 호출 예시: getBgmAudioElement()?.pause()
+ */
+function getBgmAudioElement() {
+  return select("#bgm-audio");
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 0~1 사이 실제 재생 음량.
+ * 역할: 전체 음량과 배경음 음량 두 슬라이더를 곱해 최종 음량을 만든다.
+ * 호출 예시: audio.volume = computeBgmVolume()
+ */
+function computeBgmVolume() {
+  const masterVolume = toNumber(state.appSettings.masterVolume, 60) / 100;
+  const musicVolume = toNumber(state.appSettings.musicVolume, 40) / 100;
+  return Math.min(1, Math.max(0, masterVolume * musicVolume));
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 배경음 켜짐 여부와 음량 설정을 지금 바로 반영한다. (명세 §10 S12)
+ * 호출 예시: applyBgmSettings()
+ */
+function applyBgmSettings() {
+  const audio = getBgmAudioElement();
+  if (!audio) {
+    return;
+  }
+  audio.volume = computeBgmVolume();
+  if (state.appSettings.musicEnabled) {
+    startBackgroundMusic();
+  } else {
+    pauseBackgroundMusic();
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 배경음이 꺼져 있지 않으면 재생한다. 브라우저 자동재생 정책으로 실패해도 조용히 넘어간다.
+ * 호출 예시: startBackgroundMusic()
+ */
+function startBackgroundMusic() {
+  const audio = getBgmAudioElement();
+  if (!audio || !state.appSettings.musicEnabled) {
+    return;
+  }
+  audio.volume = computeBgmVolume();
+  audio.play().catch(() => {
+    // 사용자 상호작용 전이라 자동재생이 막힌 경우입니다. 설정에서 다시 켤 수 있습니다.
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 배경음악을 멈춘다. 오디오 가이드 재생 중 겹치지 않게 할 때도 쓴다.
+ * 호출 예시: pauseBackgroundMusic()
+ */
+function pauseBackgroundMusic() {
+  getBgmAudioElement()?.pause();
+}
+
+/* ──────────────────────────────────────────────
    마이페이지 설정·권한·정보 (명세 §10 S12)
    앱 음량만 조절하며 시스템 음량을 바꾸는 것처럼 표현하지 않는다.
    ────────────────────────────────────────────── */
@@ -7797,8 +9935,8 @@ const APP_SETTING_GROUPS = [
     note: "앱에서 나는 소리만 조절해요. 기기 전체 음량은 바뀌지 않습니다.",
     items: [
       { key: "masterVolume", label: "전체 음량", type: "range" },
-      { key: "musicVolume", label: "배경음", type: "range" },
-      { key: "effectVolume", label: "효과음", type: "range" },
+      { key: "musicVolume", label: "배경음", type: "range", muteKey: "musicEnabled" },
+      { key: "effectVolume", label: "효과음", type: "range", muteKey: "effectEnabled" },
       { key: "vibration", label: "진동", type: "toggle" },
     ],
   },
@@ -7829,7 +9967,9 @@ function readAppSettings() {
   // 기본값입니다. 소리는 중간, 알림은 꺼진 상태에서 시작합니다.
   const defaults = {
     masterVolume: 60,
+    musicEnabled: true,
     musicVolume: 40,
+    effectEnabled: true,
     effectVolume: 70,
     vibration: true,
     questNotification: false,
@@ -7884,6 +10024,10 @@ async function changeAppSetting(key, value) {
   if (key === "reducedMotion") {
     state.reducedMotion = value;
     applyReducedMotion();
+  }
+
+  if (key === "musicEnabled" || key === "musicVolume" || key === "masterVolume") {
+    applyBgmSettings();
   }
 
   renderSettings();
@@ -7993,6 +10137,31 @@ function renderSettings() {
       row.append(label);
 
       if (item.type === "range") {
+        // 음소거 여부입니다. muteKey가 없는 슬라이더(전체 음량)는 항상 켜진 것으로 봅니다.
+        const isMuted = item.muteKey ? !state.appSettings[item.muteKey] : false;
+
+        // 게이지 바 왼쪽의 음소거 버튼입니다. muteKey가 있는 항목(배경음·효과음)에만 붙입니다.
+        if (item.muteKey) {
+          const muteButton = createElement("button", "setting-row__mute");
+          muteButton.type = "button";
+          muteButton.id = `setting-${item.muteKey}`;
+          muteButton.setAttribute("aria-pressed", String(!isMuted));
+          // 변수 의미: 영문 모드에서 라벨 자체도 영문으로 바꿔서 조합해야 aria-label 전체가
+          // 영문이 된다("배경음 Turn on"처럼 절반만 바뀌는 걸 방지).
+          const muteItemLabel = localize(item.label, UI_STRINGS_EN[item.label] || item.label);
+          muteButton.setAttribute(
+            "aria-label",
+            isMuted ? localize(`${muteItemLabel} 켜기`, `Turn on ${muteItemLabel}`) : localize(`${muteItemLabel} 끄기`, `Turn off ${muteItemLabel}`),
+          );
+          muteButton.append(
+            createElement("span", "px-icon px-icon--sm", isMuted ? "volume_off" : "volume_up"),
+          );
+          muteButton.addEventListener("click", () => {
+            changeAppSetting(item.muteKey, !state.appSettings[item.muteKey]);
+          });
+          row.append(muteButton);
+        }
+
         // 음량 슬라이더입니다.
         const input = document.createElement("input");
         input.type = "range";
@@ -8000,6 +10169,7 @@ function renderSettings() {
         input.min = "0";
         input.max = "100";
         input.value = String(state.appSettings[item.key]);
+        input.disabled = isMuted;
         input.addEventListener("change", (event) => changeAppSetting(item.key, Number(event.target.value)));
         // 값 표시입니다. 슬라이더를 끌 때 즉시 갱신합니다.
         const value = createElement("span", "setting-row__value", `${state.appSettings[item.key]}`);
@@ -8279,9 +10449,9 @@ function createRecordList() {
   // 전체 완료 수와 획득 XP 요약입니다.
   const stats = createElement("div", "stat-row");
   stats.append(
-    createStatCell("완료", `${state.notes.length}개`),
+    createStatCell("완료", localize(`${state.notes.length}개`, `${state.notes.length}`)),
     createStatCell("획득 XP", `${state.notes.reduce((sum, note) => sum + toNumber(note.earnedXp, 0), 0)}`),
-    createStatCell("기간", `${groups.size}개월`),
+    createStatCell("기간", localize(`${groups.size}개월`, `${groups.size} mo`)),
   );
   body.append(stats);
 
@@ -8432,7 +10602,7 @@ function createShareCard(note) {
   }
 
   const meta = createElement("div", "share-card__meta");
-  meta.append(createElement("span", "share-card__name", state.user.nickname || "모험가"));
+  meta.append(createElement("span", "share-card__name", displayNickname(state.user.nickname) || localize("모험가", "Adventurer")));
   meta.append(createElement("span", "share-card__place", note.placeName));
   if ((note.badges || []).length > 0) {
     meta.append(createElement("span", "share-card__badge", note.badges[0]));
@@ -8563,6 +10733,7 @@ function renderAll() {
   renderAdventure();
   renderQuestBoard();
   renderMapView();
+  renderPlannedQuestList();
   renderNotes();
   renderWeather();
   renderWeatherSheet();
@@ -8627,9 +10798,31 @@ function readCurrentPosition(options = {}) {
 }
 
 /**
+ * 입력: 위도/경도 두 쌍.
+ * 출력: 두 좌표 사이의 대략적인 거리(미터).
+ * 역할: GPS 오차 좌표를 걸러내는 판정에만 쓸 근사 거리를 구한다(정밀한 지도 표시용 계산이 아님).
+ * 호출 예시: const meters = approximateDistanceMeters(36.35, 127.38, 47.52, 18.96)
+ */
+function approximateDistanceMeters(lat1, lng1, lat2, lng2) {
+  // 변수 의미: 지구 평균 반지름(미터)입니다.
+  const earthRadiusMeters = 6371000;
+  const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(deltaLng / 2) ** 2;
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// 변수 의미: 대전 기준 좌표에서 이 거리(미터)를 넘어서면 GPS 오차로 보고 실측 위치를 거부한다.
+// 대한민국 전역을 넉넉히 덮는 반경이라, 국내 사용자의 정상적인 위치는 절대 이 값을 넘지 않는다.
+const PLAUSIBLE_LOCATION_RADIUS_METERS = 300000;
+
+/**
  * 입력: 브라우저 Geolocation Position.
  * 출력: 화면 상태에 저장할 위치 객체.
- * 역할: 실측 좌표와 정확도를 추천 기준 위치 형식으로 변환한다.
+ * 역할: 실측 좌표와 정확도를 추천 기준 위치 형식으로 변환한다. 대전 지역과 너무 먼 좌표는
+ *       기기/네트워크 위치추정 오차로 보고 예외를 던져 호출자가 fallback 위치로 처리하게 한다.
  * 호출 예시: state.location = normalizeMeasuredLocation(position)
  */
 function normalizeMeasuredLocation(position) {
@@ -8638,6 +10831,17 @@ function normalizeMeasuredLocation(position) {
 
   // 위치 정확도 미터 값입니다.
   const accuracyMeters = toNumber(coordinates.accuracy, 999);
+
+  // 변수 의미: 대전 기준 좌표와의 대략적인 거리입니다.
+  const distanceFromDaejeonMeters = approximateDistanceMeters(
+    coordinates.latitude,
+    coordinates.longitude,
+    FALLBACK_LOCATION.lat,
+    FALLBACK_LOCATION.lng,
+  );
+  if (distanceFromDaejeonMeters > PLAUSIBLE_LOCATION_RADIUS_METERS) {
+    throw new Error("위치 정보가 대전 지역과 너무 멀어 확인할 수 없습니다. 위치 서비스를 다시 확인해주세요.");
+  }
 
   return {
     lat: coordinates.latitude,
@@ -9161,13 +11365,43 @@ function requestLocation() {
     .then((position) => {
       state.location = normalizeMeasuredLocation(position);
       syncNaverPositionMarker();
+      recenterNaverMapOnLocation(state.location);
       renderRecommendationMeta();
       loadRecommendations();
     })
     .catch(() => {
-      state.location = { ...FALLBACK_LOCATION, label: "위치 권한 거부, 대전광역시청 기준" };
+      state.location = { ...FALLBACK_LOCATION, label: "위치 확인 불가, 대전광역시청 기준" };
+      syncNaverPositionMarker();
+      recenterNaverMapOnLocation(state.location);
       renderRecommendationMeta();
       loadRecommendations();
+    });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: TAP-TO-START 로딩 화면이 떠 있는 동안 미리 위치를 요청해 둔다. 홈 화면에 도착한
+ *       뒤에야 위치를 요청하면 기본 좌표가 잠깐 보였다가 실측 위치로 바뀌는 게 눈에 띄므로,
+ *       로딩바가 사라지기 전에 끝내 그 전환 자체가 보이지 않게 한다. 세션 준비 여부와 무관하게
+ *       항상 시도한다(ensureSessionReady()는 미동의 사용자를 동의 화면으로 강제 이동시키는
+ *       부작용이 있어 로딩 중 호출에 부적합, 위치 요청 자체는 로그인 여부와 무관함).
+ * 호출 예시: prefetchLocation()
+ */
+function prefetchLocation() {
+  readCurrentPosition({ enableHighAccuracy: true, timeout: 7000, maximumAge: 300000 })
+    .then((position) => {
+      state.location = normalizeMeasuredLocation(position);
+      syncNaverPositionMarker();
+    })
+    .catch(() => {
+      state.location = { ...FALLBACK_LOCATION, label: "위치 확인 불가, 대전광역시청 기준" };
+      syncNaverPositionMarker();
+    })
+    .finally(() => {
+      renderRecommendationMeta();
+      loadRecommendations();
+      markStartScreenTaskDone("geolocation");
     });
 }
 
@@ -9209,6 +11443,7 @@ async function loadRecommendations(forceRefresh = false) {
     lng: String(location.lng),
     category: serverCategory,
     mode: getApiRecommendationMode(),
+    lang: state.uiLanguage,
   });
   if (forceRefresh) {
     query.set("refresh", "1");
@@ -9220,6 +11455,11 @@ async function loadRecommendations(forceRefresh = false) {
       return;
     }
     state.recommendations = unwrapList(payload).map(normalizeRecommendation);
+    // 변수 의미: 계획 위치가 상호명 검색 결과면, 반경 안에 있는 다른 장소가 섞여 나오지
+    // 않도록 검색한 이름과 실제로 일치하는 장소만 남긴다("그 장소만" 요구사항).
+    if (mode === "planned" && location.isPlaceSearch) {
+      state.recommendations = state.recommendations.filter((item) => isSamePlaceName(item.placeName, location.label));
+    }
     state.dataSource = "api";
     state.recommendationMeta = normalizeRecommendationMeta(payload);
   } catch (error) {
@@ -9244,6 +11484,9 @@ async function loadRecommendations(forceRefresh = false) {
   renderAdventure();
   renderQuestBoard();
   renderMapView();
+  // 변수 의미: 추천이 새로 갱신될 때마다(언어 전환의 비동기 재번역 포함) 계획 목록도
+  // 최신 번역 텍스트로 다시 그린다(renderPlannedQuestList의 liveItem 우선 로직 참고).
+  renderPlannedQuestList();
 }
 
 /**
@@ -9408,7 +11651,7 @@ async function loadAttractions() {
 
   try {
     const payload = await fetchJson(
-      `/api/places/recommendations?category=${encodeURIComponent(category)}`,
+      `/api/places/recommendations?category=${encodeURIComponent(category)}&lang=${encodeURIComponent(state.uiLanguage)}`,
     );
     if (
       !isCurrentRequest("attraction", requestId, sessionVersion) ||
@@ -9674,6 +11917,39 @@ async function loadInitialData(forceRefresh = false) {
  * 호출 예시: bindEvents()
  */
 function bindEvents() {
+  // 직접 그린 날짜 필드(buildDateField)의 팝오버 바깥을 누르거나 Escape를 누르면 닫습니다.
+  document.addEventListener("click", () => {
+    if (!state.activeDatePickerField) {
+      return;
+    }
+    state.activeDatePickerField = "";
+    renderAll();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.activeDatePickerField) {
+      state.activeDatePickerField = "";
+      renderAll();
+    }
+  });
+
+  // 이전 화면으로 돌아가는 버튼입니다.
+  const backButton = select("#app-back-button");
+  if (backButton) {
+    backButton.addEventListener("click", goToPreviousView);
+  }
+
+  // TAP-TO-START 시작 화면입니다. 클릭이나 Enter/Space로 닫습니다.
+  const startScreen = select("#start-screen");
+  if (startScreen) {
+    startScreen.addEventListener("click", dismissStartScreen);
+    startScreen.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        dismissStartScreen();
+      }
+    });
+  }
+
   // 위치 권한 요청 버튼입니다.
   const locationButton = select("#use-location-button");
 
@@ -9699,6 +11975,18 @@ function bindEvents() {
   if (mapLocationButton) {
     mapLocationButton.addEventListener("click", requestLocation);
   }
+
+  // 화면 언어 선택 드롭다운입니다. 시작 전 동의 화면과 드로어 메뉴 둘 다에 있습니다.
+  ["#onboarding-language-select", "#ui-language-select"].forEach((selector) => {
+    const languageSelect = select(selector);
+    if (!languageSelect) {
+      return;
+    }
+    languageSelect.value = state.uiLanguage;
+    languageSelect.addEventListener("change", () => {
+      handleUiLanguageChange(languageSelect.value);
+    });
+  });
 
   if (refreshButton) {
     refreshButton.addEventListener("click", () => {
@@ -9839,6 +12127,11 @@ function bindEvents() {
       return;
     }
 
+    if (event.key === "Escape" && state.placeDetailSheet) {
+      closePlaceDetailSheet();
+      return;
+    }
+
     if (event.key === "Tab") {
       trapDrawerFocus(event);
     }
@@ -9948,14 +12241,6 @@ function bindHomeContextEvents() {
   });
 
   select("#home-sheet-grip")?.addEventListener("click", cycleHomeSheetSnap);
-
-  select("#home-plan-date")?.addEventListener("change", (event) => {
-    state.plannedDate = event.target.value || "";
-    persistPlanContext();
-    renderHomeContext();
-    renderRecommendations();
-    loadWeather(true);
-  });
 }
 
 /**
@@ -9996,6 +12281,11 @@ function setExplorationMode(mode) {
     return;
   }
 
+  // 변수 의미: "내 일정" 보기는 계획 모드 전용이라, 계획 모드를 벗어나면 검색 결과
+  // 화면으로 되돌려 둔다(현위치 모드로 돌아왔는데 계속 일정 마커만 보이는 걸 방지).
+  state.mapViewMode = "search";
+  state.mapViewModeSavedView = null;
+
   state.explorationMode === "planned"
     ? (state.plannedCategory = state.selectedCategory)
     : (state.currentCategory = state.selectedCategory);
@@ -10016,6 +12306,9 @@ function setExplorationMode(mode) {
 
   renderHomeContext();
   renderRecommendations();
+  // 변수 의미: 계획 모드에서만 보이는 목록이라, loadRecommendations()의 비동기 완료를
+  // 기다리지 않고 모드 전환 즉시 보이기/숨기기를 반영한다.
+  renderPlannedQuestList();
   loadRecommendations();
 }
 
@@ -10054,9 +12347,10 @@ function renderHomeSheet() {
   // 스냅 상태를 스크린리더에도 알립니다.
   const grip = select("#home-sheet-grip");
   if (grip) {
-    // 현재 스냅의 한국어 이름입니다.
-    const label = { collapsed: "접힘", mid: "중간", full: "전체" }[state.homeSheetSnap] || "중간";
-    grip.setAttribute("aria-label", `시트 높이 변경 (현재 ${label})`);
+    // 현재 스냅의 이름입니다.
+    const labels = { collapsed: localize("접힘", "Collapsed"), mid: localize("중간", "Medium"), full: localize("전체", "Full") };
+    const label = labels[state.homeSheetSnap] || labels.mid;
+    grip.setAttribute("aria-label", localize(`시트 높이 변경 (현재 ${label})`, `Change sheet height (currently ${label})`));
   }
 }
 
@@ -10081,6 +12375,25 @@ function renderHomeContext() {
   const planControls = select("#home-plan-controls");
   if (planControls) {
     planControls.hidden = !isPlanned;
+  }
+
+  // 계획 날짜 필드입니다. 계획 모드일 때만 뜨므로 감춰져 있을 때는 다시 그리지 않습니다.
+  const dateSlot = select("#home-plan-date-slot");
+  if (dateSlot && isPlanned) {
+    dateSlot.replaceChildren(
+      buildDateField(
+        "home",
+        state.plannedDate,
+        (next) => {
+          state.plannedDate = next;
+          persistPlanContext();
+          renderHomeContext();
+          renderRecommendations();
+          loadWeather(true);
+        },
+        renderHomeContext,
+      ),
+    );
   }
 
   // 현재 기준 위치 이름입니다.
@@ -10118,7 +12431,9 @@ function initializeApp() {
   // OAuth callback code를 token으로 교환 중인지 여부입니다.
   const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();
-  loadAuthProviders();
+  loadAuthProviders().finally(() => markStartScreenTaskDone("authProviders"));
+  prefetchLocation();
+  setupStartScreenLoading();
   setActiveView(state.activeView, false);
   // 실제 연결 모드는 서버의 보유 기록을 받기 전까지 보상과 수첩을 비워 둡니다.
   if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
@@ -10130,6 +12445,21 @@ function initializeApp() {
     state.catalog = buildServerCatalog();
   }
   renderAll();
+  setupUiLanguageObserver();
+  applyUiLanguage(document.body);
+  // 변수 의미: <input type="date"> 같은 네이티브 폼 컨트롤은 문서 lang 속성을 보고
+  // 달력 팝업/플레이스홀더 언어(연-월-일 vs yyyy-mm-dd, "2026년 9월" vs "September 2026")를
+  // 정하므로, 우리 사전 스윕으로는 못 건드리는 이 부분은 lang 속성으로 맞춰야 한다.
+  document.documentElement.lang = state.uiLanguage === "eng" ? "en" : "ko";
+  // 음량을 먼저 맞추고, TAP-TO-START를 누르기 전에도 재생을 시도합니다.
+  // 브라우저 자동재생 정책상 사용자 입력 기록이 쌓이기 전에는 대부분 막히지만(조용히
+  // 실패하고 넘어감), 재방문 등으로 이미 허용된 경우라면 탭 전에도 바로 들립니다.
+  // 막히는 경우엔 TAP-TO-START 클릭이 그대로 재생을 시작하는 사용자 입력이 됩니다.
+  const bgmAudio = getBgmAudioElement();
+  if (bgmAudio) {
+    bgmAudio.volume = computeBgmVolume();
+  }
+  startBackgroundMusic();
   if (!oauthRedirectPending && ensureSessionReady()) {
     loadInitialData();
   }

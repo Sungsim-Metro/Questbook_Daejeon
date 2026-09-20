@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS catalog_sync_runs (
   stats_json JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+-- 퀘스트 제목/설명은 카테고리별 6개 고정 템플릿 + 장소명 조합이라, 영문 모드에서 매 요청마다
+-- 다시 번역할 대상은 장소명 하나뿐이다. 배치가 하루 한 번, TourAPI 영문 서비스에 없는
+-- 장소만 Google Translate로 1회 번역해서 여기에 영구 캐싱한다(요청마다 재호출 없음).
+CREATE TABLE IF NOT EXISTS place_name_translations (
+  content_id TEXT PRIMARY KEY,
+  name_kor TEXT NOT NULL,
+  name_eng TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('tourapi', 'machine', 'fallback')),
+  translated_at TIMESTAMPTZ NOT NULL
+);
+
 ALTER TABLE reusable_quests
   ADD COLUMN IF NOT EXISTS catalog_managed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE reusable_quests
@@ -389,6 +400,46 @@ class QuestCatalogRepositoryMixin:
             )
             if cursor.rowcount != 1:
                 raise ValueError("catalog run must be claimed before finishing")
+
+    def get_place_name_translations(self, content_ids: list[str]) -> dict[str, dict[str, str]]:
+        """
+        입력: 조회할 장소 contentId 목록.
+        출력: contentId별 {"nameKor": ..., "nameEng": ...} 캐시 row.
+        역할: 요청마다 재번역하지 않도록 배치가 미리 채워 둔 영문 장소명을 읽는다.
+        호출 예시: cached = repository.get_place_name_translations(["126508"])
+        """
+        if not content_ids:
+            return {}
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT content_id, name_kor, name_eng FROM place_name_translations WHERE content_id = ANY(%s)",
+                (content_ids,),
+            ).fetchall()
+        return {
+            row["content_id"]: {"nameKor": row["name_kor"], "nameEng": row["name_eng"]}
+            for row in rows
+        }
+
+    def upsert_place_name_translations(self, rows: list[tuple[str, str, str, str]]) -> None:
+        """
+        입력: (contentId, 국문 장소명, 영문 장소명, 출처('tourapi'|'machine')) 목록.
+        출력: 없음.
+        역할: 배치가 새로 번역한 장소명을 영구 캐시에 반영한다. 국문명이 바뀌면 값을 덮어써서
+              다음 배치가 다시 번역해 최신 상태를 유지하게 한다.
+        호출 예시: repository.upsert_place_name_translations([("126508", "한밭수목원", "Hanbat Arboretum", "tourapi")])
+        """
+        if not rows:
+            return
+        with self._lock, self._connection.cursor() as cursor:
+            cursor.executemany(
+                """INSERT INTO place_name_translations(content_id, name_kor, name_eng, source, translated_at)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (content_id) DO UPDATE SET
+                     name_kor = EXCLUDED.name_kor, name_eng = EXCLUDED.name_eng,
+                     source = EXCLUDED.source, translated_at = EXCLUDED.translated_at""",
+                [(content_id, name_kor, name_eng, source, datetime.now(timezone.utc))
+                 for content_id, name_kor, name_eng, source in rows],
+            )
 
     def catalog_status(self) -> dict[str, Any]:
         """

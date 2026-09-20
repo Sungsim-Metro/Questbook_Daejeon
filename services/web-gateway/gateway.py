@@ -23,7 +23,10 @@ USER_WEB_SRC_ROOT = REPOSITORY_ROOT / "apps" / "user-web" / "src"
 # 변수 의미: 저장소 루트 dotenv 파일 경로다.
 DOTENV_PATH = REPOSITORY_ROOT / ".env"
 # 변수 의미: 프록시 요청 제한 시간 초 단위 값이다.
-PROXY_TIMEOUT_SECONDS = 10
+# 장소 상세 조회(fetch_localized_detail)는 오디오 가이드 조회와 다국어 매칭 조회를 순차로 호출하며
+# 각각 UPSTREAM_TIMEOUT_SECONDS(5초)까지 기다릴 수 있어, 상위 TourAPI 서비스 중 일부가 느려지면
+# 두 호출만으로도 10초를 넘길 수 있다. 게이트웨이가 앱 API보다 먼저 끊어버리지 않도록 여유를 둔다.
+PROXY_TIMEOUT_SECONDS = 25
 # 변수 의미: 앱 API에서 브라우저까지 보존할 프록시 응답 헤더다.
 FORWARDED_RESPONSE_HEADERS = {"Cache-Control", "Content-Security-Policy", "Vary"}
 

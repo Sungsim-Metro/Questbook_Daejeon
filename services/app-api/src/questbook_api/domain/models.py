@@ -33,6 +33,8 @@ class TourPlaceCandidate:
     distance_meters: float | None
     # 변수 의미: 데이터 출처 표시용 값이다.
     source: str
+    # 변수 의미: TourAPI contentTypeId다. 장소 상세(detailIntro2) 조회에 필요하며 없으면 빈 문자열이다.
+    content_type_id: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         """
@@ -51,6 +53,7 @@ class TourPlaceCandidate:
             "summary": self.summary,
             "distanceMeters": self.distance_meters,
             "source": self.source,
+            "contentTypeId": self.content_type_id,
         }
 
 

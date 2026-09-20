@@ -14,6 +14,8 @@ from questbook_api.application.quest_generation import build_catalog_quest
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.tourapi.catalog import fetch_catalog
 from questbook_api.integrations.tourapi.client import TourApiClient
+from questbook_api.integrations.translation.client import TranslationClient
+from questbook_api.settings import AppSettings
 
 
 # 변수 의미: 외부 타임존 데이터 설치 없이 한국 날짜를 계산하는 UTC+9 시간대다.
@@ -49,6 +51,49 @@ def _raise_if_database_unavailable(repository: QuestbookRepository) -> None:
         ) from None
 
 
+def sync_place_name_translations(
+    repository: QuestbookRepository,
+    client: TourApiClient,
+    translation_client: TranslationClient | None,
+    places: list,
+) -> None:
+    """
+    입력: 저장소, TourAPI 클라이언트, 번역 클라이언트(없을 수 있음), 이번 관측의 전체 장소.
+    출력: 없음. place_name_translations 캐시를 갱신한다.
+    역할: 퀘스트 제목/설명은 영문 템플릿 + 장소명 조합으로 요청 시점에 재조립하므로(
+          quest_generation.build_localized_quest_text), 매일 배치에서 장소명만 1회 영문화해
+          캐싱해 두면 매 사용자 요청마다 재번역할 필요가 없다. TourAPI EngService2에 이미
+          영문명이 있으면 그걸 우선 쓰고(무료, 호출량 제한 없음), 없을 때만 Google Translate를
+          아주 조금만 호출한다(무료 할당량을 아끼기 위함).
+    호출 예시: sync_place_name_translations(repository, client, translation_client, places)
+    """
+    # 변수 의미: 국문명이 바뀌지 않은 이미 번역된 장소는 다시 번역하지 않기 위한 기존 캐시다.
+    existing = repository.get_place_name_translations([place.content_id for place in places])
+    # 변수 의미: 새로 번역해야 하는 장소(신규 또는 국문명이 바뀐 장소)다.
+    stale_places = [
+        place for place in places
+        if existing.get(place.content_id, {}).get("nameKor") != place.title
+    ]
+    # 변수 의미: 이번에 새로 확정한 (contentId, 국문명, 영문명, 출처) 행이다.
+    translated_rows: list[tuple[str, str, str, str]] = []
+    for place in stale_places:
+        english_name = None
+        try:
+            english_name = client.find_english_place_name(place.title, place.latitude, place.longitude)
+        except Exception:
+            english_name = None
+        if english_name:
+            translated_rows.append((place.content_id, place.title, english_name, "tourapi"))
+            continue
+        if translation_client is None or not translation_client.is_configured():
+            continue
+        machine_translated = translation_client.translate_text(place.title, "eng")
+        if machine_translated:
+            translated_rows.append((place.content_id, place.title, machine_translated, "machine"))
+    if translated_rows:
+        repository.upsert_place_name_translations(translated_rows)
+
+
 def run_catalog_sync(
     repository: QuestbookRepository,
     client: TourApiClient,
@@ -57,6 +102,7 @@ def run_catalog_sync(
     missing_grace_days: int = 7,
     force: bool = False,
     stop_event: Event | None = None,
+    translation_client: TranslationClient | None = None,
 ) -> dict[str, Any]:
     """
     입력: 별도 연결의 저장소와 클라이언트, 관측 시각·누락 유예일·수동 강제·종료 이벤트.
@@ -99,6 +145,8 @@ def run_catalog_sync(
                 if stop_event is not None and stop_event.is_set():
                     result["status"] = "cancelled"
                 if result["status"] == "live":
+                    # 변수 의미: 국문명이 바뀌었거나 신규인 장소만 영문명을 새로 확보해 캐싱한다.
+                    sync_place_name_translations(repository, client, translation_client, places)
                     # 변수 의미: 사용자를 지정하지 않는 공용 재사용 퀘스트 정의 목록이다.
                     quest_definitions: list[dict[str, Any]] = []
                     # 변수 의미: 지원되는 테마인지 확인하며 생성할 현재 관광지다.
@@ -134,9 +182,10 @@ def run_daily(
     missing_grace_days: int = 7,
     stop_event: Event | None = None,
     clock: Callable[[], datetime] | None = None,
+    translation_client: TranslationClient | None = None,
 ) -> None:
     """
-    입력: 독립 저장소·클라이언트·유예일과 종료 이벤트, 선택적 시계.
+    입력: 독립 저장소·클라이언트·유예일과 종료 이벤트, 선택적 시계, 선택적 번역 클라이언트.
     출력: 없음. 날짜별 실행 결과는 한 줄 JSON으로 기록한다.
     역할: 시작 시 오늘 실행을 확인하고 한국 날짜가 바뀔 때만 다시 확인한다.
     호출 예시: run_daily(repository, client, stop_event=shutdown_event)
@@ -157,6 +206,7 @@ def run_daily(
             result = run_catalog_sync(
                 repository, client, now=current_time,
                 missing_grace_days=missing_grace_days, stop_event=shutdown_event,
+                translation_client=translation_client,
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
             checked_date = current_date
@@ -217,10 +267,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         repository.initialize()
         # 변수 의미: 환경에 주입된 키를 가진 백그라운드 전용 TourAPI 클라이언트다.
         client = TourApiClient(os.getenv("TOURAPI_SERVICE_KEY", ""))
+        # 변수 의미: 장소명 영문화 배치가 쓸 번역 클라이언트다. 키가 없어도 TourAPI 영문
+        # 매칭만으로 일부는 채워지므로, 미설정이어도 배치 자체는 계속 진행한다.
+        translation_client = TranslationClient(AppSettings.from_env())
         if arguments.daily:
             run_daily(
                 repository, client, missing_grace_days=missing_grace_days,
-                stop_event=shutdown_event,
+                stop_event=shutdown_event, translation_client=translation_client,
             )
             exit_code = 0
         else:
@@ -228,6 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run_catalog_sync(
                 repository, client, missing_grace_days=missing_grace_days,
                 force=arguments.force, stop_event=shutdown_event,
+                translation_client=translation_client,
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
             exit_code = 0 if result["status"] in {

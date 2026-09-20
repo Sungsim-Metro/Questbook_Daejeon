@@ -16,6 +16,33 @@ QUEST_TEMPLATES: dict[str, QuestTemplate] = {
     "nightview": QuestTemplate("nightview", "활동형", "time_window_photo", 70, "{place_name} 야경 기록", "{place_name}에서 저녁 시간대 전망 기록을 남깁니다."),
 }
 
+# 변수 의미: 위 6개 템플릿의 영문 버전이다. 사람이 직접 옮긴 고정 문구라 기계번역 호출이
+# 필요 없다 — 영문 모드에서 장소명만 갈아 끼우면 되므로(get_recommendations/get_place_recommendations
+# 참고), 매 요청마다 Google Translate를 부르지 않고도 퀘스트 제목/설명 전체를 영문화할 수 있다.
+QUEST_TEMPLATE_TEXT_EN: dict[str, tuple[str, str]] = {
+    "nature": ("Nature Check-in at {place_name}", "Record today's nature clue around {place_name} and earn Green Explorer XP."),
+    "science": ("Science Expedition at {place_name}", "Note one exhibit keyword at {place_name} in your notebook and earn Science Explorer XP."),
+    "downtown": ("Old Downtown Walk at {place_name}", "Walk around {place_name} and complete your old-downtown stroll record."),
+    "market": ("Visit the Local Market at {place_name}", "Verify your visit to {place_name} with a photo or receipt to earn Market Explorer XP."),
+    "mobility": ("Mobility Route from {place_name}", "A mobility quest connecting nearby attractions, starting from {place_name}."),
+    "nightview": ("Night View Record at {place_name}", "Capture an evening view record at {place_name}."),
+}
+
+
+def build_localized_quest_text(category_code: str, place_name: str) -> tuple[str, str]:
+    """
+    입력: 퀘스트 카테고리 코드, 영문으로 표시할 장소명.
+    출력: (영문 제목, 영문 설명).
+    역할: 저장된 국문 title/description 대신, 요청 시점에 영문 템플릿 + 장소명으로 다시 조립한다.
+          카테고리가 없는 예외 상황은 발생하지 않지만(퀘스트는 항상 지원 카테고리에서만 생성됨),
+          방어적으로 downtown 템플릿을 기본값으로 둔다.
+    호출 예시: title, description = build_localized_quest_text("nature", "Hanbat Arboretum")
+    """
+    title_template, description_template = QUEST_TEMPLATE_TEXT_EN.get(
+        category_code, QUEST_TEMPLATE_TEXT_EN["downtown"],
+    )
+    return title_template.format(place_name=place_name), description_template.format(place_name=place_name)
+
 def build_template_quest(
     place: TourPlaceCandidate,
     template: QuestTemplate,
