@@ -8,7 +8,7 @@
 //   - 릴리스 버전 하나로 캐시 이름과 정적 자산 버전을 원자적으로 올린다.
 
 // 이 릴리스의 버전입니다. 아래 캐시 이름과 자산 주소가 모두 이 값을 씁니다.
-const RELEASE_VERSION = "20260915-integration-13";
+const RELEASE_VERSION = "20260915-integration-28";
 
 // 앱 셸 캐시입니다.
 const STATIC_CACHE_NAME = `questbook-static-${RELEASE_VERSION}`;
@@ -32,6 +32,9 @@ const STATIC_ASSETS = [
   "../src/reward-fx.js",
   // 완료 연출이 300ms 에 바로 쓰는 스프라이트입니다. 첫 완료에서 늦으면 안 됩니다.
   "./assets/fx/dumdori_cheer_96x96_4f.png",
+  // TAP-TO-START 시작 화면은 앱을 열 때마다 가장 먼저 보이므로 미리 담아 둡니다.
+  // 배경음악 mp3는 preload="none"이라 재생 시점에만 받으면 되므로 여기 넣지 않습니다.
+  "./assets/splash/start-screen.png",
 ];
 
 /**

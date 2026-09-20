@@ -489,6 +489,30 @@ html:not(.fonts-icons-ready) .px-icon {
   box-shadow: 1px 1px 0 var(--px-outline);
 }
 
+/* 이전 화면으로 돌아가는 버튼이다. 되돌아갈 화면이 있을 때만 좌측 상단에 나타난다. */
+.app-back-button {
+  inline-size: 28px;
+  block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: 1px 1px 0 var(--px-outline);
+}
+
+.app-back-button[hidden] {
+  display: none;
+}
+
+.app-back-button:active {
+  box-shadow: none;
+  translate: 1px 1px;
+}
+
 .app-title-group {
   display: flex;
   flex-direction: column;
@@ -682,6 +706,17 @@ html:not(.fonts-icons-ready) .px-icon {
 }
 
 .drawer-language-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u2);
+}
+
+.onboarding-language-row {
+  margin-bottom: var(--u3);
+}
+
+.drawer-mode-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1475,6 +1510,20 @@ body[data-exploration-mode="planned"] .plan-flag {
 
 .place-detail__status:empty {
   display: none;
+}
+
+/* 관광지 상세 모달만 하단 시트가 아니라 화면 중앙 다이얼로그로 띄웁니다.
+   다른 quest-sheet 계열(퀘스트 상세, 도감 상세 등)은 기존 하단 시트를 그대로 유지합니다. */
+#place-detail-sheet {
+  justify-content: center;
+  align-items: center;
+  padding: var(--u3);
+}
+
+#place-detail-sheet .quest-sheet__panel {
+  max-block-size: 85dvh;
+  border-bottom: 3px solid var(--px-outline);
+  box-shadow: 4px 4px 0 rgba(44, 29, 22, 0.35);
 }
 
 /* 보상 쌍: 미니 뱃지와 꿈돌이를 같은 규격으로 나란히 둡니다. */
@@ -2470,6 +2519,29 @@ body[data-photo-sheet-open="true"] {
   color: var(--px-ink-sub);
 }
 
+/* 배경음·효과음 게이지 바 왼쪽의 음소거 버튼입니다. */
+.setting-row__mute {
+  flex: 0 0 auto;
+  inline-size: 26px;
+  block-size: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--px-ink);
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+.setting-row__mute[aria-pressed="false"] {
+  color: var(--px-ink-sub);
+  background: var(--px-panel);
+}
+
+.setting-row input[type="range"]:disabled {
+  opacity: 0.4;
+}
+
 .setting-row input[type="checkbox"] {
   flex: 0 0 auto;
   inline-size: 22px;
@@ -2628,4 +2700,116 @@ body[data-record-sheet-open="true"] {
 /* 10. 진행 바는 실제 progressbar 의미를 가집니다. 값은 app.js 가 넣습니다. */
 .progress-bar[role="progressbar"] {
   display: block;
+}
+
+/* ────────────────────────────────────────────────
+   TAP-TO-START 시작 화면. 앱 셸보다 항상 위에 뜨고,
+   클릭/터치/Enter·Space 키로 닫힌다. 첫 사용자 입력이라
+   배경음악 자동재생 허용에도 이 시점을 그대로 쓴다.
+   ──────────────────────────────────────────────── */
+.start-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  /* 다른 화면과 같은 바깥 여백 색이다(body 배경과 동일). 폭이 --shell-max-width로
+     제한되므로 넓은 화면에서는 이 색이 좌우 여백으로 그대로 보인다. */
+  background: #e6dcc2;
+  cursor: pointer;
+  transition: opacity 0.35s ease;
+}
+
+.start-screen[hidden] {
+  display: none;
+}
+
+.start-screen.is-dismissing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.start-screen__frame {
+  position: relative;
+  inline-size: 100%;
+  /* 앱 셸(.app-shell)과 똑같은 폭 상한을 써서 다른 화면들과 크기를 맞춘다. */
+  max-inline-size: var(--shell-max-width);
+  margin: 0 auto;
+}
+
+.start-screen__image {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  /* cover로 채우면 세로로 긴 이미지 위쪽 타이틀 로고가 넓은 화면에서 잘린다.
+     contain으로 전체 이미지(로고 포함)가 항상 보이게 한다. */
+  object-fit: contain;
+}
+
+/* 로딩 바(초기)와 TAP TO START 문구(로딩 완료 후)가 같은 자리에서 서로 바뀝니다. */
+.start-screen__status {
+  position: absolute;
+  z-index: 1;
+  inset-inline: 0;
+  inset-block-end: 10dvh;
+  inline-size: min(260px, 70%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--u1);
+}
+
+.start-screen__loading {
+  inline-size: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.start-screen__loading[hidden] {
+  display: none;
+}
+
+.start-screen__progress-bar {
+  inline-size: 100%;
+  border: 2px solid #fff;
+}
+
+.start-screen__progress-bar .progress-fill {
+  transition: width 0.1s linear;
+}
+
+.start-screen__loading-text,
+.start-screen__hint {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #fff;
+  /* 도형(배경 박스) 없이 텍스트만 쓴다. 이미지 위에서도 읽히도록 그림자만 준다. */
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.85), 0 2px 2px rgba(0, 0, 0, 0.85);
+}
+
+.start-screen__hint {
+  font-size: 16px;
+  animation: start-screen-pulse 1.6s ease-in-out infinite;
+}
+
+.start-screen__hint[hidden] {
+  display: none;
+}
+
+@keyframes start-screen-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .start-screen__hint {
+    animation: none;
+  }
 }

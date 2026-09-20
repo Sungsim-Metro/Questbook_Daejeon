@@ -24,15 +24,48 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block"
       onload="document.documentElement.classList.add('fonts-icons-ready')"
     />
-    <link rel="stylesheet" href="../src/styles.css?v=20260915-integration-13" />
-    <link rel="stylesheet" href="../src/stitch-theme.css?v=20260915-integration-13" />
-    <link rel="stylesheet" href="../src/reward-fx.css?v=20260915-integration-13" />
+    <link rel="stylesheet" href="../src/styles.css?v=20260915-integration-28" />
+    <link rel="stylesheet" href="../src/stitch-theme.css?v=20260915-integration-28" />
+    <link rel="stylesheet" href="../src/reward-fx.css?v=20260915-integration-28" />
   </head>
   <body data-active-view="home">
     <a class="skip-link" href="#main-content">본문으로 이동</a>
 
+    <!-- ── TAP-TO-START 시작 화면. 화면 아무 곳이나 누르면 사라진다.
+         .app-shell과 같은 --shell-max-width로 폭을 맞춘다 ── -->
+    <div class="start-screen" id="start-screen" role="button" tabindex="0" aria-label="화면을 눌러 시작하기">
+      <div class="start-screen__frame">
+        <img class="start-screen__image" src="./assets/splash/start-screen.png" alt="모험가의 수첩" />
+        <div class="start-screen__status">
+          <div class="start-screen__loading" id="start-screen-loading">
+            <div
+              class="progress-bar start-screen__progress-bar"
+              id="start-screen-progress-bar"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              aria-label="로딩 중 0퍼센트"
+            >
+              <span class="progress-fill" id="start-screen-progress-fill" style="width: 0%"></span>
+            </div>
+            <p class="start-screen__loading-text" id="start-screen-loading-text">Loading... 0%</p>
+          </div>
+          <p class="start-screen__hint" id="start-screen-hint" hidden>TAP TO START</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 배경음악 오디오 엘리먼트. 컨트롤 UI는 마이페이지 설정에서 제공한다.
+         타이틀 화면을 보는 동안 미리 받아 둬서, 탭하는 즉시 재생되게 한다
+         (자동재생 정책상 소리 자체는 탭 전에 못 내지만 데이터는 미리 받을 수 있다) -->
+    <audio id="bgm-audio" loop preload="auto" src="./assets/audio/bgm-travel-gogo.mp3"></audio>
+
     <div class="app-shell">
       <header class="app-header" aria-label="앱 상태">
+        <button class="app-back-button" id="app-back-button" type="button" aria-label="이전 화면으로" hidden>
+          <span class="px-icon" aria-hidden="true">arrow_back</span>
+        </button>
         <span class="app-mark" data-app-icon aria-hidden="true"></span>
         <div class="app-title-group">
           <span class="app-eyebrow" data-app-eyebrow>QUESTBOOK</span>
@@ -49,6 +82,14 @@
 
       <main class="app-main" id="main-content">
         <section class="consent-panel px-panel" id="consent-panel" aria-labelledby="consent-title" hidden>
+          <div class="drawer-language-row onboarding-language-row">
+            <span class="px-label">LANGUAGE</span>
+            <select class="ui-language-select" id="onboarding-language-select" aria-label="화면 언어 선택">
+              <option value="kor">국문</option>
+              <option value="eng">English</option>
+            </select>
+          </div>
+
           <p class="page-kicker">시작 전 확인</p>
 
           <h2 class="page-title" id="consent-title">모험가 등록</h2>
@@ -108,24 +149,8 @@
 
             <div class="context-bar" id="home-context-bar">
               <div class="context-row">
-                <div class="mode-toggle" role="group" aria-label="탐색 기준 위치">
-                  <button
-                    class="mode-toggle__button"
-                    type="button"
-                    data-context-mode="current"
-                    aria-pressed="true"
-                  >
-                    현위치
-                  </button>
-                  <button
-                    class="mode-toggle__button"
-                    type="button"
-                    data-context-mode="planned"
-                    aria-pressed="false"
-                  >
-                    계획 모드
-                  </button>
-                </div>
+                <!-- 현위치·계획 모드 토글은 드로어 메뉴 상단(LANGUAGE 아래)으로 옮겼습니다.
+                     여기서는 계획 중 배지와 날씨만 남습니다. -->
                 <!-- 계획 모드일 때만 보이는 지속 라벨입니다. (명세 §6.3) -->
                 <span class="plan-flag" id="home-plan-flag">
                   <span class="px-icon px-icon--sm" aria-hidden="true">event</span>
@@ -454,6 +479,27 @@
             <option value="eng">English</option>
           </select>
         </div>
+        <div class="drawer-mode-row">
+          <span class="px-label">MODE</span>
+          <div class="mode-toggle" role="group" aria-label="탐색 기준 위치">
+            <button
+              class="mode-toggle__button"
+              type="button"
+              data-context-mode="current"
+              aria-pressed="true"
+            >
+              현위치
+            </button>
+            <button
+              class="mode-toggle__button"
+              type="button"
+              data-context-mode="planned"
+              aria-pressed="false"
+            >
+              계획 모드
+            </button>
+          </div>
+        </div>
         <div class="drawer-profile" id="drawer-profile"></div>
       </header>
 
@@ -465,7 +511,7 @@
       </div>
     </aside>
 
-    <script type="module" src="../src/app.js?v=20260915-integration-13"></script>
-    <script src="../src/scroll-fab.js?v=20260915-integration-13"></script>
+    <script type="module" src="../src/app.js?v=20260915-integration-28"></script>
+    <script src="../src/scroll-fab.js?v=20260915-integration-28"></script>
   </body>
 </html>

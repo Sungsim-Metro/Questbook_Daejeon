@@ -46,13 +46,45 @@ ODII_SEARCH_RADIUS_METERS = 1500
 # 변수 의미: Odii 결과를 같은 장소로 인정할 최대 거리다. Odii 제목이 국문뿐이라 좌표로만 매칭한다.
 ODII_STORY_MATCH_RADIUS_METERS = 150.0
 # 변수 의미: detailIntro2 응답 필드를 사람이 읽을 라벨로 바꾸는 표다. 값이 있는 첫 필드만 사용한다.
+# detailIntro2는 contentTypeId(업종)마다 필드 이름이 완전히 다르다(예: 영업시간이
+# usetime/usetimeculture/opentimefood/opentime/checkintime로 제각각). 한 장소는
+# 자기 업종 필드만 채워져 있고 나머지는 항상 빈 문자열로 오므로, 업종별로 분기하지
+# 않고 실제로 관광지/문화시설/음식점/숙박/쇼핑/축제에서 쓰는 필드를 전부 검사해
+# 값이 있는 것만 뽑는다. 필드명은 실제 TourAPI 응답으로 확인했다.
 DETAIL_AMENITY_FIELD_LABELS: tuple[tuple[str, str], ...] = (
-    ("parking", "주차"),
+    # 영업/이용 시간
     ("usetime", "이용 시간"),
+    ("usetimeculture", "이용 시간"),
+    ("usetimefestival", "이용 요금"),
+    ("opentimefood", "영업시간"),
+    ("opentime", "영업시간"),
+    ("checkintime", "체크인"),
+    ("checkouttime", "체크아웃"),
+    ("playtime", "공연 시간"),
+    # 휴무일
     ("restdate", "휴무일"),
+    ("restdateculture", "휴무일"),
+    ("restdatefood", "휴무일"),
+    ("restdateshopping", "휴무일"),
+    # 주차
+    ("parking", "주차"),
+    ("parkingculture", "주차"),
+    ("parkinglodging", "주차"),
+    ("parkingshopping", "주차"),
+    # 문의처
     ("infocenter", "문의처"),
-    ("chkbabycarriageculture", "유모차 대여"),
-    ("chkpetculture", "반려동물 동반"),
+    ("infocenterculture", "문의처"),
+    ("infocenterfood", "문의처"),
+    ("infocenterlodging", "문의처"),
+    ("infocentershopping", "문의처"),
+    ("sponsor1tel", "문의처"),
+    # 기타
+    ("reservationfood", "예약"),
+    ("chkbabycarriage", "유모차 대여"),
+    ("chkpet", "반려동물 동반"),
+    ("eventplace", "행사 장소"),
+    ("eventstartdate", "행사 시작일"),
+    ("eventenddate", "행사 종료일"),
 )
 
 
@@ -874,7 +906,10 @@ class TourApiClient:
         item = items[0] if items else {}
         amenities: list[dict[str, str]] = []
         for field_name, label in DETAIL_AMENITY_FIELD_LABELS:
-            value = str(item.get(field_name, "")).strip()
+            # 변수 의미: 줄바꿈 태그가 섞인 원본 값이다. 이용시간 등은 <br>로 여러 줄을 이어 붙여 온다.
+            raw_value = str(item.get(field_name, "")).strip()
+            # 이 앱은 한 줄짜리 뱃지로 보여주므로 줄바꿈은 " / "로 이어 붙인다.
+            value = strip_html_tags(raw_value).replace("\n", " / ").strip()
             if value:
                 amenities.append({"key": field_name, "label": label, "value": value})
         return amenities

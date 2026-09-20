@@ -493,6 +493,10 @@ const NOTE_ENTRY_BODY_MAX_LENGTH = 2000;
 const state = {
   apiHealthy: false,
   activeView: readInitialView(),
+  // 뒤로가기 버튼이 돌아갈 이전 화면 스택입니다. 최근 방문이 배열 끝입니다.
+  viewHistory: [],
+  // 시작 화면 로딩이 끝나 TAP TO START로 바뀌었는지 여부입니다.
+  startScreenReady: false,
   dataSource: "fallback",
   recommendationMeta: {
     sourceStatus: "fallback:not_loaded",
@@ -916,6 +920,9 @@ const UI_STRINGS_EN = {
   "공용 체험 계정의 기록은 소셜 계정으로 이전되지 않습니다.": "Shared demo account records are not transferred to a social account.",
   "네이버 계정으로 로그인": "Sign in with Naver",
   "구글 계정으로 로그인": "Sign in with Google",
+  "네이버 로그인 · 준비 중": "Naver login · Coming soon",
+  "구글 로그인 · 준비 중": "Google login · Coming soon",
+  "서버 OAuth 설정이 완료된 뒤 사용할 수 있습니다.": "This will be available once server OAuth setup is complete.",
   "관심사": "Interests",
   "관심사는 주변 추천과 대전 전체 관광지 탐색에 사용합니다.": "Interests are used for nearby recommendations and browsing all Daejeon attractions.",
   "관심사 저장": "Save interests",
@@ -929,6 +936,11 @@ const UI_STRINGS_EN = {
   "앱에서 나는 소리만 조절해요. 기기 전체 음량은 바뀌지 않습니다.": "This only adjusts sounds within the app; your device's overall volume is unaffected.",
   "전체 음량": "Overall volume",
   "배경음": "Background music",
+  "배경음 켜기": "Turn on background music",
+  "배경음 끄기": "Turn off background music",
+  "효과음 켜기": "Turn on sound effects",
+  "효과음 끄기": "Turn off sound effects",
+  "화면을 눌러 시작하기": "Tap the screen to start",
   "효과음": "Sound effects",
   "진동": "Vibration",
   "알림": "Notifications",
@@ -974,6 +986,21 @@ const UI_STRINGS_EN = {
 
   // 관광지 상세 모달 (신규 이식 기능)
   "추가 정보": "Additional info",
+  "이용 시간": "Hours",
+  "이용 요금": "Admission fee",
+  "영업시간": "Business hours",
+  "체크인": "Check-in",
+  "체크아웃": "Check-out",
+  "공연 시간": "Show time",
+  "휴무일": "Closed on",
+  "주차": "Parking",
+  "문의처": "Contact",
+  "예약": "Reservation",
+  "유모차 대여": "Stroller rental",
+  "반려동물 동반": "Pets allowed",
+  "행사 장소": "Event venue",
+  "행사 시작일": "Event start date",
+  "행사 종료일": "Event end date",
   "등록된 편의 정보가 아직 없습니다.": "No amenity information registered yet.",
   "🔊 이 장소는 아직 오디오 가이드가 없습니다.": "🔊 There is no audio guide for this place yet.",
   "▶ 오디오 가이드 재생": "▶ Play audio guide",
@@ -986,9 +1013,17 @@ const UI_STRINGS_EN = {
   "이 장소는 아직 영문 관광 정보가 없어 자동 번역으로 보여드려요.": "There is no English tourism info for this place yet, so we're showing an automatic translation.",
   "이 장소는 아직 영문 관광 정보가 없어 국문 설명을 보여드려요.": "There is no English tourism info for this place yet, so we're showing the Korean description.",
   "상세 닫기": "Close details",
+  "이전 화면으로": "Back",
   "날씨 상세 보기": "View weather details",
   "불러오는 중...": "Loading...",
 };
+
+// UI_STRINGS_EN의 역방향 사전이다. 영문에서 국문으로 되돌아갈 때 쓴다.
+// 여러 국문 키가 같은 영문 값으로 매핑된 경우(예: "완료"/"완료됨" 모두 "Completed") 마지막
+// 항목이 우선한다 — 되돌아갈 때 원문과 정확히 같은 국문 문구가 아닐 수 있지만 의미는 같다.
+const UI_STRINGS_KOR = Object.fromEntries(
+  Object.entries(UI_STRINGS_EN).map(([korean, english]) => [english, korean]),
+);
 
 /**
  * 입력: 번역을 적용할 루트 노드. 기본값은 document.body.
@@ -999,7 +1034,12 @@ const UI_STRINGS_EN = {
  * 호출 예시: applyUiLanguage(document.body)
  */
 function applyUiLanguage(root = document.body) {
-  if (state.uiLanguage !== "eng" || !root) {
+  // 변수 의미: 지금 방향에 맞는 사전이다. 국문 리터럴을 새로 만드는 render*() 함수들과
+  // 달리, 정적 index.html 텍스트나 별도 스크립트(scroll-fab 등)가 건드리는 속성은
+  // 국문으로 돌아갈 때 아무도 되돌려주지 않으므로, kor 방향에서도 역방향 사전으로
+  // 명시적으로 되돌려야 한다.
+  const dictionary = state.uiLanguage === "eng" ? UI_STRINGS_EN : state.uiLanguage === "kor" ? UI_STRINGS_KOR : null;
+  if (!dictionary || !root) {
     return;
   }
 
@@ -1019,15 +1059,15 @@ function applyUiLanguage(root = document.body) {
     if (!trimmed) {
       return;
     }
-    if (UI_STRINGS_EN[trimmed]) {
-      node.nodeValue = original.replace(trimmed, UI_STRINGS_EN[trimmed]);
+    if (dictionary[trimmed]) {
+      node.nodeValue = original.replace(trimmed, dictionary[trimmed]);
       return;
     }
     // 변수 의미: "대전광역시청 기준 · 36.3504, 127.3845 · NAVER Dynamic Map 연결 준비"처럼
     // " · "로 이어붙인 상태 문구는 조각 단위로 사전을 찾아본다.
     if (trimmed.includes(" · ")) {
       const segments = trimmed.split(" · ");
-      const translatedSegments = segments.map((segment) => UI_STRINGS_EN[segment] || segment);
+      const translatedSegments = segments.map((segment) => dictionary[segment] || segment);
       if (translatedSegments.some((segment, index) => segment !== segments[index])) {
         node.nodeValue = original.replace(trimmed, translatedSegments.join(" · "));
       }
@@ -1039,13 +1079,13 @@ function applyUiLanguage(root = document.body) {
   root.querySelectorAll(attributeSelector).forEach((element) => {
     ["aria-label", "title", "placeholder"].forEach((attributeName) => {
       const value = element.getAttribute(attributeName);
-      if (value && UI_STRINGS_EN[value]) {
-        element.setAttribute(attributeName, UI_STRINGS_EN[value]);
+      if (value && dictionary[value]) {
+        element.setAttribute(attributeName, dictionary[value]);
       }
     });
   });
-  if (root.hasAttribute?.("aria-label") && UI_STRINGS_EN[root.getAttribute("aria-label")]) {
-    root.setAttribute("aria-label", UI_STRINGS_EN[root.getAttribute("aria-label")]);
+  if (root.hasAttribute?.("aria-label") && dictionary[root.getAttribute("aria-label")]) {
+    root.setAttribute("aria-label", dictionary[root.getAttribute("aria-label")]);
   }
 }
 
@@ -1098,9 +1138,22 @@ function handleUiLanguageChange(nextLanguage) {
   renderAll();
   applyUiLanguage(document.body);
 
+  // 온보딩 화면과 드로어 메뉴, 두 드롭다운이 같은 값을 보여주도록 맞춥니다.
+  // 둘 다 정적 HTML 요소라 renderAll()이 값을 다시 맞춰주지 않습니다.
+  ["#onboarding-language-select", "#ui-language-select"].forEach((selector) => {
+    const languageSelect = select(selector);
+    if (languageSelect) {
+      languageSelect.value = normalizedLanguage;
+    }
+  });
+
   // 장소명/퀘스트 제목·설명(Papago 번역)을 새 언어로 다시 받아옵니다.
-  if (ensureSessionReady()) {
-    loadRecommendations(true);
+  // TourAPI 캐시까지 강제로 무시하면(refresh=1) 매번 느린 실시간 조회가 걸리니,
+  // 캐시는 그대로 쓰고 번역만 새로 받도록 강제 새로고침 없이 호출한다.
+  // ensureSessionReady()는 미로그인 시 동의 화면으로 강제 전환하는 부작용이 있어
+  // 언어 전환 같은 무관한 동작에서는 쓰지 않고 토큰 존재 여부만 직접 확인한다.
+  if (state.accessToken) {
+    loadRecommendations(false);
   }
 
   // 열려 있는 관광지 상세 모달도 새 언어로 다시 불러옵니다.
@@ -2705,6 +2758,12 @@ function renderAppHeader() {
   // 현재 화면의 메타데이터입니다.
   const meta = VIEW_META[state.activeView] || VIEW_META.home;
 
+  // 뒤로가기 버튼입니다. 돌아갈 화면이 있을 때만 보여줍니다.
+  const backButton = select("#app-back-button");
+  if (backButton) {
+    backButton.hidden = state.viewHistory.length === 0;
+  }
+
   // 헤더 아이콘 요소입니다.
   const iconElement = select("[data-app-icon]");
   // 헤더 상단 라벨 요소입니다.
@@ -2981,18 +3040,25 @@ function prefersReducedMotion() {
 }
 
 /**
- * 입력: 전환할 화면 ID와 URL 해시 갱신 여부.
+ * 입력: 전환할 화면 ID, URL 해시 갱신 여부, 뒤로가기 버튼이 호출한 것인지 여부.
  * 출력: 없음.
  * 역할: 단일 PWA 안에서 다섯 최상위 메뉴를 책장 넘김으로 전환한다. (명세 §7.3)
+ *       뒤로가기가 아닌 일반 이동일 때만 이전 화면을 뒤로가기 스택에 쌓는다.
  * 호출 예시: setActiveView("quests")
  */
-function setActiveView(viewId, shouldUpdateHash = true) {
+function setActiveView(viewId, shouldUpdateHash = true, isBackNavigation = false) {
   if (!VIEW_META[viewId]) {
     return;
   }
 
   // 같은 화면을 다시 고른 경우인지 여부입니다. 연출을 반복하지 않습니다.
   const isSameView = state.activeView === viewId;
+
+  // 초기 로드·로그아웃 복원(shouldUpdateHash=false)과 뒤로가기 자체는 스택에 쌓지 않습니다.
+  // 그 외의 명시적 화면 이동만 "돌아갈 곳"으로 기록합니다.
+  if (!isSameView && shouldUpdateHash && !isBackNavigation && VIEW_META[state.activeView]) {
+    state.viewHistory.push(state.activeView);
+  }
 
   state.activeView = viewId;
 
@@ -3042,6 +3108,21 @@ function setActiveView(viewId, shouldUpdateHash = true) {
       heading.focus({ preventScroll: true });
     }
   }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 뒤로가기 스택에서 바로 이전 화면을 꺼내 그 화면으로 돌아간다.
+ * 호출 예시: goToPreviousView()
+ */
+function goToPreviousView() {
+  // 스택에서 꺼낸 이전 화면입니다. 없으면 아무 것도 하지 않습니다.
+  const previousView = state.viewHistory.pop();
+  if (!previousView) {
+    return;
+  }
+  setActiveView(previousView, true, true);
 }
 
 /**
@@ -3810,10 +3891,15 @@ async function loadPlaceDetail(place) {
  * 호출 예시: stopAudioGuidePlayback()
  */
 function stopAudioGuidePlayback() {
+  // 오디오 가이드 재생 중 배경음악을 낮췄다면, 재생이 끝나는 순간 되돌립니다.
+  const wasPlaying = state.audioGuidePlaying;
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
   state.audioGuidePlaying = false;
+  if (wasPlaying) {
+    startBackgroundMusic();
+  }
 }
 
 /**
@@ -3833,6 +3919,8 @@ function toggleAudioGuidePlayback(audioGuide) {
   }
 
   window.speechSynthesis.cancel();
+  // 오디오 가이드 내레이션과 겹치지 않도록 배경음악을 잠시 멈춥니다.
+  pauseBackgroundMusic();
   const utterance = new SpeechSynthesisUtterance(audioGuide.script);
   utterance.lang = "ko-KR";
   utterance.onend = () => {
@@ -8543,6 +8631,221 @@ function createPhotoSlider(label, key, min, max, value) {
 }
 
 /* ──────────────────────────────────────────────
+   TAP-TO-START 시작 화면과 배경음악(BGM)
+   ────────────────────────────────────────────── */
+
+// 시작 화면 로딩 바가 추적하는 항목입니다. 전부 끝나야 TAP TO START로 바뀝니다.
+const START_SCREEN_TASKS = ["splashImage", "iconFont", "bgmReady", "authProviders"];
+// 느린 네트워크 등으로 항목 하나가 안 끝나도 화면이 멈추지 않도록 두는 최대 대기 시간입니다.
+const START_SCREEN_TASK_TIMEOUT_MS = 8000;
+// 로컬 서버 등에서는 실제 로딩이 순식간에 끝나 로딩 바가 스쳐 지나가듯 사라지므로,
+// 실제 로딩이 이보다 빨리 끝나도 최소 이 시간만큼은 로딩 연출을 보여준다.
+const START_SCREEN_MIN_DURATION_MS = 2500;
+// 진행률 갱신 주기입니다. 부드럽게 차오르도록 짧게 잡습니다.
+const START_SCREEN_TICK_MS = 80;
+
+// 시작 화면 로딩 항목별 완료 여부입니다.
+const startScreenTaskDone = Object.fromEntries(START_SCREEN_TASKS.map((task) => [task, false]));
+// 로딩을 시작한 시각(performance.now() 기준)입니다.
+let startScreenLoadStartedAt = 0;
+// 진행률 갱신 타이머 id입니다.
+let startScreenTickerId = null;
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 경과 시간과 실제 로딩 완료 여부를 함께 반영해 로딩 바를 갱신한다.
+ *       실제 로딩이 먼저 끝나도 최소 시간 전에는 99%에서 멈추고, 최소 시간이 지나도
+ *       실제 로딩이 안 끝났으면 100%를 보여주지 않는다. 둘 다 끝나야 TAP TO START로 바뀐다.
+ * 호출 예시: updateStartScreenDisplay()
+ */
+function updateStartScreenDisplay() {
+  // 변수 의미: 로딩 시작 이후 지난 시간(ms)입니다.
+  const elapsedMs = performance.now() - startScreenLoadStartedAt;
+  // 변수 의미: 항목 네 개가 모두 끝났는지 여부입니다.
+  const allTasksDone = Object.values(startScreenTaskDone).every(Boolean);
+  // 변수 의미: 시간 기준 진행률입니다. 실제 로딩이 안 끝났으면 99%를 넘지 않습니다.
+  const timePercent = Math.round((elapsedMs / START_SCREEN_MIN_DURATION_MS) * 100);
+  const percent = Math.max(0, Math.min(allTasksDone ? 100 : 99, timePercent));
+
+  const fill = select("#start-screen-progress-fill");
+  const bar = select("#start-screen-progress-bar");
+  const text = select("#start-screen-loading-text");
+  if (fill) {
+    fill.style.width = `${percent}%`;
+  }
+  if (bar) {
+    bar.setAttribute("aria-valuenow", String(percent));
+    bar.setAttribute("aria-label", `로딩 중 ${percent}퍼센트`);
+  }
+  if (text) {
+    text.textContent = `Loading... ${percent}%`;
+  }
+
+  if (percent >= 100 && allTasksDone) {
+    if (startScreenTickerId !== null) {
+      window.clearInterval(startScreenTickerId);
+      startScreenTickerId = null;
+    }
+    state.startScreenReady = true;
+    select("#start-screen-loading")?.setAttribute("hidden", "");
+    select("#start-screen-hint")?.removeAttribute("hidden");
+  }
+}
+
+/**
+ * 입력: 완료된 로딩 항목 이름.
+ * 출력: 없음.
+ * 역할: 로딩 항목 하나를 끝난 것으로 표시하고 화면을 갱신한다. 실제로 100%가 되는 시점은
+ *       updateStartScreenDisplay()가 최소 시간과 함께 판단한다.
+ * 호출 예시: markStartScreenTaskDone("splashImage")
+ */
+function markStartScreenTaskDone(taskName) {
+  if (!(taskName in startScreenTaskDone) || startScreenTaskDone[taskName]) {
+    return;
+  }
+  startScreenTaskDone[taskName] = true;
+  updateStartScreenDisplay();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 스플래시 이미지·폰트·배경음악·인증 서버 연결 네 가지 준비 상태를 각각 추적해 로딩 바에 반영한다.
+ *       하나가 너무 오래 걸려도(느린 네트워크 등) 정해진 시간 뒤 강제로 완료 처리해 화면이 멈추지 않게 한다.
+ * 호출 예시: setupStartScreenLoading()
+ */
+function setupStartScreenLoading() {
+  startScreenLoadStartedAt = performance.now();
+
+  // 스플래시 이미지입니다. 이미 캐시로 로드가 끝나 있을 수도 있습니다.
+  const splashImage = select(".start-screen__image");
+  if (splashImage?.complete) {
+    markStartScreenTaskDone("splashImage");
+  } else {
+    splashImage?.addEventListener("load", () => markStartScreenTaskDone("splashImage"), { once: true });
+    splashImage?.addEventListener("error", () => markStartScreenTaskDone("splashImage"), { once: true });
+  }
+
+  // 아이콘·본문 폰트입니다.
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => markStartScreenTaskDone("iconFont"));
+  } else {
+    markStartScreenTaskDone("iconFont");
+  }
+
+  // 배경음악입니다. 끊김 없이 재생할 수 있을 만큼 받아졌을 때 완료로 봅니다.
+  const bgmAudio = getBgmAudioElement();
+  if (bgmAudio && bgmAudio.readyState >= 3) {
+    markStartScreenTaskDone("bgmReady");
+  } else {
+    bgmAudio?.addEventListener("canplaythrough", () => markStartScreenTaskDone("bgmReady"), { once: true });
+    bgmAudio?.addEventListener("error", () => markStartScreenTaskDone("bgmReady"), { once: true });
+  }
+
+  // 느린 네트워크 등으로 항목 하나가 끝내 안 끝나도 화면이 멈추지 않도록 강제로 전부 완료 처리합니다.
+  window.setTimeout(() => {
+    START_SCREEN_TASKS.forEach((task) => markStartScreenTaskDone(task));
+  }, START_SCREEN_TASK_TIMEOUT_MS);
+
+  // 최소 노출 시간 동안 진행률이 부드럽게 차오르도록 주기적으로 갱신합니다.
+  // 실제 로딩이 다 끝나면 updateStartScreenDisplay()가 알아서 타이머를 멈춥니다.
+  updateStartScreenDisplay();
+  startScreenTickerId = window.setInterval(updateStartScreenDisplay, START_SCREEN_TICK_MS);
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 시작 화면을 닫는다. 이때의 클릭/키 입력을 배경음악 자동재생 허용 계기로 그대로 쓴다.
+ *       로딩이 끝나기 전(state.startScreenReady가 false)에는 닫지 않는다.
+ * 호출 예시: dismissStartScreen()
+ */
+function dismissStartScreen() {
+  const startScreen = select("#start-screen");
+  if (!startScreen || startScreen.hidden || !state.startScreenReady) {
+    return;
+  }
+  startScreen.classList.add("is-dismissing");
+  window.setTimeout(() => {
+    startScreen.hidden = true;
+    startScreen.classList.remove("is-dismissing");
+  }, 350);
+
+  if (state.appSettings.musicEnabled) {
+    startBackgroundMusic();
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 배경음악 audio 엘리먼트 또는 null.
+ * 역할: 정적 HTML에 있는 배경음악 엘리먼트를 찾는다.
+ * 호출 예시: getBgmAudioElement()?.pause()
+ */
+function getBgmAudioElement() {
+  return select("#bgm-audio");
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 0~1 사이 실제 재생 음량.
+ * 역할: 전체 음량과 배경음 음량 두 슬라이더를 곱해 최종 음량을 만든다.
+ * 호출 예시: audio.volume = computeBgmVolume()
+ */
+function computeBgmVolume() {
+  const masterVolume = toNumber(state.appSettings.masterVolume, 60) / 100;
+  const musicVolume = toNumber(state.appSettings.musicVolume, 40) / 100;
+  return Math.min(1, Math.max(0, masterVolume * musicVolume));
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 배경음 켜짐 여부와 음량 설정을 지금 바로 반영한다. (명세 §10 S12)
+ * 호출 예시: applyBgmSettings()
+ */
+function applyBgmSettings() {
+  const audio = getBgmAudioElement();
+  if (!audio) {
+    return;
+  }
+  audio.volume = computeBgmVolume();
+  if (state.appSettings.musicEnabled) {
+    startBackgroundMusic();
+  } else {
+    pauseBackgroundMusic();
+  }
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 배경음이 꺼져 있지 않으면 재생한다. 브라우저 자동재생 정책으로 실패해도 조용히 넘어간다.
+ * 호출 예시: startBackgroundMusic()
+ */
+function startBackgroundMusic() {
+  const audio = getBgmAudioElement();
+  if (!audio || !state.appSettings.musicEnabled) {
+    return;
+  }
+  audio.volume = computeBgmVolume();
+  audio.play().catch(() => {
+    // 사용자 상호작용 전이라 자동재생이 막힌 경우입니다. 설정에서 다시 켤 수 있습니다.
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 배경음악을 멈춘다. 오디오 가이드 재생 중 겹치지 않게 할 때도 쓴다.
+ * 호출 예시: pauseBackgroundMusic()
+ */
+function pauseBackgroundMusic() {
+  getBgmAudioElement()?.pause();
+}
+
+/* ──────────────────────────────────────────────
    마이페이지 설정·권한·정보 (명세 §10 S12)
    앱 음량만 조절하며 시스템 음량을 바꾸는 것처럼 표현하지 않는다.
    ────────────────────────────────────────────── */
@@ -8555,8 +8858,8 @@ const APP_SETTING_GROUPS = [
     note: "앱에서 나는 소리만 조절해요. 기기 전체 음량은 바뀌지 않습니다.",
     items: [
       { key: "masterVolume", label: "전체 음량", type: "range" },
-      { key: "musicVolume", label: "배경음", type: "range" },
-      { key: "effectVolume", label: "효과음", type: "range" },
+      { key: "musicVolume", label: "배경음", type: "range", muteKey: "musicEnabled" },
+      { key: "effectVolume", label: "효과음", type: "range", muteKey: "effectEnabled" },
       { key: "vibration", label: "진동", type: "toggle" },
     ],
   },
@@ -8587,7 +8890,9 @@ function readAppSettings() {
   // 기본값입니다. 소리는 중간, 알림은 꺼진 상태에서 시작합니다.
   const defaults = {
     masterVolume: 60,
+    musicEnabled: true,
     musicVolume: 40,
+    effectEnabled: true,
     effectVolume: 70,
     vibration: true,
     questNotification: false,
@@ -8642,6 +8947,10 @@ async function changeAppSetting(key, value) {
   if (key === "reducedMotion") {
     state.reducedMotion = value;
     applyReducedMotion();
+  }
+
+  if (key === "musicEnabled" || key === "musicVolume" || key === "masterVolume") {
+    applyBgmSettings();
   }
 
   renderSettings();
@@ -8751,6 +9060,25 @@ function renderSettings() {
       row.append(label);
 
       if (item.type === "range") {
+        // 음소거 여부입니다. muteKey가 없는 슬라이더(전체 음량)는 항상 켜진 것으로 봅니다.
+        const isMuted = item.muteKey ? !state.appSettings[item.muteKey] : false;
+
+        // 게이지 바 왼쪽의 음소거 버튼입니다. muteKey가 있는 항목(배경음·효과음)에만 붙입니다.
+        if (item.muteKey) {
+          const muteButton = createElement("button", "setting-row__mute");
+          muteButton.type = "button";
+          muteButton.id = `setting-${item.muteKey}`;
+          muteButton.setAttribute("aria-pressed", String(!isMuted));
+          muteButton.setAttribute("aria-label", isMuted ? `${item.label} 켜기` : `${item.label} 끄기`);
+          muteButton.append(
+            createElement("span", "px-icon px-icon--sm", isMuted ? "volume_off" : "volume_up"),
+          );
+          muteButton.addEventListener("click", () => {
+            changeAppSetting(item.muteKey, !state.appSettings[item.muteKey]);
+          });
+          row.append(muteButton);
+        }
+
         // 음량 슬라이더입니다.
         const input = document.createElement("input");
         input.type = "range";
@@ -8758,6 +9086,7 @@ function renderSettings() {
         input.min = "0";
         input.max = "100";
         input.value = String(state.appSettings[item.key]);
+        input.disabled = isMuted;
         input.addEventListener("change", (event) => changeAppSetting(item.key, Number(event.target.value)));
         // 값 표시입니다. 슬라이더를 끌 때 즉시 갱신합니다.
         const value = createElement("span", "setting-row__value", `${state.appSettings[item.key]}`);
@@ -10467,6 +10796,24 @@ async function loadInitialData(forceRefresh = false) {
  * 호출 예시: bindEvents()
  */
 function bindEvents() {
+  // 이전 화면으로 돌아가는 버튼입니다.
+  const backButton = select("#app-back-button");
+  if (backButton) {
+    backButton.addEventListener("click", goToPreviousView);
+  }
+
+  // TAP-TO-START 시작 화면입니다. 클릭이나 Enter/Space로 닫습니다.
+  const startScreen = select("#start-screen");
+  if (startScreen) {
+    startScreen.addEventListener("click", dismissStartScreen);
+    startScreen.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        dismissStartScreen();
+      }
+    });
+  }
+
   // 위치 권한 요청 버튼입니다.
   const locationButton = select("#use-location-button");
 
@@ -10493,14 +10840,17 @@ function bindEvents() {
     mapLocationButton.addEventListener("click", requestLocation);
   }
 
-  // 화면 언어 선택 드롭다운입니다.
-  const uiLanguageSelect = select("#ui-language-select");
-  if (uiLanguageSelect) {
-    uiLanguageSelect.value = state.uiLanguage;
-    uiLanguageSelect.addEventListener("change", () => {
-      handleUiLanguageChange(uiLanguageSelect.value);
+  // 화면 언어 선택 드롭다운입니다. 시작 전 동의 화면과 드로어 메뉴 둘 다에 있습니다.
+  ["#onboarding-language-select", "#ui-language-select"].forEach((selector) => {
+    const languageSelect = select(selector);
+    if (!languageSelect) {
+      return;
+    }
+    languageSelect.value = state.uiLanguage;
+    languageSelect.addEventListener("change", () => {
+      handleUiLanguageChange(languageSelect.value);
     });
-  }
+  });
 
   if (refreshButton) {
     refreshButton.addEventListener("click", () => {
@@ -10925,7 +11275,8 @@ function initializeApp() {
   // OAuth callback code를 token으로 교환 중인지 여부입니다.
   const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();
-  loadAuthProviders();
+  loadAuthProviders().finally(() => markStartScreenTaskDone("authProviders"));
+  setupStartScreenLoading();
   setActiveView(state.activeView, false);
   // 실제 연결 모드는 서버의 보유 기록을 받기 전까지 보상과 수첩을 비워 둡니다.
   if (IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
@@ -10939,6 +11290,15 @@ function initializeApp() {
   renderAll();
   setupUiLanguageObserver();
   applyUiLanguage(document.body);
+  // 음량을 먼저 맞추고, TAP-TO-START를 누르기 전에도 재생을 시도합니다.
+  // 브라우저 자동재생 정책상 사용자 입력 기록이 쌓이기 전에는 대부분 막히지만(조용히
+  // 실패하고 넘어감), 재방문 등으로 이미 허용된 경우라면 탭 전에도 바로 들립니다.
+  // 막히는 경우엔 TAP-TO-START 클릭이 그대로 재생을 시작하는 사용자 입력이 됩니다.
+  const bgmAudio = getBgmAudioElement();
+  if (bgmAudio) {
+    bgmAudio.volume = computeBgmVolume();
+  }
+  startBackgroundMusic();
   if (!oauthRedirectPending && ensureSessionReady()) {
     loadInitialData();
   }
