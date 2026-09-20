@@ -24,9 +24,9 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block"
       onload="document.documentElement.classList.add('fonts-icons-ready')"
     />
-    <link rel="stylesheet" href="../src/styles.css?v=20260915-integration-39" />
-    <link rel="stylesheet" href="../src/stitch-theme.css?v=20260915-integration-39" />
-    <link rel="stylesheet" href="../src/reward-fx.css?v=20260915-integration-39" />
+    <link rel="stylesheet" href="../src/styles.css?v=20260915-integration-62" />
+    <link rel="stylesheet" href="../src/stitch-theme.css?v=20260915-integration-62" />
+    <link rel="stylesheet" href="../src/reward-fx.css?v=20260915-integration-62" />
   </head>
   <body data-active-view="home">
     <a class="skip-link" href="#main-content">본문으로 이동</a>
@@ -172,8 +172,7 @@
               </div>
 
               <div class="context-row" id="home-plan-controls" hidden>
-                <label class="px-sr-only" for="home-plan-date">계획 날짜</label>
-                <input type="date" id="home-plan-date" />
+                <div id="home-plan-date-slot"></div>
                 <button class="px-button px-button--ghost" type="button" id="home-plan-search">
                   <span class="px-icon px-icon--sm" aria-hidden="true">search</span>
                   위치 검색
@@ -210,6 +209,12 @@
 
                 <section aria-label="선택한 장소 정보">
                   <div class="map-detail" id="map-detail"></div>
+                </section>
+
+                <!-- 계획 모드에서만 보이는 "내가 담은 퀘스트" 목록입니다. (계획 모드 1단계) -->
+                <section aria-label="계획한 퀘스트 목록" id="planned-quest-section" hidden>
+                  <h3 class="section-title">계획한 퀘스트</h3>
+                  <div class="planned-quest-list" id="planned-quest-list"></div>
                 </section>
 
                 <section aria-label="탐험 상태 요약">
@@ -511,7 +516,7 @@
       </div>
     </aside>
 
-    <script type="module" src="../src/app.js?v=20260915-integration-39"></script>
-    <script src="../src/scroll-fab.js?v=20260915-integration-39"></script>
+    <script type="module" src="../src/app.js?v=20260915-integration-62"></script>
+    <script src="../src/scroll-fab.js?v=20260915-integration-62"></script>
   </body>
 </html>

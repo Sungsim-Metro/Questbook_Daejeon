@@ -200,6 +200,10 @@ class AppSettings:
     translation_timeout_seconds: int = 8
     # 변수 의미: 번역 결과 캐시 TTL 초 단위 값이다. 기본 30일이다.
     translation_cache_ttl_seconds: int = 2592000
+    # 변수 의미: NAVER API HUB(지역검색) Client ID다.
+    naver_api_hub_key_id: str = ""
+    # 변수 의미: NAVER API HUB(지역검색) Client Secret이다.
+    naver_api_hub_key: str = ""
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -285,4 +289,6 @@ class AppSettings:
             translation_cache_ttl_seconds=get_int_env(
                 "QUESTBOOK_TRANSLATION_CACHE_TTL_SECONDS", 2592000, 3600, 31536000
             ),
+            naver_api_hub_key_id=get_env("NAVER_API_HUB_KEY_ID"),
+            naver_api_hub_key=get_env("NAVER_API_HUB_KEY"),
         )

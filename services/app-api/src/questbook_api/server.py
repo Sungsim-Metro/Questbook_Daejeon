@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import re
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -25,14 +26,23 @@ from questbook_api.integrations.translation.client import TranslationClient
 from questbook_api.settings import AppSettings
 
 
-# 변수 의미: NAVER Maps REST API 기본 URL이다.
-NAVER_OPENAPI_BASE_URL = "https://naveropenapi.apigw.ntruss.com"
+# 변수 의미: NAVER Maps REST API 기본 URL이다. naveropenapi.apigw.ntruss.com은 구버전
+# "AI·NAVER API" 상품 도메인이라, 신버전 통합 "Maps" 상품(Application Services > Maps)에서
+# 만든 Application은 이 구버전 게이트웨이로는 구독 여부와 무관하게 계속 401을 돌려준다.
+# 실측으로 직접 확인(신버전 도메인은 200, 구버전은 동일 키로도 401)하고 이걸로 바꿨다.
+NAVER_OPENAPI_BASE_URL = "https://maps.apigw.ntruss.com"
 # 변수 의미: NAVER Geocoding API 경로다.
 NAVER_GEOCODE_PATH = "/map-geocode/v2/geocode"
 # 변수 의미: NAVER Reverse Geocoding API 경로다.
 NAVER_REVERSE_GEOCODE_PATH = "/map-reversegeocode/v2/gc"
 # 변수 의미: NAVER REST API 상위 요청 제한 시간 초 단위 값이다.
 NAVER_UPSTREAM_TIMEOUT_SECONDS = 8
+# 변수 의미: NAVER API HUB(2026-06-25 이후 검색 API 통합 플랫폼, developers.naver.com 대체) 기본 URL이다.
+NAVER_API_HUB_BASE_URL = "https://naverapihub.apigw.ntruss.com"
+# 변수 의미: 지역검색(상호명/장소명 검색) 경로다. Geocoding은 정형 주소만 매칭해서 별도로 둔다.
+NAVER_LOCAL_SEARCH_PATH = "/search/v1/local"
+# 변수 의미: 지역검색 mapx/mapy를 위경도(도) 단위로 바꾸는 나눗셈 값이다.
+NAVER_LOCAL_SEARCH_COORD_DIVISOR = 10_000_000
 # 변수 의미: Geocoding API에 허용할 언어 코드다.
 ALLOWED_GEOCODE_LANGUAGES = {"kor", "eng"}
 # 변수 의미: Reverse Geocoding API에 허용할 변환 대상이다.
@@ -255,19 +265,20 @@ def build_naver_headers(settings: AppSettings, accept: str | None = None) -> dic
     return headers
 
 
-def request_naver_upstream(settings: AppSettings, path: str, params: dict[str, Any]) -> tuple[bytes, str, int]:
+def request_naver_json(base_url: str, path: str, params: dict[str, Any], headers: dict[str, str]) -> tuple[bytes, str, int]:
     """
-    입력: 앱 설정, NAVER API 경로, 쿼리 파라미터.
+    입력: NAVER API 기본 URL, 경로, 쿼리 파라미터, 인증 헤더.
     출력: 응답 바이트, 콘텐츠 타입, 상위 HTTP 상태 코드.
-    역할: NAVER Open API에 제한 시간 안에서 서버 측 요청을 보낸다.
-    호출 예시: body, content_type, status = request_naver_upstream(settings, NAVER_GEOCODE_PATH, params)
+    역할: Maps(Geocoding)와 API HUB(지역검색)가 도메인·인증키는 다르지만 요청/오류 처리
+          로직은 같아서 공유한다.
+    호출 예시: body, content_type, status = request_naver_json(NAVER_OPENAPI_BASE_URL, NAVER_GEOCODE_PATH, params, headers)
     """
     # 변수 의미: 인코딩된 쿼리 문자열이다.
     query_string = urlencode(params, doseq=True)
     # 변수 의미: 완성된 NAVER 상위 API URL이다.
-    upstream_url = f"{NAVER_OPENAPI_BASE_URL}{path}?{query_string}"
+    upstream_url = f"{base_url}{path}?{query_string}"
     # 변수 의미: 준비된 상위 API 요청 객체다.
-    request = Request(upstream_url, headers=build_naver_headers(settings, "application/json"))
+    request = Request(upstream_url, headers=headers)
 
     try:
         with urlopen(request, timeout=NAVER_UPSTREAM_TIMEOUT_SECONDS) as response:
@@ -285,7 +296,90 @@ def request_naver_upstream(settings: AppSettings, path: str, params: dict[str, A
         error_content_type = error.headers.get("Content-Type", "application/json; charset=utf-8")
         return error_body, error_content_type, error.code
     except URLError as error:
-        raise RuntimeError(f"NAVER Maps upstream request failed: {error.reason}") from error
+        raise RuntimeError(f"NAVER upstream request failed: {error.reason}") from error
+
+
+def request_naver_upstream(settings: AppSettings, path: str, params: dict[str, Any]) -> tuple[bytes, str, int]:
+    """
+    입력: 앱 설정, NAVER Maps API 경로, 쿼리 파라미터.
+    출력: 응답 바이트, 콘텐츠 타입, 상위 HTTP 상태 코드.
+    역할: NAVER Maps(Geocoding/Reverse Geocoding)에 제한 시간 안에서 서버 측 요청을 보낸다.
+    호출 예시: body, content_type, status = request_naver_upstream(settings, NAVER_GEOCODE_PATH, params)
+    """
+    return request_naver_json(
+        NAVER_OPENAPI_BASE_URL, path, params, build_naver_headers(settings, "application/json"),
+    )
+
+
+def build_naver_api_hub_headers(settings: AppSettings) -> dict[str, str]:
+    """
+    입력: 앱 설정.
+    출력: NAVER API HUB에 필요한 인증 헤더.
+    역할: Maps와 별개로 발급받은 API HUB Application의 Client ID/Secret을 사용한다.
+    호출 예시: headers = build_naver_api_hub_headers(settings)
+    """
+    if not settings.naver_api_hub_key_id or not settings.naver_api_hub_key:
+        raise RuntimeError("NAVER API HUB credentials are missing.")
+    return {
+        "X-NCP-APIGW-API-KEY-ID": settings.naver_api_hub_key_id,
+        "X-NCP-APIGW-API-KEY": settings.naver_api_hub_key,
+        "Accept": "application/json",
+    }
+
+
+def request_naver_local_search(settings: AppSettings, query_text: str) -> tuple[bytes, str, int]:
+    """
+    입력: 앱 설정, 검색어.
+    출력: 응답 바이트, 콘텐츠 타입, 상위 HTTP 상태 코드.
+    역할: 상호명/장소명 검색(지역검색)을 NAVER API HUB에 요청한다. Geocoding과 달리 정형
+          주소가 아니어도("성심당 본점") 매칭된다.
+    호출 예시: body, content_type, status = request_naver_local_search(settings, "성심당 본점")
+    """
+    return request_naver_json(
+        NAVER_API_HUB_BASE_URL,
+        NAVER_LOCAL_SEARCH_PATH,
+        {"query": query_text, "display": 5, "start": 1, "sort": "random"},
+        build_naver_api_hub_headers(settings),
+    )
+
+
+def strip_html_tags(text: str) -> str:
+    """
+    입력: HTML 태그가 섞여 있을 수 있는 텍스트.
+    출력: 태그를 제거한 순수 텍스트.
+    역할: NAVER 지역검색 title이 일치 구간에 <b> 태그를 감싸서 오는 것을 정리한다.
+    호출 예시: strip_html_tags("<b>성심당</b> 본점") == "성심당 본점"
+    """
+    return re.sub(r"<[^>]+>", "", text or "")
+
+
+def normalize_local_search_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    입력: NAVER 지역검색 원본 JSON.
+    출력: Geocoding 응답과 같은 모양({roadAddress, jibunAddress, label, x, y})의 목록.
+    역할: 프런트가 이미 Geocoding 응답을 파싱하는 로직(roadAddress/jibunAddress/label,
+          x/y)을 그대로 재사용할 수 있도록 두 API의 결과 모양을 하나로 맞춘다. mapx/mapy는
+          위경도*10^7 정수로 온다(레거시 지역검색 API와 동일한 관례로 확인됨).
+    호출 예시: addresses = normalize_local_search_results(payload)
+    """
+    results = []
+    for item in payload.get("items", []):
+        try:
+            longitude = float(item.get("mapx", 0)) / NAVER_LOCAL_SEARCH_COORD_DIVISOR
+            latitude = float(item.get("mapy", 0)) / NAVER_LOCAL_SEARCH_COORD_DIVISOR
+        except (TypeError, ValueError):
+            continue
+        if not (-90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0):
+            continue
+        results.append({
+            "label": strip_html_tags(str(item.get("title", ""))),
+            "roadAddress": str(item.get("roadAddress", "")),
+            "jibunAddress": str(item.get("address", "")),
+            "category": str(item.get("category", "")),
+            "x": longitude,
+            "y": latitude,
+        })
+    return results
 
 
 def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
@@ -1133,6 +1227,39 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             language = first_query_value(query, "language", "kor").lower()
             if language not in ALLOWED_GEOCODE_LANGUAGES:
                 language = "kor"
+
+            # 변수 의미: 상호명/장소명 검색을 먼저 시도한다. Geocoding은 정형 주소만
+            # 매칭해서 "성심당 본점" 같은 검색어는 못 찾지만, 지역검색(API HUB)은 찾을 수
+            # 있다. API HUB 키가 없거나 결과가 없으면 조용히 기존 Geocoding으로 넘어간다.
+            if state.settings.naver_api_hub_key_id and state.settings.naver_api_hub_key:
+                try:
+                    local_body, _local_content_type, local_status = request_naver_local_search(
+                        state.settings, query_text,
+                    )
+                    if local_status == 200:
+                        local_payload = json.loads(local_body.decode("utf-8"))
+                        addresses = normalize_local_search_results(local_payload)
+                        if addresses:
+                            # 변수 의미: 지역검색은 언어 파라미터가 없어 상호명·주소가 항상
+                            # 국문으로 온다. 영문 모드에서는 place-detail과 같은 방식(원문
+                            # 자체를 캐시 키로 쓰는 기계번역)으로 화면에 보이는 필드만 번역한다.
+                            if language == "eng" and state.translation is not None:
+                                for address in addresses:
+                                    for field_name in ("label", "roadAddress", "jibunAddress"):
+                                        original_value = address.get(field_name, "")
+                                        if not original_value:
+                                            continue
+                                        translated_value, _machine_translated = state.translation.translate_description(
+                                            f"geocode:{field_name}:{original_value}", original_value, language,
+                                        )
+                                        address[field_name] = translated_value
+                            self._send_json(
+                                HTTPStatus.OK,
+                                {"status": "OK", "addresses": addresses, "source": "localSearch"},
+                            )
+                            return
+                except (RuntimeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                    pass
 
             # 변수 의미: Geocoding 요청 파라미터다.
             upstream_params: dict[str, Any] = {

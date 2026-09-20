@@ -1320,6 +1320,16 @@ body[data-exploration-mode="planned"] .plan-flag {
   box-shadow: 0 -4px 0 rgba(44, 29, 22, 0.35);
 }
 
+/* grid item의 기본 min-width는 auto라(세로축 minmax(0,1fr)는 body 행에만 적용되고
+   가로축엔 영향이 없음), 영문으로 길어진 제목처럼 안쪽 텍스트가 줄임표 처리되도록
+   짜여 있어도 이 grid item 자체가 패널 폭보다 넓게 밀려나 화면 밖으로 넘칠 수 있다.
+   세 행 모두 0으로 낮춰서 패널 폭 안으로 강제로 눌러준다. */
+.quest-sheet__head,
+.quest-sheet__body,
+.quest-sheet__cta {
+  min-width: 0;
+}
+
 .quest-sheet__head {
   position: sticky;
   top: 0;
@@ -2246,6 +2256,107 @@ body[data-catalog-sheet-open="true"] {
   color: var(--px-ink);
   background: var(--px-panel-muted);
   border-inline-start: 6px solid var(--px-danger);
+}
+
+/* 직접 그린 날짜 필드(buildDateField). 네이티브 <input type="date">를 대체한다 — 네이티브
+   위젯은 달력 언어가 방문자 브라우저 로케일을 그대로 따라가 버려서 화면 언어(영문/국문)로
+   바꿀 수 없다(의도된 브라우저 동작). */
+.date-field {
+  position: relative;
+}
+
+.date-field__toggle {
+  min-width: 160px;
+}
+
+.date-field__popover {
+  position: absolute;
+  z-index: 20;
+  inset-block-start: calc(100% + var(--u1));
+  inset-inline-start: 0;
+  min-width: 260px;
+  padding: var(--u2);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  box-shadow: var(--px-shadow);
+}
+
+.date-field__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--u1);
+  margin-block-end: var(--u2);
+}
+
+.date-field__nav {
+  min-width: 36px;
+  min-height: 36px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  cursor: pointer;
+}
+
+.date-field__month-label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--px-ink);
+}
+
+.date-field__weekdays,
+.date-field__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-field__weekdays span {
+  text-align: center;
+  font-size: 11px;
+  color: var(--px-ink-sub);
+  padding-block-end: var(--u1);
+}
+
+.date-field__cell {
+  aspect-ratio: 1 / 1;
+}
+
+.date-field__day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 13px;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.date-field__day:hover {
+  border-color: var(--px-outline);
+}
+
+.date-field__day.is-today {
+  color: var(--px-gold);
+  font-weight: 700;
+}
+
+.date-field__day.is-selected {
+  background: var(--px-plan);
+  color: #fff;
+  border-color: var(--px-outline);
+}
+
+.date-field__today {
+  margin-block-start: var(--u2);
+  width: 100%;
+  text-align: center;
 }
 
 .account-message:empty {
