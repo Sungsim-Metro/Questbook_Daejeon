@@ -194,11 +194,9 @@ class AppSettings:
     ocr_language: str = "ko"
     # 변수 의미: OCR 상위 요청 제한 시간 초 단위 값이다.
     ocr_timeout_seconds: int = 8
-    # 변수 의미: NAVER Papago(NCP) 번역 API Client ID다.
-    translation_client_id: str = ""
-    # 변수 의미: NAVER Papago(NCP) 번역 API Client Secret이다.
-    translation_client_secret: str = ""
-    # 변수 의미: Papago 번역 요청 제한 시간 초 단위 값이다.
+    # 변수 의미: Google Cloud Translation API 키다.
+    google_translate_api_key: str = ""
+    # 변수 의미: Google Cloud Translation 요청 제한 시간 초 단위 값이다.
     translation_timeout_seconds: int = 8
     # 변수 의미: 번역 결과 캐시 TTL 초 단위 값이다. 기본 30일이다.
     translation_cache_ttl_seconds: int = 2592000
@@ -282,9 +280,8 @@ class AppSettings:
             ocr_secret_key=get_env("NCP_CLOVA_OCR_SECRET_KEY"),
             ocr_language=get_env("NCP_CLOVA_OCR_LANGUAGE", "ko") or "ko",
             ocr_timeout_seconds=get_int_env("NCP_CLOVA_OCR_TIMEOUT_SECONDS", 8, 1, 30),
-            translation_client_id=get_env("NCP_PAPAGO_CLIENT_ID"),
-            translation_client_secret=get_env("NCP_PAPAGO_CLIENT_SECRET"),
-            translation_timeout_seconds=get_int_env("NCP_PAPAGO_TIMEOUT_SECONDS", 8, 1, 30),
+            google_translate_api_key=get_env("GOOGLE_TRANSLATE_API_KEY"),
+            translation_timeout_seconds=get_int_env("GOOGLE_TRANSLATE_TIMEOUT_SECONDS", 8, 1, 30),
             translation_cache_ttl_seconds=get_int_env(
                 "QUESTBOOK_TRANSLATION_CACHE_TTL_SECONDS", 2592000, 3600, 31536000
             ),

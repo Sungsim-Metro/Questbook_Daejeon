@@ -1103,12 +1103,16 @@ p {
   display: grid;
   gap: var(--content-gap);
   padding: var(--card-padding);
+  /* 그리드 아이템의 기본 min-width는 auto라, 영문 버튼처럼 줄바꿈 없는 긴 텍스트가 있으면
+     카드 전체가 화면 폭을 넘어 가로 스크롤이 생긴다. 0으로 낮춰 폭에 맞게 줄어들게 한다. */
+  min-width: 0;
 }
 
 .map-detail-head {
   display: flex;
   align-items: center;
   gap: var(--content-gap);
+  min-width: 0;
 }
 
 .map-detail-copy {
@@ -1129,6 +1133,18 @@ p {
   color: var(--sub);
   font-size: 16px;
   line-height: 1.1;
+}
+
+/* 공용 .primary-action은 좁은 칸에서 버튼 높이가 늘어나지 않도록 white-space: nowrap +
+   flex-shrink: 0을 쓰는데(stitch-theme.css), 여기 카드 안에서는 짧은 국문 라벨("퀘스트 보기")
+   대신 영문으로 바뀌면 그 텍스트가 카드보다 길어져 화면 밖으로 가로 넘침이 생긴다.
+   이 카드 맥락에서만 줄바꿈을 허용해 카드 폭 안에서 위아래로만 늘어나게 한다. */
+.map-detail-card .primary-action {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+  word-break: break-word;
 }
 
 .map-place-button {

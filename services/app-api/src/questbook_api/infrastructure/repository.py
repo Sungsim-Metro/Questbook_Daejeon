@@ -335,6 +335,19 @@ GGUMDORI_SEEDS = [
     ("ggumdori_hotspring_1", "온천 꿈돌이", "hotspring", 1, "유성온천 방문", "/assets/ggumdori/hotspring-1.svg", "유성온천 탐험을 기념하는 꿈돌이입니다.", "common", 60),
 ]
 
+# 변수 의미: fallback 장소(integrations/tourapi/client.py FALLBACK_PLACES)의 영문 이름이다.
+# fallback 장소는 일일 카탈로그 배치(catalog_sync.sync_place_name_translations) 대상이
+# 아니라서(TourAPI 실 결과가 아님) 배치로는 채워지지 않는다. 6개뿐인 고정 장소라 사람이
+# 직접 번역해 여기 시드로 넣어 두면 기계번역 호출 없이 영문 모드에서 바로 쓸 수 있다.
+FALLBACK_PLACE_NAME_TRANSLATION_SEEDS = [
+    ("fallback-hanbat-arboretum", "한밭수목원", "Hanbat Arboretum", "fallback"),
+    ("fallback-science-museum", "국립중앙과학관", "National Science Museum", "fallback"),
+    ("fallback-eunhaeng-dong", "은행동 스카이로드", "Eunhaeng-dong Sky Road", "fallback"),
+    ("fallback-sungsimdang", "성심당 본점", "Sungsimdang Main Store", "fallback"),
+    ("fallback-tashu-station", "타슈 중앙로 거점", "Tashu Jungangno Station", "fallback"),
+    ("fallback-bomunsan-observatory", "보문산 전망대", "Bomunsan Observatory", "fallback"),
+]
+
 
 class QuestbookRepository(QuestCatalogRepositoryMixin):
     """
@@ -426,6 +439,14 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
                 ON CONFLICT (id) DO NOTHING
                 """,
                 GGUMDORI_SEEDS,
+            )
+            cursor.executemany(
+                """
+                INSERT INTO place_name_translations(content_id, name_kor, name_eng, source, translated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (content_id) DO NOTHING
+                """,
+                [(*row, datetime.now(timezone.utc)) for row in FALLBACK_PLACE_NAME_TRANSLATION_SEEDS],
             )
 
     def ensure_user(self, user_id: str = "demo-user") -> dict[str, Any]:

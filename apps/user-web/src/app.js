@@ -474,6 +474,11 @@ const OAUTH_INTENT_KEY = "questbook:user-web:oauth-intent";
 // 닉네임 자동 추천에 쓰는 조각입니다. 중복을 허용하므로 확인 API를 부르지 않습니다. (명세 §9.4)
 const NICKNAME_PREFIXES = ["씩씩한", "느긋한", "호기심 많은", "부지런한", "용감한", "다정한", "엉뚱한", "꼼꼼한"];
 const NICKNAME_NOUNS = ["꿈돌이", "탐험가", "기록가", "산책러", "미식가", "수집가", "여행자", "모험가"];
+// NICKNAME_PREFIXES/NICKNAME_NOUNS와 같은 순서로 대응하는 영문 닉네임 조각입니다.
+// 조합이 랜덤이라 applyUiLanguage()의 문자열 정확 일치로는 못 잡아, suggestNickname()이
+// 뽑을 때 인덱스를 맞춰 직접 영문/국문 중 하나를 고른다.
+const NICKNAME_PREFIXES_EN = ["Brave", "Easygoing", "Curious", "Diligent", "Bold", "Kind", "Quirky", "Meticulous"];
+const NICKNAME_NOUNS_EN = ["Dreamdol", "Explorer", "Recorder", "Stroller", "Foodie", "Collector", "Traveler", "Adventurer"];
 
 // 사진 증빙 기본 업로드 제한 바이트 값입니다.
 const DEFAULT_EVIDENCE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -618,6 +623,10 @@ const state = {
   accountStep: "consent",
   // 닉네임 입력 칸의 현재 값입니다. (명세 §9.4)
   nicknameDraft: "",
+  // 지금 nicknameDraft가 suggestNickname()이 뽑아 둔 제안값 그대로인지 추적하는 인덱스입니다.
+  // 사용자가 직접 입력칸을 고치면 null로 지워, 언어 토글이 사용자가 입력한 커스텀 닉네임을
+  // 건드리지 않게 합니다. 제안값 그대로일 때만 언어 토글 시 같은 조합을 다른 언어로 다시 조립합니다.
+  nicknameSuggestionIndices: null,
   // 소셜 연결(승계) 진행 상태입니다. idle | pending | failed. (명세 §9.3)
   accountLinkState: "idle",
   // 마이페이지 계정 영역에 알릴 문구입니다.
@@ -660,6 +669,9 @@ const state = {
   naverMapInstance: null,
   naverMapMarkers: [],
   naverPositionMarker: null,
+  // 지도를 마지막으로 센터링한 기준 좌표입니다. 모달 열고 닫기 등 위치 변경과 무관한
+  // 재렌더링에서는 이 값이 그대로라 사용자가 손으로 옮겨 둔 지도 위치를 건드리지 않습니다.
+  naverMapCenteredLocation: null,
 };
 
 /**
@@ -751,6 +763,18 @@ function readStorageValue(key) {
 function readStoredUiLanguage() {
   const storedLanguage = readStorageValue(UI_LANGUAGE_KEY);
   return SUPPORTED_UI_LANGUAGES.includes(storedLanguage) ? storedLanguage : "kor";
+}
+
+/**
+ * 입력: 국문 문구, 영문 문구.
+ * 출력: 현재 화면 언어에 맞는 문구.
+ * 역할: 정확도 "87m"처럼 동적 숫자가 끼워져 있어 UI_STRINGS_EN의 텍스트 노드 정확 일치
+ *       방식(applyUiLanguage)으로는 못 잡는 조합 문구를, 만들어지는 순간 언어에 맞게 고른다.
+ *       이 앱은 매 렌더마다 새로 만들기 때문에 언어를 토글하면 다음 렌더에서 바로 반영된다.
+ * 호출 예시: localize(`정확도 ${n}m`, `Accuracy ${n}m`)
+ */
+function localize(korean, english) {
+  return state.uiLanguage === "eng" ? english : korean;
 }
 
 // 화면 전체 영문화용 고정 UI 텍스트 사전입니다. 값의 가짓수가 정해진 텍스트(버튼, 헤딩,
@@ -904,6 +928,10 @@ const UI_STRINGS_EN = {
   "꿈돌이 도감": "Ggumdori Collection",
   "카테고리 XP를 쌓아 꿈돌이와 뱃지를 해금하세요.": "Earn category XP to unlock Ggumdori characters and badges.",
   "대표 미설정": "No featured character set",
+  "사진 찍기": "Take a photo",
+  "꿈돌이": "Ggumdori",
+  "대전 탐험가": "Daejeon Explorer",
+  "모험가": "Adventurer",
   "대표": "Featured",
   "꿈돌이 또는 퀘스트 이름": "Ggumdori or quest name",
   "획득": "Earned",
@@ -1001,6 +1029,31 @@ const UI_STRINGS_EN = {
   "행사 장소": "Event venue",
   "행사 시작일": "Event start date",
   "행사 종료일": "Event end date",
+  // 편의 정보 값(TourAPI 원문에 자주 나오는 짧고 고정된 단어). 이용시간처럼 자유 문장인 값은
+  // 백엔드가 번역해서 내려주지만(server.py _handle_place_detail), 이런 짧은 고정 단어는
+  // 프런트 사전으로 바로 잡는 게 더 빠르고 API 호출도 없다.
+  "가능": "Available",
+  "불가": "Not available",
+  "불가능": "Not available",
+  "무료": "Free",
+  "유료": "Paid",
+  "연중무휴": "Open year-round",
+  "년중무휴": "Open year-round",
+  "매일": "Daily",
+  "없음": "None",
+  "있음": "Available",
+  "월요일": "Monday",
+  "화요일": "Tuesday",
+  "수요일": "Wednesday",
+  "목요일": "Thursday",
+  "금요일": "Friday",
+  "토요일": "Saturday",
+  "일요일": "Sunday",
+  "API 연결됨": "API Connected",
+  "목업 모드": "Mock Mode",
+  // 브랜드명은 직역이 아니라 원래 영문 서비스명으로 대응한다.
+  "모험가의 수첩": "Travel-Qbook",
+  "기간": "Period",
   "등록된 편의 정보가 아직 없습니다.": "No amenity information registered yet.",
   "🔊 이 장소는 아직 오디오 가이드가 없습니다.": "🔊 There is no audio guide for this place yet.",
   "▶ 오디오 가이드 재생": "▶ Play audio guide",
@@ -1016,6 +1069,43 @@ const UI_STRINGS_EN = {
   "이전 화면으로": "Back",
   "날씨 상세 보기": "View weather details",
   "불러오는 중...": "Loading...",
+  // 꿈돌이 이름(백엔드 seed, infrastructure/repository.py GGUMDORI_SEEDS 8종)
+  "기본 꿈돌이": "Default Ggumdori",
+  "제빵 꿈돌이": "Baker Ggumdori",
+  "안경 꿈돌이": "Glasses Ggumdori",
+  "플라스크 꿈돌이": "Flask Ggumdori",
+  "숲 탐험 꿈돌이": "Forest Explorer Ggumdori",
+  "타슈 꿈돌이": "Tashu Ggumdori",
+  "야경 꿈돌이": "Night View Ggumdori",
+  "온천 꿈돌이": "Hot Spring Ggumdori",
+  // 꿈돌이 이름(프런트 fallback 목업 데이터 전용, API 실패 시에만 노출)
+  "연구원 꿈돌이": "Researcher Ggumdori",
+  "빵집 꿈돌이": "Bakery Ggumdori",
+  "산책 꿈돌이": "Stroll Ggumdori",
+  "축제 꿈돌이": "Festival Ggumdori",
+  // 뱃지 이름(백엔드 seed, infrastructure/repository.py BADGE_SEEDS 12종)
+  "초록 탐험가": "Green Explorer",
+  "숲 탐험 꿈나무": "Forest Explorer Sprout",
+  "과학 탐험가": "Science Explorer",
+  "실험실 탐험가": "Lab Explorer",
+  "대전 워커": "Daejeon Walker",
+  "원도심 산책가": "Old Downtown Stroller",
+  "빵지순례자": "Bakery Pilgrim",
+  "상권 탐험가": "Market Explorer",
+  "타슈 라이더": "Tashu Rider",
+  "도시 연결자": "City Connector",
+  "전망 수집가": "View Collector",
+  "야경 기록가": "Night View Recorder",
+  // 계획 위치 프리셋(PLAN_LOCATION_PRESETS)
+  "대전역": "Daejeon Station",
+  "유성온천역": "Yuseong Spa Station",
+  "국립중앙과학관": "National Science Museum",
+  "한밭수목원": "Hanbat Arboretum",
+  // 위치 라벨 고정 문구(동적 숫자가 끼워지는 정확도 라벨은 localize()로 별도 처리)
+  "대전광역시청 기준": "Based on Daejeon City Hall",
+  "위치 확인 불가, 대전광역시청 기준": "Unable to determine location, using Daejeon City Hall",
+  "계획 위치를 설정해주세요": "Please set a planned location",
+  "지도에서 선택한 위치": "Location selected on the map",
 };
 
 // UI_STRINGS_EN의 역방향 사전이다. 영문에서 국문으로 되돌아갈 때 쓴다.
@@ -1135,7 +1225,22 @@ function handleUiLanguageChange(nextLanguage) {
   }
   state.uiLanguage = normalizedLanguage;
   writeStorageValue(UI_LANGUAGE_KEY, normalizedLanguage);
+
+  // 닉네임 입력칸이 아직 사용자가 손대지 않은 제안값 그대로면(nicknameSuggestionIndices가
+  // 남아 있으면), 같은 조합을 새 언어 단어로 다시 조립한다. <input>의 value는 텍스트 노드가
+  // 아니라 applyUiLanguage()의 DOM 스윕으로는 못 잡기 때문에 여기서 직접 갱신해야 한다.
+  // 사용자가 직접 입력칸을 고친 경우에는 이미 null이라 건드리지 않는다.
+  if (state.nicknameSuggestionIndices) {
+    state.nicknameDraft = formatNicknameSuggestion(
+      state.nicknameSuggestionIndices.prefixIndex,
+      state.nicknameSuggestionIndices.nounIndex,
+    );
+  }
+
   renderAll();
+  // renderAll()에는 온보딩 닉네임 단계가 없다(진입 액션에서만 그려짐). <input>의 value는
+  // applyUiLanguage()의 DOM 스윕으로도 못 잡으니, 지금 그 단계가 보이는 중이면 직접 다시 그린다.
+  renderAccountStep();
   applyUiLanguage(document.body);
 
   // 온보딩 화면과 드로어 메뉴, 두 드롭다운이 같은 값을 보여주도록 맞춥니다.
@@ -2243,7 +2348,21 @@ function toServerCategory(category) {
  * 호출 예시: const location = getRecommendationLocation()
  */
 function getRecommendationLocation() {
-  return state.explorationMode === "planned" ? state.plannedLocation : state.location;
+  // 변수 의미: 현재 탐색 모드가 가리키는 원본 위치 객체입니다.
+  const location = state.explorationMode === "planned" ? state.plannedLocation : state.location;
+  if (!location.measured) {
+    return location;
+  }
+  // 실측 GPS 위치의 라벨은 정확도(m)가 끼워진 동적 문구라 UI_STRINGS_EN 사전(정확 일치)으로
+  // 못 잡는다. normalizeMeasuredLocation()이 만들 때 고정해 둔 국문 라벨 대신, 조회 시점의
+  // 화면 언어로 매번 새로 만들어 돌려준다.
+  return {
+    ...location,
+    label: localize(
+      `현재 위치 기준, 정확도 ${Math.round(toNumber(location.accuracyMeters, 0))}m`,
+      `Current location, accuracy ${Math.round(toNumber(location.accuracyMeters, 0))}m`,
+    ),
+  };
 }
 
 /**
@@ -2872,7 +2991,7 @@ function renderDrawerProfile() {
     const meta = createElement("div", "drawer-profile__meta");
     const nameRow = createElement("div", "context-row");
     nameRow.append(
-      createElement("span", "nav-link__label", state.user.nickname || "모험가"),
+      createElement("span", "nav-link__label", displayNickname(state.user.nickname) || localize("모험가", "Adventurer")),
       createElement("span", "level-pill px-counter", `Lv.${toNumber(state.user.level, 1)}`),
     );
     meta.append(nameRow, createElement("span", "nav-link__desc", state.user.title || "대전 탐험가"));
@@ -3151,16 +3270,21 @@ function renderProfile() {
   const main = createElement("div", "profile-main");
   const avatar = createGgumdoriFigure(selectedGgumdori);
   const profileText = createElement("div");
-  const name = createElement("p", "profile-name", state.user.nickname || FALLBACK_USER.nickname);
+  const name = createElement("p", "profile-name", displayNickname(state.user.nickname) || displayNickname(FALLBACK_USER.nickname));
   const meta = createElement(
     "p",
     "profile-meta",
     `Lv.${toNumber(state.user.level, 1)} · ${toNumber(state.user.xp).toLocaleString("ko-KR")} XP`,
   );
+  // 변수 의미: 대표로 선택된 꿈돌이 이름입니다(고정된 이름 집합이라 UI_STRINGS_EN에도 등록돼 있음).
+  const selectedGgumdoriName = selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이";
   const selectedName = createElement(
     "span",
     "selected-ggumdori-name",
-    `${selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이"} 선택 중`,
+    localize(
+      `${selectedGgumdoriName} 선택 중`,
+      `${UI_STRINGS_EN[selectedGgumdoriName] || selectedGgumdoriName} selected`,
+    ),
   );
   const customizeLink = createElement("button", "profile-customize-link", "도감에서 대표 바꾸기 →");
   customizeLink.type = "button";
@@ -3172,7 +3296,11 @@ function renderProfile() {
   // 레벨 진행률 설명입니다.
   const progressCaption = createElement("div", "progress-caption");
   progressCaption.append(
-    createElement("span", "", `Lv.${toNumber(state.user.level, 1) + 1}까지`),
+    createElement(
+      "span",
+      "",
+      localize(`Lv.${toNumber(state.user.level, 1) + 1}까지`, `Until Lv.${toNumber(state.user.level, 1) + 1}`),
+    ),
     createElement("span", "", `${Math.round(progressPercent)}%`),
   );
 
@@ -3195,8 +3323,8 @@ function renderProfile() {
   const statRow = createElement("div", "stat-row");
   [
     ["XP", `${toNumber(state.user.xp).toLocaleString("ko-KR")}`],
-    ["완료", `${toNumber(state.user.completedQuestCount)}개`],
-    ["뱃지", `${toNumber(state.user.badgeCount)}개`],
+    ["완료", localize(`${toNumber(state.user.completedQuestCount)}개`, `${toNumber(state.user.completedQuestCount)}`)],
+    ["뱃지", localize(`${toNumber(state.user.badgeCount)}개`, `${toNumber(state.user.badgeCount)}`)],
   ].forEach(([label, value]) => {
     // 통계 한 칸을 표시하는 요소입니다.
     const statItem = createElement("div", "stat-item");
@@ -3227,8 +3355,8 @@ function renderHomeMetrics() {
   // 표시할 지표 목록입니다.
   const metrics = [
     ["📍", getRecommendationLocation().label.replace(" 기준", ""), state.explorationMode === "planned" ? "계획 위치" : "현재 위치 후보"],
-    ["🏷️", `${earnedBadges.length}개`, "획득 뱃지"],
-    ["🗺️", `${state.recommendations.length}개`, "주변 퀘스트"],
+    ["🏷️", localize(`${earnedBadges.length}개`, `${earnedBadges.length}`), "획득 뱃지"],
+    ["🗺️", localize(`${state.recommendations.length}개`, `${state.recommendations.length}`), "주변 퀘스트"],
     ["🎁", getRecommendationDataLabel(), "추천 데이터"],
   ];
 
@@ -3922,7 +4050,9 @@ function toggleAudioGuidePlayback(audioGuide) {
   // 오디오 가이드 내레이션과 겹치지 않도록 배경음악을 잠시 멈춥니다.
   pauseBackgroundMusic();
   const utterance = new SpeechSynthesisUtterance(audioGuide.script);
-  utterance.lang = "ko-KR";
+  // 백엔드가 영문 모드에서 script 자체를 이미 번역해서 내려주므로(_handle_place_detail),
+  // 읽어 줄 음성도 그 언어에 맞춰야 자연스럽게 들린다.
+  utterance.lang = state.uiLanguage === "eng" ? "en-US" : "ko-KR";
   utterance.onend = () => {
     stopAudioGuidePlayback();
     renderPlaceDetailSheet();
@@ -4594,6 +4724,8 @@ function renderAdventure() {
   // S02 닉네임 단계 컨트롤입니다. (명세 §9.4, §10 S02)
   select("#nickname-input")?.addEventListener("input", (event) => {
     state.nicknameDraft = event.target.value || "";
+    // 사용자가 직접 고친 값이니, 언어 토글 때 제안값으로 되돌려 조립하지 않도록 잊습니다.
+    state.nicknameSuggestionIndices = null;
   });
   select("#nickname-suggest")?.addEventListener("click", () => {
     state.nicknameDraft = suggestNickname();
@@ -5013,11 +5145,12 @@ function renderQuestBoard() {
 
   board.replaceChildren();
 
-  // 퀘스트 상태 그룹 정의입니다.
+  // 퀘스트 상태 그룹 정의입니다. 영문 라벨은 카운트 숫자와 한 텍스트 노드로 합쳐지므로
+  // (예: "추천됨 3") UI_STRINGS_EN의 완전 일치 방식으로는 못 잡아, localize()로 직접 고른다.
   const groups = [
-    { key: "recommended", title: "추천됨" },
-    { key: "accepted", title: "진행 중" },
-    { key: "completed", title: "완료" },
+    { key: "recommended", title: localize("추천됨", "Recommended") },
+    { key: "accepted", title: localize("진행 중", "In Progress") },
+    { key: "completed", title: localize("완료", "Completed") },
   ];
 
   groups.forEach((group) => {
@@ -5161,6 +5294,7 @@ async function renderNaverMapView(canvas, places) {
         position: window.naver.maps.Position.TOP_RIGHT,
       },
     });
+    state.naverMapCenteredLocation = { lat: getRecommendationLocation().lat, lng: getRecommendationLocation().lng };
     window.naver.maps.Event.addListener(state.naverMapInstance, "click", (event) => {
       if (state.explorationMode !== "planned") {
         return;
@@ -5168,7 +5302,19 @@ async function renderNaverMapView(canvas, places) {
       setPlanningLocation(event.coord.lat(), event.coord.lng(), "지도에서 선택한 위치");
     });
   } else {
-    state.naverMapInstance.setCenter(center);
+    // 추천 기준 위치가 실제로 바뀐 경우(GPS 갱신, 계획 위치 변경, 현위치/계획 모드 전환)에만
+    // 센터를 옮긴다. 모달을 열고 닫는 것처럼 위치와 무관한 재렌더링마다 센터를 리셋하면
+    // 사용자가 손으로 확대/이동해 둔 지도 위치가 자꾸 원점으로 튕겨 나가 불편해진다.
+    const referenceLocation = getRecommendationLocation();
+    const lastCenteredLocation = state.naverMapCenteredLocation;
+    const locationChanged =
+      !lastCenteredLocation ||
+      lastCenteredLocation.lat !== referenceLocation.lat ||
+      lastCenteredLocation.lng !== referenceLocation.lng;
+    if (locationChanged) {
+      state.naverMapInstance.setCenter(center);
+      state.naverMapCenteredLocation = { lat: referenceLocation.lat, lng: referenceLocation.lng };
+    }
   }
 
   syncNaverPositionMarker();
@@ -5204,6 +5350,24 @@ function syncNaverPositionMarker() {
 }
 
 /**
+ * 입력: 되돌아갈 기준 위치.
+ * 출력: 없음.
+ * 역할: "현재 위치" 버튼처럼 사용자가 명시적으로 위치로 돌아가길 요청했을 때만 지도를
+ *       그 위치로 되돌린다. 좌표 값이 이전과 같아도(같은 GPS 캐시 결과 등) 항상 되돌아간다는
+ *       걸 보장한다 — renderNaverMapView()의 좌표-변경 감지는 모달 열고 닫기 같은 무관한
+ *       재렌더링에서 지도를 건드리지 않기 위한 것이라 이 경우엔 못 쓴다.
+ * 호출 예시: recenterNaverMapOnLocation(state.location)
+ */
+function recenterNaverMapOnLocation(location) {
+  if (!state.naverMapInstance || !hasNaverMaps()) {
+    return;
+  }
+  state.naverMapInstance.setCenter(new window.naver.maps.LatLng(location.lat, location.lng));
+  state.naverMapInstance.setZoom(NAVER_MAP_DEFAULT_ZOOM);
+  state.naverMapCenteredLocation = { lat: location.lat, lng: location.lng };
+}
+
+/**
  * 입력: 추천 장소 목록.
  * 출력: 없음.
  * 역할: NAVER 지도 위 퀘스트 마커를 추천 데이터와 선택 상태에 맞게 갱신한다.
@@ -5224,9 +5388,8 @@ function syncNaverPlaceMarkers(places) {
     });
 
     window.naver.maps.Event.addListener(marker, "click", () => {
+      // 마커를 눌러 모달을 열 때도 지도를 확대/이동시키지 않는다(사용자가 옮겨 둔 상태 보존).
       selectMapPlace(place.instanceId);
-      state.naverMapInstance.setCenter(toNaverLatLng(place));
-      state.naverMapInstance.setZoom(NAVER_MAP_FOCUSED_ZOOM);
     });
 
     return { marker, place };
@@ -5263,12 +5426,9 @@ function selectMapPlace(instanceId) {
   // 선택한 추천 장소입니다.
   const selectedPlace = state.recommendations.find((item) => item.instanceId === instanceId);
   if (selectedPlace) {
+    // 모달을 여느라 지도를 확대/이동시키지 않는다. 사용자가 직접 옮겨 둔 지도 상태(확대/이동)를
+    // 그대로 보존해야 모달을 보고 나서도 하던 흐름을 이어갈 수 있다.
     openPlaceDetailSheet(selectedPlace);
-  }
-
-  if (state.naverMapInstance && hasNaverMaps() && selectedPlace) {
-    state.naverMapInstance.setCenter(toNaverLatLng(selectedPlace));
-    state.naverMapInstance.setZoom(NAVER_MAP_FOCUSED_ZOOM);
   }
 }
 
@@ -6259,7 +6419,9 @@ function renderCollection() {
     const featured = state.catalog.entries.find(
       (item) => item.ggumdoriId === state.selectedGgumdoriId && item.state === "earned",
     );
-    featuredElement.textContent = featured ? `대표 ${featured.ggumdoriName}` : "대표 미설정";
+    featuredElement.textContent = featured
+      ? localize(`대표 ${featured.ggumdoriName}`, `Featured ${UI_STRINGS_EN[featured.ggumdoriName] || featured.ggumdoriName}`)
+      : localize("대표 미설정", "No featured character set");
   }
 
   // 필터 버튼의 현재 선택을 반영합니다.
@@ -6522,7 +6684,9 @@ function renderCatalogSheet() {
   if (entry.ggumdoriImageRef) {
     const image = document.createElement("img");
     image.src = entry.ggumdoriImageRef;
-    image.alt = isEarned ? entry.ggumdoriName : `${entry.ggumdoriName} 미획득`;
+    image.alt = isEarned
+      ? entry.ggumdoriName
+      : localize(`${entry.ggumdoriName} 미획득`, `${UI_STRINGS_EN[entry.ggumdoriName] || entry.ggumdoriName} (not yet earned)`);
     figure.append(image);
   }
   if (!isEarned) {
@@ -6709,11 +6873,62 @@ async function saveFeaturedGgumdori(ggumdoriId) {
  * 호출 예시: const nickname = suggestNickname()
  */
 function suggestNickname() {
-  // 앞뒤 조각을 하나씩 골라 붙입니다.
-  const prefix = NICKNAME_PREFIXES[Math.floor(Math.random() * NICKNAME_PREFIXES.length)];
-  const noun = NICKNAME_NOUNS[Math.floor(Math.random() * NICKNAME_NOUNS.length)];
+  // 앞뒤 조각을 하나씩 골라 붙입니다. 국문/영문 배열은 같은 순서로 대응하므로 인덱스를
+  // 공유해서 현재 화면 언어에 맞는 쪽을 고릅니다.
+  const prefixIndex = Math.floor(Math.random() * NICKNAME_PREFIXES.length);
+  const nounIndex = Math.floor(Math.random() * NICKNAME_NOUNS.length);
+  // 뽑은 인덱스를 기억해 둡니다. 언어를 토글했을 때 새로 랜덤 추첨하지 않고, 같은 조합을
+  // 다른 언어 단어로만 다시 조립할 수 있게 하기 위해서입니다(formatNicknameSuggestion 참고).
+  state.nicknameSuggestionIndices = { prefixIndex, nounIndex };
+  return formatNicknameSuggestion(prefixIndex, nounIndex);
+}
 
+/**
+ * 입력: 형용사/명사 인덱스.
+ * 출력: 현재 화면 언어에 맞는 닉네임 제안 문자열.
+ * 역할: suggestNickname()과 언어 토글 재조립이 같은 조립 로직을 쓰게 한다.
+ * 호출 예시: formatNicknameSuggestion(0, 5)
+ */
+function formatNicknameSuggestion(prefixIndex, nounIndex) {
+  const prefix = localize(NICKNAME_PREFIXES[prefixIndex], NICKNAME_PREFIXES_EN[prefixIndex]);
+  const noun = localize(NICKNAME_NOUNS[nounIndex], NICKNAME_NOUNS_EN[nounIndex]);
   return `${prefix} ${noun}`;
+}
+
+/**
+ * 입력: 저장된 닉네임(국문 또는 영문 제안값 형태일 수 있음).
+ * 출력: 현재 화면 언어에 맞는 닉네임. 제안 조합이 아니면 원본 그대로.
+ * 역할: 확정해 저장한 닉네임이 "형용사 명사" 자동 제안 조합(64가지)과 정확히 일치하면
+ *       같은 조합을 현재 언어 단어로 다시 조립해 보여준다. 사용자가 직접 입력한 커스텀
+ *       닉네임은 어느 목록과도 안 맞으니 그대로 남는다(번역할 사전이 없어서 자연스러운 동작).
+ * 호출 예시: displayNickname(state.user.nickname)
+ */
+function displayNickname(nickname) {
+  const text = String(nickname || "").trim();
+  if (!text) {
+    return text;
+  }
+  // 변수 의미: (명사 목록, 그 명사 목록과 짝지어진 형용사 목록) 쌍입니다. 저장된 닉네임이
+  // 국문으로 됐던 영문으로 됐던 둘 다 검사해야 하므로 두 언어를 모두 확인합니다.
+  const nounLists = [
+    { nouns: NICKNAME_NOUNS, prefixes: NICKNAME_PREFIXES },
+    { nouns: NICKNAME_NOUNS_EN, prefixes: NICKNAME_PREFIXES_EN },
+  ];
+  for (const { nouns, prefixes } of nounLists) {
+    for (let nounIndex = 0; nounIndex < nouns.length; nounIndex += 1) {
+      const noun = nouns[nounIndex];
+      if (!text.endsWith(` ${noun}`)) {
+        continue;
+      }
+      // 변수 의미: 명사를 뗀 나머지, 형용사여야 합니다.
+      const prefixText = text.slice(0, text.length - noun.length - 1).trim();
+      const prefixIndex = prefixes.indexOf(prefixText);
+      if (prefixIndex !== -1) {
+        return formatNicknameSuggestion(prefixIndex, nounIndex);
+      }
+    }
+  }
+  return text;
 }
 
 /**
@@ -6954,7 +7169,7 @@ function renderAccountPanel() {
   const nicknameInput = document.createElement("input");
   nicknameInput.type = "text";
   nicknameInput.id = "me-nickname-input";
-  nicknameInput.value = state.user.nickname || "";
+  nicknameInput.value = displayNickname(state.user.nickname);
   nicknameInput.maxLength = 20;
   nicknameInput.setAttribute("aria-label", "닉네임");
 
@@ -8474,7 +8689,13 @@ function renderPhotoSheet() {
   // 상단 고정 머리말입니다.
   const head = createElement("header", "quest-sheet__head px-dialog__bar");
   const titleGroup = createElement("div", "quest-sheet__title-group");
-  const title = createElement("h2", "px-label", `${entry?.ggumdoriName || "꿈돌이"}와 사진 찍기`);
+  // 변수 의미: 사진 찍기 대상 꿈돌이 이름입니다(고정된 이름 집합이라 UI_STRINGS_EN에도 등록돼 있음).
+  const photoGgumdoriName = entry?.ggumdoriName || "꿈돌이";
+  const title = createElement(
+    "h2",
+    "px-label",
+    localize(`${photoGgumdoriName}와 사진 찍기`, `Take a photo with ${UI_STRINGS_EN[photoGgumdoriName] || photoGgumdoriName}`),
+  );
   title.id = "photo-sheet-title";
   title.tabIndex = -1;
   titleGroup.append(title);
@@ -8635,12 +8856,12 @@ function createPhotoSlider(label, key, min, max, value) {
    ────────────────────────────────────────────── */
 
 // 시작 화면 로딩 바가 추적하는 항목입니다. 전부 끝나야 TAP TO START로 바뀝니다.
-const START_SCREEN_TASKS = ["splashImage", "iconFont", "bgmReady", "authProviders"];
+const START_SCREEN_TASKS = ["splashImage", "iconFont", "bgmReady", "authProviders", "geolocation"];
 // 느린 네트워크 등으로 항목 하나가 안 끝나도 화면이 멈추지 않도록 두는 최대 대기 시간입니다.
 const START_SCREEN_TASK_TIMEOUT_MS = 8000;
 // 로컬 서버 등에서는 실제 로딩이 순식간에 끝나 로딩 바가 스쳐 지나가듯 사라지므로,
 // 실제 로딩이 이보다 빨리 끝나도 최소 이 시간만큼은 로딩 연출을 보여준다.
-const START_SCREEN_MIN_DURATION_MS = 2500;
+const START_SCREEN_MIN_DURATION_MS = 1500;
 // 진행률 갱신 주기입니다. 부드럽게 차오르도록 짧게 잡습니다.
 const START_SCREEN_TICK_MS = 80;
 
@@ -9366,9 +9587,9 @@ function createRecordList() {
   // 전체 완료 수와 획득 XP 요약입니다.
   const stats = createElement("div", "stat-row");
   stats.append(
-    createStatCell("완료", `${state.notes.length}개`),
+    createStatCell("완료", localize(`${state.notes.length}개`, `${state.notes.length}`)),
     createStatCell("획득 XP", `${state.notes.reduce((sum, note) => sum + toNumber(note.earnedXp, 0), 0)}`),
-    createStatCell("기간", `${groups.size}개월`),
+    createStatCell("기간", localize(`${groups.size}개월`, `${groups.size} mo`)),
   );
   body.append(stats);
 
@@ -9519,7 +9740,7 @@ function createShareCard(note) {
   }
 
   const meta = createElement("div", "share-card__meta");
-  meta.append(createElement("span", "share-card__name", state.user.nickname || "모험가"));
+  meta.append(createElement("span", "share-card__name", displayNickname(state.user.nickname) || localize("모험가", "Adventurer")));
   meta.append(createElement("span", "share-card__place", note.placeName));
   if ((note.badges || []).length > 0) {
     meta.append(createElement("span", "share-card__badge", note.badges[0]));
@@ -10281,14 +10502,43 @@ function requestLocation() {
     .then((position) => {
       state.location = normalizeMeasuredLocation(position);
       syncNaverPositionMarker();
+      recenterNaverMapOnLocation(state.location);
       renderRecommendationMeta();
       loadRecommendations();
     })
     .catch(() => {
       state.location = { ...FALLBACK_LOCATION, label: "위치 확인 불가, 대전광역시청 기준" };
       syncNaverPositionMarker();
+      recenterNaverMapOnLocation(state.location);
       renderRecommendationMeta();
       loadRecommendations();
+    });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: TAP-TO-START 로딩 화면이 떠 있는 동안 미리 위치를 요청해 둔다. 홈 화면에 도착한
+ *       뒤에야 위치를 요청하면 기본 좌표가 잠깐 보였다가 실측 위치로 바뀌는 게 눈에 띄므로,
+ *       로딩바가 사라지기 전에 끝내 그 전환 자체가 보이지 않게 한다. 세션 준비 여부와 무관하게
+ *       항상 시도한다(ensureSessionReady()는 미동의 사용자를 동의 화면으로 강제 이동시키는
+ *       부작용이 있어 로딩 중 호출에 부적합, 위치 요청 자체는 로그인 여부와 무관함).
+ * 호출 예시: prefetchLocation()
+ */
+function prefetchLocation() {
+  readCurrentPosition({ enableHighAccuracy: true, timeout: 7000, maximumAge: 300000 })
+    .then((position) => {
+      state.location = normalizeMeasuredLocation(position);
+      syncNaverPositionMarker();
+    })
+    .catch(() => {
+      state.location = { ...FALLBACK_LOCATION, label: "위치 확인 불가, 대전광역시청 기준" };
+      syncNaverPositionMarker();
+    })
+    .finally(() => {
+      renderRecommendationMeta();
+      loadRecommendations();
+      markStartScreenTaskDone("geolocation");
     });
 }
 
@@ -11276,6 +11526,7 @@ function initializeApp() {
   const oauthRedirectPending = consumeOAuthRedirect();
   bindEvents();
   loadAuthProviders().finally(() => markStartScreenTaskDone("authProviders"));
+  prefetchLocation();
   setupStartScreenLoading();
   setActiveView(state.activeView, false);
   // 실제 연결 모드는 서버의 보유 기록을 받기 전까지 보상과 수첩을 비워 둡니다.

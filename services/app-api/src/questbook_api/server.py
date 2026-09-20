@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from questbook_api.application.baseline_service import BaselineQuestbookService
+from questbook_api.application.quest_generation import build_localized_quest_text
 from questbook_api.domain.auth.tokens import create_access_token, verify_access_token
 from questbook_api.infrastructure.cache import TourPlaceRedisCache
 from questbook_api.infrastructure.oauth_state import OAuthStateError, OAuthStateStore
@@ -61,7 +62,8 @@ class AppState:
     object_storage: ObjectStorageClient | None = None
     # 변수 의미: NCP CLOVA OCR 호출 클라이언트다.
     ocr: OcrClient | None = None
-    # 변수 의미: NAVER Papago 번역 클라이언트다.
+    # 변수 의미: Google Cloud Translation 클라이언트다. 장소 상세 모달의 설명 텍스트에만
+    # 쓰인다(퀘스트 제목/설명은 translate_recommendation_texts()가 템플릿+장소명으로 조립).
     translation: TranslationClient | None = None
 
 
@@ -136,37 +138,46 @@ def parse_optional_float_query(query: dict[str, list[str]], name: str) -> float 
 
 
 def translate_recommendation_texts(
-    payload: dict[str, Any], translation: TranslationClient | None, language: str,
+    payload: dict[str, Any], repository: QuestbookRepository, language: str,
 ) -> None:
     """
-    입력: 추천 응답 딕셔너리, 번역 클라이언트, 요청 언어.
+    입력: 추천 응답 딕셔너리, 저장소, 요청 언어.
     출력: 없음. payload를 제자리에서 수정한다.
-    역할: 장소명·퀘스트 제목·설명처럼 장소명이 문장에 끼워져 조합이 무한한 텍스트를
-          영문 요청일 때만 Papago로 번역한다. 카테고리명 등 고정된 값은 프런트 사전이 담당한다.
-    호출 예시: translate_recommendation_texts(payload, state.translation, "eng")
+    역할: 퀘스트 제목/설명은 카테고리별 6개 고정 템플릿 + 장소명 조합일 뿐이라(quest_generation.
+          QUEST_TEMPLATES), 매 요청마다 기계번역을 부르지 않고 영문 템플릿(QUEST_TEMPLATE_TEXT_EN)에
+          장소명만 끼워 재조립한다. 장소명 자체는 매일 배치(catalog_sync.sync_place_name_translations)가
+          미리 채워 둔 place_name_translations 캐시에서 읽는다 — 실시간 호출이 전혀 없다.
+          배치가 아직 못 채운 아주 새 장소는 국문 장소명을 그대로 영문 템플릿에 끼워 넣어
+          완전히 빈 텍스트가 되는 것만 피한다(다음 배치에서 자연히 채워짐).
+    호출 예시: translate_recommendation_texts(payload, state.repository, "eng")
     """
-    if language != "eng" or translation is None:
+    if language != "eng":
         return
-    for item in payload.get("recommendations", []):
+    recommendations = payload.get("recommendations", [])
+    # 변수 의미: 이번 응답에 등장하는 장소의 contentId 목록이다. 한 번의 배치 조회로 끝낸다.
+    content_ids = [
+        str(item["place"]["contentId"])
+        for item in recommendations
+        if isinstance(item.get("place"), dict) and item["place"].get("contentId")
+    ]
+    translations = repository.get_place_name_translations(content_ids)
+    for item in recommendations:
         place = item.get("place")
-        if isinstance(place, dict) and place.get("title"):
-            translated_title, _ = translation.translate_description(
-                str(place.get("contentId", "")), place["title"], "eng",
-            )
-            place["title"] = translated_title
+        if not isinstance(place, dict) or not place.get("title"):
+            continue
+        content_id = str(place.get("contentId", ""))
+        cached = translations.get(content_id)
+        # 변수 의미: 캐시에 없으면 다음 배치가 채울 때까지 국문 장소명을 그대로 쓴다.
+        english_place_name = cached["nameEng"] if cached else place["title"]
+        place["title"] = english_place_name
         quest = item.get("quest")
-        if isinstance(quest, dict):
-            content_id = str(place.get("contentId", "")) if isinstance(place, dict) else ""
-            if quest.get("title"):
-                translated_quest_title, _ = translation.translate_description(
-                    f"{content_id}:title", quest["title"], "eng",
-                )
-                quest["title"] = translated_quest_title
-            if quest.get("description"):
-                translated_quest_description, _ = translation.translate_description(
-                    f"{content_id}:description", quest["description"], "eng",
-                )
-                quest["description"] = translated_quest_description
+        if isinstance(quest, dict) and quest.get("categoryCode"):
+            title, description = build_localized_quest_text(quest["categoryCode"], english_place_name)
+            quest["title"] = title
+            quest["description"] = description
+            place_reference = quest.get("placeReference")
+            if isinstance(place_reference, dict):
+                place_reference["placeName"] = english_place_name
 
 
 def is_safe_oauth_nonce(value: str) -> bool:
@@ -368,7 +379,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                         force_refresh,
                         mode,
                     )
-                    translate_recommendation_texts(recommendations_payload, state.translation, language)
+                    translate_recommendation_texts(recommendations_payload, state.repository, language)
                     self._send_json(HTTPStatus.OK, recommendations_payload)
                     return
                 if path == "/api/places/recommendations":
@@ -383,7 +394,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     place_recommendations_payload = state.service.get_place_recommendations(
                         user_id, category_key, force_refresh,
                     )
-                    translate_recommendation_texts(place_recommendations_payload, state.translation, language)
+                    translate_recommendation_texts(place_recommendations_payload, state.repository, language)
                     self._send_json(HTTPStatus.OK, place_recommendations_payload)
                     return
                 # 변수 의미: 장소 상세 조회 경로 토큰이다. (/api/places/{contentId}/detail)
@@ -1075,8 +1086,34 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 )
                 detail["description"] = translated_text
                 detail["machineTranslated"] = machine_translated
+                # 변수 의미: 편의 정보 값이다. "이용 시간"처럼 자유 문장인 값은 프런트 사전
+                # (UI_STRINGS_EN)의 고정 단어 치환만으로는 못 잡으므로, description과 같은
+                # 방식으로(콘텐츠ID+필드 단위 Redis 캐시) 번역해 섞인 텍스트가 남지 않게 한다.
+                amenities = detail.get("amenities")
+                if isinstance(amenities, list):
+                    for amenity in amenities:
+                        if not isinstance(amenity, dict) or not amenity.get("value"):
+                            continue
+                        translated_value, value_machine_translated = state.translation.translate_description(
+                            f"{content_id}:amenity:{amenity.get('key', '')}", amenity["value"], language,
+                        )
+                        amenity["value"] = translated_value
+                        detail["machineTranslated"] = detail["machineTranslated"] or value_machine_translated
             else:
                 detail["machineTranslated"] = False
+            # 변수 의미: Odii 오디오 가이드 대본이다. Odii는 언어 파라미터 없이 국문 전용으로만
+            # 조회하므로(find_audio_guide의 langCode="ko" 고정), EngService2 매칭 성공 여부와
+            # 무관하게 항상 국문이다 — translationAvailable 분기와 별개로 매번 번역이 필요하다.
+            audio_guide = detail.get("audioGuide")
+            if isinstance(audio_guide, dict) and language != "kor" and state.translation is not None:
+                for field_name in ("title", "audioTitle", "script"):
+                    if not audio_guide.get(field_name):
+                        continue
+                    translated_field, field_machine_translated = state.translation.translate_description(
+                        f"{content_id}:audioGuide:{field_name}", audio_guide[field_name], language,
+                    )
+                    audio_guide[field_name] = translated_field
+                    detail["machineTranslated"] = detail.get("machineTranslated", False) or field_machine_translated
             self._send_json(HTTPStatus.OK, detail)
 
         def _handle_naver_geocode(self, query: dict[str, list[str]]) -> None:
@@ -1156,6 +1193,21 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 response_body, content_type, status_code = request_naver_upstream(state.settings, path, params)
             except RuntimeError as error:
                 self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(error)})
+                return
+
+            if status_code in (401, 403):
+                # NAVER 쪽 키/구독 인증 실패다. 그대로 돌려주면 프런트의 fetchJson()이 "우리
+                # 서비스 로그인 세션 만료"로 오인해 정상 로그인된 사용자를 강제 로그아웃시킨다
+                # (isUnauthorizedError()가 상태 코드 401만 보고 판단하기 때문). 사용자 세션과는
+                # 무관한 업스트림 인증 실패이므로 502로 구분해 돌려준다.
+                self._send_json(
+                    HTTPStatus.BAD_GATEWAY,
+                    {
+                        "error": "naver_upstream_unauthorized",
+                        "message": "NAVER Maps API 인증에 실패했습니다.",
+                        "upstreamStatus": status_code,
+                    },
+                )
                 return
 
             self.send_response(status_code)

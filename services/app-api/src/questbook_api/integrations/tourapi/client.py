@@ -368,6 +368,16 @@ def extract_parenthetical_name(title: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def strip_localized_parenthetical(title: str) -> str:
+    """
+    입력: "Translated Name (국문명)" 형태일 수 있는 TourAPI 영문 서비스 제목.
+    출력: 끝의 "(국문명)"을 뗀 영문 이름만. 원래 그 형태가 아니었으면 원문 그대로.
+    역할: extract_parenthetical_name()과 반대로, 매칭용이 아니라 화면에 보여줄 영문 이름을 만든다.
+    호출 예시: strip_localized_parenthetical("Hanbat Arboretum (한밭수목원)") == "Hanbat Arboretum"
+    """
+    return re.sub(r"\s*\([^()]+\)\s*$", "", title or "").strip()
+
+
 def extract_result_code(payload: dict[str, Any]) -> str:
     """
     입력: TourAPI JSON 페이로드.
@@ -711,6 +721,24 @@ class TourApiClient:
                 best_match = (candidate_content_id, str(candidate.get("contenttypeid", "")).strip())
         return best_match
 
+    def find_english_place_name(self, kor_title: str, latitude: float, longitude: float) -> str | None:
+        """
+        입력: 국문 장소명과 기준 좌표.
+        출력: EngService2에서 같은 장소로 확인된 영문 장소명. 없으면 None.
+        역할: 퀘스트 카탈로그 배치가 장소명만 영문으로 미리 캐싱할 때 쓴다. 전체 상세(설명)까지는
+              필요 없어 find_localized_place() + 상세 제목 한 번만 재사용해 가볍게 끝낸다.
+        호출 예시: name = client.find_english_place_name("한밭수목원", 36.3664, 127.3881)
+        """
+        match = self.find_localized_place("eng", latitude, longitude, kor_title)
+        if match is None:
+            return None
+        matched_content_id, _matched_content_type_id = match
+        try:
+            _description, matched_title = self._fetch_detail_overview(matched_content_id, "EngService2")
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+        return strip_localized_parenthetical(matched_title) or None
+
     def fetch_localized_detail(
         self,
         content_id: str,
@@ -760,13 +788,18 @@ class TourApiClient:
         matched_content_id, matched_content_type_id = match
         service_host = LANGUAGE_SERVICE_HOSTS[normalized_language]
         try:
-            description, _matched_title = self._fetch_detail_overview(matched_content_id, service_host)
+            description, matched_title = self._fetch_detail_overview(matched_content_id, service_host)
             amenities = self._fetch_detail_amenities(matched_content_id, matched_content_type_id, service_host)
         except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
             return {**kor_detail, "language": normalized_language, "translationAvailable": False, "audioGuide": audio_guide}
 
+        # 변수 의미: 매칭된 언어 서비스의 제목이다. "Translated Name (국문명)" 형태면 국문 괄호를
+        # 떼어 화면에 보여줄 이름만 남긴다. 버그: 예전엔 이 제목을 버리고 국문 제목을 그대로
+        # 돌려줘서, 설명은 영문인데 모달 제목만 국문으로 남는 문제가 있었다.
+        localized_title = strip_localized_parenthetical(matched_title) or kor_detail.get("title", "")
         return {
             "contentId": content_id,
+            "title": localized_title,
             "language": normalized_language,
             "description": description or kor_detail["description"],
             "amenities": amenities,
