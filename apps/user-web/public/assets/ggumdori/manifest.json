@@ -1,442 +1,727 @@
 {
-  "version": 2,
-  "unlockPolicy": "category-completions",
+  "generatedAt": "2026-09-10T06:46:35.527Z",
+  "fullSize": 128,
+  "thumbSize": 64,
   "entries": [
     {
-      "assetId": "기본_128",
-      "variantId": "ggumdori_default_1",
-      "name": "기본 꿈돌이",
-      "category": "default",
-      "tier": 1,
-      "requiredCount": 0,
-      "unlockCondition": "기본 지급",
-      "stillImageRef": "/assets/ggumdori/기본_128.png",
-      "thumbImageRef": "/assets/ggumdori/기본_128.png",
-      "animationImageRef": "/assets/ggumdori/기본_128.gif",
-      "detailImageRef": "/assets/ggumdori/기본_1024.png"
+      "assetId": "bread-1",
+      "stillImageRef": "/assets/ggumdori/bread-1.png",
+      "blinkImageRef": "/assets/ggumdori/bread-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/bread-1-thumb.png",
+      "width": 99,
+      "height": 128,
+      "eyes": [
+        [
+          39,
+          54,
+          43,
+          65
+        ],
+        [
+          54,
+          54,
+          58,
+          65
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "bread-1.png"
     },
     {
-      "assetId": "science_lv1_128",
-      "variantId": "ggumdori_science_1",
-      "name": "과학 꿈돌이 Lv.1",
-      "category": "science",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "과학 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/science_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/science_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/science_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/science_lv1_1024.png"
+      "assetId": "bread-2",
+      "stillImageRef": "/assets/ggumdori/bread-2.png",
+      "blinkImageRef": "/assets/ggumdori/bread-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/bread-2-thumb.png",
+      "width": 105,
+      "height": 128,
+      "eyes": [
+        [
+          39,
+          48,
+          43,
+          58
+        ],
+        [
+          53,
+          48,
+          57,
+          58
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "bread-2.png"
     },
     {
-      "assetId": "science_lv2_128",
-      "variantId": "ggumdori_science_2",
-      "name": "과학 꿈돌이 Lv.2",
-      "category": "science",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "과학 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/science_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/science_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/science_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/science_lv2_1024.png"
-    },
-    {
-      "assetId": "science_lv3_128",
-      "variantId": "ggumdori_science_3",
-      "name": "과학 꿈돌이 Lv.3",
-      "category": "science",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "과학 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/science_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/science_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/science_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/science_lv3_1024.png"
-    },
-    {
-      "assetId": "bread_lv1_128",
-      "variantId": "ggumdori_bread_1",
-      "name": "빵 꿈돌이 Lv.1",
-      "category": "bread",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "빵 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/bread_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/bread_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/bread_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/bread_lv1_1024.png"
-    },
-    {
-      "assetId": "bread_lv2_128",
-      "variantId": "ggumdori_bread_2",
-      "name": "빵 꿈돌이 Lv.2",
-      "category": "bread",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "빵 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/bread_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/bread_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/bread_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/bread_lv2_1024.png"
-    },
-    {
-      "assetId": "bread_lv3_128",
-      "variantId": "ggumdori_bread_3",
-      "name": "빵 꿈돌이 Lv.3",
-      "category": "bread",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "빵 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/bread_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/bread_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/bread_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/bread_lv3_1024.png"
-    },
-    {
-      "assetId": "food_lv1_128",
-      "variantId": "ggumdori_food_1",
-      "name": "음식 꿈돌이 Lv.1",
-      "category": "noodle",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "음식 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/food_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/food_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/food_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/food_lv1_1024.png"
-    },
-    {
-      "assetId": "food_lv2_128",
-      "variantId": "ggumdori_food_2",
-      "name": "음식 꿈돌이 Lv.2",
-      "category": "noodle",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "음식 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/food_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/food_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/food_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/food_lv2_1024.png"
-    },
-    {
-      "assetId": "food_lv3_128",
-      "variantId": "ggumdori_food_3",
-      "name": "음식 꿈돌이 Lv.3",
-      "category": "noodle",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "음식 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/food_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/food_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/food_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/food_lv3_1024.png"
-    },
-    {
-      "assetId": "nature-1",
-      "variantId": "ggumdori_nature_1",
-      "name": "자연 꿈돌이 Lv.1",
-      "category": "nature",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "자연 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/nature-1.png",
-      "thumbImageRef": "/assets/ggumdori/nature-1.png",
-      "detailImageRef": "/assets/ggumdori/nature-1.png"
-    },
-    {
-      "assetId": "nature-2",
-      "variantId": "ggumdori_nature_2",
-      "name": "자연 꿈돌이 Lv.2",
-      "category": "nature",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "자연 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/nature-2.png",
-      "thumbImageRef": "/assets/ggumdori/nature-2.png",
-      "detailImageRef": "/assets/ggumdori/nature-2.png"
-    },
-    {
-      "assetId": "nature-3",
-      "variantId": "ggumdori_nature_3",
-      "name": "자연 꿈돌이 Lv.3",
-      "category": "nature",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "자연 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/nature-3.png",
-      "thumbImageRef": "/assets/ggumdori/nature-3.png",
-      "detailImageRef": "/assets/ggumdori/nature-3.png"
-    },
-    {
-      "assetId": "baseball_lv1_128",
-      "variantId": "ggumdori_sport_1",
-      "name": "스포츠 꿈돌이 Lv.1",
-      "category": "sport",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "스포츠 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/baseball_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/baseball_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/baseball_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/baseball_lv1_1024.png"
-    },
-    {
-      "assetId": "baseball_lv2_128",
-      "variantId": "ggumdori_sport_2",
-      "name": "스포츠 꿈돌이 Lv.2",
-      "category": "sport",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "스포츠 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/baseball_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/baseball_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/baseball_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/baseball_lv2_1024.png"
-    },
-    {
-      "assetId": "baseball_lv3_128",
-      "variantId": "ggumdori_sport_3",
-      "name": "스포츠 꿈돌이 Lv.3",
-      "category": "sport",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "스포츠 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/baseball_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/baseball_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/baseball_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/baseball_lv3_1024.png"
-    },
-    {
-      "assetId": "history_lv1_128",
-      "variantId": "ggumdori_downtown_1",
-      "name": "역사 꿈돌이 Lv.1",
-      "category": "heritage",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "역사 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/history_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/history_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/history_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/history_lv1_1024.png"
-    },
-    {
-      "assetId": "history_lv2_128",
-      "variantId": "ggumdori_downtown_2",
-      "name": "역사 꿈돌이 Lv.2",
-      "category": "heritage",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "역사 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/history_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/history_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/history_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/history_lv2_1024.png"
-    },
-    {
-      "assetId": "history_lv3_128",
-      "variantId": "ggumdori_downtown_3",
-      "name": "역사 꿈돌이 Lv.3",
-      "category": "heritage",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "역사 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/history_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/history_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/history_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/history_lv3_1024.png"
+      "assetId": "bread-3",
+      "stillImageRef": "/assets/ggumdori/bread-3.png",
+      "blinkImageRef": "/assets/ggumdori/bread-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/bread-3-thumb.png",
+      "width": 128,
+      "height": 117,
+      "eyes": [
+        [
+          52,
+          44,
+          57,
+          53
+        ],
+        [
+          66,
+          44,
+          71,
+          53
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "bread-3.png"
     },
     {
       "assetId": "culture-1",
-      "variantId": "ggumdori_culture_1",
-      "name": "문화 꿈돌이 Lv.1",
-      "category": "culture",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "문화 퀘스트 누적 1회 성공",
       "stillImageRef": "/assets/ggumdori/culture-1.png",
-      "thumbImageRef": "/assets/ggumdori/culture-1.png",
-      "detailImageRef": "/assets/ggumdori/culture-1.png"
+      "blinkImageRef": "/assets/ggumdori/culture-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/culture-1-thumb.png",
+      "width": 118,
+      "height": 128,
+      "eyes": [
+        [
+          44,
+          57,
+          47,
+          65
+        ],
+        [
+          59,
+          57,
+          62,
+          65
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "culture-1.png"
     },
     {
       "assetId": "culture-2",
-      "variantId": "ggumdori_culture_2",
-      "name": "문화 꿈돌이 Lv.2",
-      "category": "culture",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "문화 퀘스트 누적 2회 성공",
       "stillImageRef": "/assets/ggumdori/culture-2.png",
-      "thumbImageRef": "/assets/ggumdori/culture-2.png",
-      "detailImageRef": "/assets/ggumdori/culture-2.png"
+      "blinkImageRef": "/assets/ggumdori/culture-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/culture-2-thumb.png",
+      "width": 128,
+      "height": 117,
+      "eyes": [
+        [
+          39,
+          49,
+          43,
+          60
+        ],
+        [
+          52,
+          49,
+          55,
+          60
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "culture-2.png"
     },
     {
       "assetId": "culture-3",
-      "variantId": "ggumdori_culture_3",
-      "name": "문화 꿈돌이 Lv.3",
-      "category": "culture",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "문화 퀘스트 누적 3회 성공",
       "stillImageRef": "/assets/ggumdori/culture-3.png",
-      "thumbImageRef": "/assets/ggumdori/culture-3.png",
-      "detailImageRef": "/assets/ggumdori/culture-3.png"
+      "blinkImageRef": "/assets/ggumdori/culture-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/culture-3-thumb.png",
+      "width": 128,
+      "height": 120,
+      "eyes": [
+        [
+          40,
+          49,
+          43,
+          61
+        ],
+        [
+          53,
+          49,
+          56,
+          61
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "culture-3.png"
     },
     {
-      "assetId": "shopping_lv1_128",
-      "variantId": "ggumdori_market_1",
-      "name": "시장·쇼핑 꿈돌이 Lv.1",
-      "category": "market",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "시장·쇼핑 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/shopping_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/shopping_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/shopping_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/shopping_lv1_1024.png"
+      "assetId": "festival-1",
+      "stillImageRef": "/assets/ggumdori/festival-1.png",
+      "blinkImageRef": "/assets/ggumdori/festival-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/festival-1-thumb.png",
+      "width": 98,
+      "height": 128,
+      "eyes": [
+        [
+          30,
+          64,
+          33,
+          70
+        ],
+        [
+          40,
+          64,
+          44,
+          70
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "festival-1.png"
     },
     {
-      "assetId": "shopping_lv2_128",
-      "variantId": "ggumdori_market_2",
-      "name": "시장·쇼핑 꿈돌이 Lv.2",
-      "category": "market",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "시장·쇼핑 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/shopping_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/shopping_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/shopping_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/shopping_lv2_1024.png"
+      "assetId": "festival-2",
+      "stillImageRef": "/assets/ggumdori/festival-2.png",
+      "blinkImageRef": "/assets/ggumdori/festival-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/festival-2-thumb.png",
+      "width": 101,
+      "height": 128,
+      "eyes": [
+        [
+          39,
+          34,
+          40,
+          37
+        ],
+        [
+          52,
+          32,
+          52,
+          38
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "festival-2.png"
     },
     {
-      "assetId": "shopping_lv3_128",
-      "variantId": "ggumdori_market_3",
-      "name": "시장·쇼핑 꿈돌이 Lv.3",
-      "category": "market",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "시장·쇼핑 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/shopping_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/shopping_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/shopping_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/shopping_lv3_1024.png"
+      "assetId": "festival-3",
+      "stillImageRef": "/assets/ggumdori/festival-3.png",
+      "blinkImageRef": "/assets/ggumdori/festival-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/festival-3-thumb.png",
+      "width": 128,
+      "height": 109,
+      "eyes": [
+        [
+          57,
+          44,
+          59,
+          51
+        ],
+        [
+          67,
+          45,
+          69,
+          51
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "festival-3.png"
     },
     {
-      "assetId": "tashu_lv1_128",
-      "variantId": "ggumdori_mobility_1",
-      "name": "타슈 꿈돌이 Lv.1",
-      "category": "tashu",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "타슈 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/tashu_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/tashu_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/tashu_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/tashu_lv1_1024.png"
+      "assetId": "heritage-1",
+      "stillImageRef": "/assets/ggumdori/heritage-1.png",
+      "blinkImageRef": "/assets/ggumdori/heritage-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/heritage-1-thumb.png",
+      "width": 101,
+      "height": 128,
+      "eyes": [
+        [
+          47,
+          56,
+          51,
+          68
+        ],
+        [
+          64,
+          56,
+          68,
+          68
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "heritage-1.png"
     },
     {
-      "assetId": "tashu_lv2_128",
-      "variantId": "ggumdori_mobility_2",
-      "name": "타슈 꿈돌이 Lv.2",
-      "category": "tashu",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "타슈 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/tashu_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/tashu_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/tashu_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/tashu_lv2_1024.png"
+      "assetId": "heritage-2",
+      "stillImageRef": "/assets/ggumdori/heritage-2.png",
+      "blinkImageRef": "/assets/ggumdori/heritage-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/heritage-2-thumb.png",
+      "width": 98,
+      "height": 128,
+      "eyes": [
+        [
+          42,
+          50,
+          46,
+          61
+        ],
+        [
+          56,
+          51,
+          60,
+          61
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "heritage-2.png"
     },
     {
-      "assetId": "tashu_lv3_128",
-      "variantId": "ggumdori_mobility_3",
-      "name": "타슈 꿈돌이 Lv.3",
-      "category": "tashu",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "타슈 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/tashu_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/tashu_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/tashu_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/tashu_lv3_1024.png"
+      "assetId": "heritage-3",
+      "stillImageRef": "/assets/ggumdori/heritage-3.png",
+      "blinkImageRef": "/assets/ggumdori/heritage-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/heritage-3-thumb.png",
+      "width": 109,
+      "height": 128,
+      "eyes": [
+        [
+          37,
+          52,
+          41,
+          64
+        ],
+        [
+          51,
+          54,
+          55,
+          64
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "heritage-3.png"
     },
     {
-      "assetId": "spa_lv1_128",
-      "variantId": "ggumdori_hotspring_1",
-      "name": "온천 꿈돌이 Lv.1",
-      "category": "spa",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "온천 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/spa_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/spa_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/spa_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/spa_lv1_1024.png"
+      "assetId": "market-1",
+      "stillImageRef": "/assets/ggumdori/market-1.png",
+      "blinkImageRef": "/assets/ggumdori/market-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/market-1-thumb.png",
+      "width": 128,
+      "height": 113,
+      "eyes": [
+        [
+          53,
+          48,
+          57,
+          58
+        ],
+        [
+          66,
+          49,
+          69,
+          58
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "market-1.png"
     },
     {
-      "assetId": "spa_lv2_128",
-      "variantId": "ggumdori_hotspring_2",
-      "name": "온천 꿈돌이 Lv.2",
-      "category": "spa",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "온천 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/spa_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/spa_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/spa_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/spa_lv2_1024.png"
+      "assetId": "market-2",
+      "stillImageRef": "/assets/ggumdori/market-2.png",
+      "blinkImageRef": "/assets/ggumdori/market-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/market-2-thumb.png",
+      "width": 128,
+      "height": 105,
+      "eyes": [
+        [
+          56,
+          42,
+          59,
+          50
+        ],
+        [
+          68,
+          44,
+          70,
+          50
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "market-2.png"
     },
     {
-      "assetId": "spa_lv3_128",
-      "variantId": "ggumdori_hotspring_3",
-      "name": "온천 꿈돌이 Lv.3",
-      "category": "spa",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "온천 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/spa_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/spa_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/spa_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/spa_lv3_1024.png"
+      "assetId": "market-3",
+      "stillImageRef": "/assets/ggumdori/market-3.png",
+      "blinkImageRef": "/assets/ggumdori/market-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/market-3-thumb.png",
+      "width": 128,
+      "height": 111,
+      "eyes": [
+        [
+          56,
+          42,
+          59,
+          50
+        ],
+        [
+          68,
+          44,
+          70,
+          50
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "market-3.png"
     },
     {
-      "assetId": "festival_lv1_128",
-      "variantId": "ggumdori_festival_1",
-      "name": "축제 꿈돌이 Lv.1",
-      "category": "festival",
-      "tier": 1,
-      "requiredCount": 1,
-      "unlockCondition": "축제 퀘스트 누적 1회 성공",
-      "stillImageRef": "/assets/ggumdori/festival_lv1_128.png",
-      "thumbImageRef": "/assets/ggumdori/festival_lv1_128.png",
-      "animationImageRef": "/assets/ggumdori/festival_lv1_128.gif",
-      "detailImageRef": "/assets/ggumdori/festival_lv1_1024.png"
+      "assetId": "nature-1",
+      "stillImageRef": "/assets/ggumdori/nature-1.png",
+      "blinkImageRef": "/assets/ggumdori/nature-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/nature-1-thumb.png",
+      "width": 105,
+      "height": 128,
+      "eyes": [
+        [
+          48,
+          58,
+          52,
+          69
+        ],
+        [
+          65,
+          58,
+          69,
+          69
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "nature-1.png"
     },
     {
-      "assetId": "festival_lv2_128",
-      "variantId": "ggumdori_festival_2",
-      "name": "축제 꿈돌이 Lv.2",
-      "category": "festival",
-      "tier": 2,
-      "requiredCount": 2,
-      "unlockCondition": "축제 퀘스트 누적 2회 성공",
-      "stillImageRef": "/assets/ggumdori/festival_lv2_128.png",
-      "thumbImageRef": "/assets/ggumdori/festival_lv2_128.png",
-      "animationImageRef": "/assets/ggumdori/festival_lv2_128.gif",
-      "detailImageRef": "/assets/ggumdori/festival_lv2_1024.png"
+      "assetId": "nature-2",
+      "stillImageRef": "/assets/ggumdori/nature-2.png",
+      "blinkImageRef": "/assets/ggumdori/nature-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/nature-2-thumb.png",
+      "width": 128,
+      "height": 117,
+      "eyes": [
+        [
+          49,
+          49,
+          53,
+          58
+        ],
+        [
+          62,
+          49,
+          66,
+          58
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "nature-2.png"
     },
     {
-      "assetId": "festival_lv3_128",
-      "variantId": "ggumdori_festival_3",
-      "name": "축제 꿈돌이 Lv.3",
-      "category": "festival",
-      "tier": 3,
-      "requiredCount": 3,
-      "unlockCondition": "축제 퀘스트 누적 3회 성공",
-      "stillImageRef": "/assets/ggumdori/festival_lv3_128.png",
-      "thumbImageRef": "/assets/ggumdori/festival_lv3_128.png",
-      "animationImageRef": "/assets/ggumdori/festival_lv3_128.gif",
-      "detailImageRef": "/assets/ggumdori/festival_lv3_1024.png"
+      "assetId": "nature-3",
+      "stillImageRef": "/assets/ggumdori/nature-3.png",
+      "blinkImageRef": "/assets/ggumdori/nature-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/nature-3-thumb.png",
+      "width": 123,
+      "height": 128,
+      "eyes": [
+        [
+          37,
+          52,
+          41,
+          63
+        ],
+        [
+          51,
+          53,
+          55,
+          63
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "naturenature-3.png"
+    },
+    {
+      "assetId": "noodle-1",
+      "stillImageRef": "/assets/ggumdori/noodle-1.png",
+      "blinkImageRef": "/assets/ggumdori/noodle-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/noodle-1-thumb.png",
+      "width": 107,
+      "height": 128,
+      "eyes": [
+        [
+          40,
+          48,
+          44,
+          58
+        ],
+        [
+          55,
+          48,
+          58,
+          58
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "noodle-1.png"
+    },
+    {
+      "assetId": "noodle-2",
+      "stillImageRef": "/assets/ggumdori/noodle-2.png",
+      "blinkImageRef": "/assets/ggumdori/noodle-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/noodle-2-thumb.png",
+      "width": 91,
+      "height": 128,
+      "eyes": [
+        [
+          36,
+          48,
+          39,
+          59
+        ],
+        [
+          50,
+          48,
+          53,
+          59
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "noodle-2.png"
+    },
+    {
+      "assetId": "noodle-3",
+      "stillImageRef": "/assets/ggumdori/noodle-3.png",
+      "blinkImageRef": "/assets/ggumdori/noodle-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/noodle-3-thumb.png",
+      "width": 128,
+      "height": 123,
+      "eyes": [
+        [
+          56,
+          46,
+          59,
+          56
+        ],
+        [
+          69,
+          47,
+          72,
+          56
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "noodle-3.png"
+    },
+    {
+      "assetId": "science-1",
+      "stillImageRef": "/assets/ggumdori/science-1.png",
+      "blinkImageRef": "/assets/ggumdori/science-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/science-1-thumb.png",
+      "width": 94,
+      "height": 128,
+      "eyes": [
+        [
+          36,
+          49,
+          39,
+          59
+        ],
+        [
+          49,
+          49,
+          53,
+          59
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "science-1.png"
+    },
+    {
+      "assetId": "science-2",
+      "stillImageRef": "/assets/ggumdori/science-2.png",
+      "blinkImageRef": "/assets/ggumdori/science-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/science-2-thumb.png",
+      "width": 114,
+      "height": 128,
+      "eyes": [
+        [
+          36,
+          45,
+          40,
+          56
+        ],
+        [
+          51,
+          45,
+          54,
+          56
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "science-2.png"
+    },
+    {
+      "assetId": "science-3",
+      "stillImageRef": "/assets/ggumdori/science-3.png",
+      "blinkImageRef": "/assets/ggumdori/science-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/science-3-thumb.png",
+      "width": 119,
+      "height": 128,
+      "eyes": [
+        [
+          48,
+          51,
+          51,
+          61
+        ],
+        [
+          61,
+          51,
+          64,
+          61
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "science-3.png"
+    },
+    {
+      "assetId": "sport-1",
+      "stillImageRef": "/assets/ggumdori/sport-1.png",
+      "blinkImageRef": "/assets/ggumdori/sport-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/sport-1-thumb.png",
+      "width": 104,
+      "height": 128,
+      "eyes": [
+        [
+          38,
+          45,
+          42,
+          56
+        ],
+        [
+          53,
+          45,
+          56,
+          56
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "sport-1.png"
+    },
+    {
+      "assetId": "sport-2",
+      "stillImageRef": "/assets/ggumdori/sport-2.png",
+      "blinkImageRef": "/assets/ggumdori/sport-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/sport-2-thumb.png",
+      "width": 128,
+      "height": 128,
+      "eyes": [
+        [
+          55,
+          50,
+          58,
+          60
+        ],
+        [
+          68,
+          50,
+          72,
+          60
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "sport-2.png"
+    },
+    {
+      "assetId": "sport-3",
+      "stillImageRef": "/assets/ggumdori/sport-3.png",
+      "blinkImageRef": "/assets/ggumdori/sport-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/sport-3-thumb.png",
+      "width": 128,
+      "height": 123,
+      "eyes": [
+        [
+          46,
+          46,
+          49,
+          56
+        ],
+        [
+          59,
+          49,
+          61,
+          56
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "sport-3.png"
+    },
+    {
+      "assetId": "tashu-1",
+      "stillImageRef": "/assets/ggumdori/tashu-1.png",
+      "blinkImageRef": "/assets/ggumdori/tashu-1-blink.png",
+      "thumbImageRef": "/assets/ggumdori/tashu-1-thumb.png",
+      "width": 123,
+      "height": 128,
+      "eyes": [
+        [
+          52,
+          46,
+          56,
+          56
+        ],
+        [
+          65,
+          46,
+          68,
+          56
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "tashu-1.png"
+    },
+    {
+      "assetId": "tashu-2",
+      "stillImageRef": "/assets/ggumdori/tashu-2.png",
+      "blinkImageRef": "/assets/ggumdori/tashu-2-blink.png",
+      "thumbImageRef": "/assets/ggumdori/tashu-2-thumb.png",
+      "width": 92,
+      "height": 128,
+      "eyes": [
+        [
+          29,
+          41,
+          32,
+          54
+        ],
+        [
+          41,
+          41,
+          45,
+          54
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "tashu-2.png"
+    },
+    {
+      "assetId": "tashu-3",
+      "stillImageRef": "/assets/ggumdori/tashu-3.png",
+      "blinkImageRef": "/assets/ggumdori/tashu-3-blink.png",
+      "thumbImageRef": "/assets/ggumdori/tashu-3-thumb.png",
+      "width": 108,
+      "height": 128,
+      "eyes": [
+        [
+          29,
+          41,
+          32,
+          54
+        ],
+        [
+          41,
+          41,
+          45,
+          54
+        ]
+      ],
+      "eyesSource": "auto",
+      "sourceFile": "tashu-3.png"
     }
   ]
 }
