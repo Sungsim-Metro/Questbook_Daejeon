@@ -11,6 +11,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from questbook_api.domain.models import TourPlaceCandidate
+from questbook_api.domain.ggumdori_rewards import ACTIVE_VARIANT_IDS, GGUMDORI_SEEDS, THEMES, completion_theme
 from questbook_api.infrastructure.quest_catalog import CATALOG_SCHEMA_SQL, QuestCatalogRepositoryMixin
 from questbook_api.infrastructure.quest_snapshots import (
     QUEST_SNAPSHOT_EXPRESSION,
@@ -323,18 +324,6 @@ BADGE_SEEDS = [
 ]
 
 
-# 변수 의미: 꿈돌이 도감 seed 데이터다.
-GGUMDORI_SEEDS = [
-    ("ggumdori_default_1", "기본 꿈돌이", "default", 1, "기본 지급", "/assets/ggumdori/default-1.svg", "대전 탐험을 시작하는 기본 꿈돌이입니다.", "common", 0),
-    ("ggumdori_market_2", "제빵 꿈돌이", "market", 2, "market Lv.2", "/assets/ggumdori/market-2.svg", "지역 상권 탐험을 좋아하는 꿈돌이입니다.", "rare", 10),
-    ("ggumdori_science_1", "안경 꿈돌이", "science", 1, "science Lv.1", "/assets/ggumdori/science-1.svg", "과학 전시와 실험을 좋아하는 꿈돌이입니다.", "common", 20),
-    ("ggumdori_science_2", "플라스크 꿈돌이", "science", 2, "science Lv.2", "/assets/ggumdori/science-2.svg", "깊은 과학 탐험을 상징하는 꿈돌이입니다.", "rare", 21),
-    ("ggumdori_nature_2", "숲 탐험 꿈돌이", "nature", 2, "nature Lv.2", "/assets/ggumdori/nature-2.svg", "대전의 녹지를 누비는 꿈돌이입니다.", "rare", 30),
-    ("ggumdori_mobility_1", "타슈 꿈돌이", "mobility", 1, "mobility Lv.1", "/assets/ggumdori/mobility-1.svg", "이동형 퀘스트를 즐기는 꿈돌이입니다.", "common", 40),
-    ("ggumdori_nightview_2", "야경 꿈돌이", "nightview", 2, "nightview Lv.2", "/assets/ggumdori/nightview-2.svg", "야경과 전망을 수집하는 꿈돌이입니다.", "rare", 50),
-    ("ggumdori_hotspring_1", "온천 꿈돌이", "hotspring", 1, "유성온천 방문", "/assets/ggumdori/hotspring-1.svg", "유성온천 탐험을 기념하는 꿈돌이입니다.", "common", 60),
-]
-
 # 변수 의미: fallback 장소(integrations/tourapi/client.py FALLBACK_PLACES)의 영문 이름이다.
 # fallback 장소는 일일 카탈로그 배치(catalog_sync.sync_place_name_translations) 대상이
 # 아니라서(TourAPI 실 결과가 아님) 배치로는 채워지지 않는다. 6개뿐인 고정 장소라 사람이
@@ -420,7 +409,10 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
         with self._connection.cursor() as cursor:
             cursor.executemany(
                 "INSERT INTO categories(code, name, description, sort_order) VALUES (%s, %s, %s, %s) ON CONFLICT (code) DO NOTHING",
-                CATEGORY_SEEDS,
+                CATEGORY_SEEDS + [
+                    (code, label, f"{label} 퀘스트 누적 완료 보상", 100 + index)
+                    for index, (code, _, label, _, _) in enumerate(THEMES)
+                ],
             )
             cursor.executemany(
                 """
@@ -436,7 +428,13 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
                 INSERT INTO ggumdori_variants(
                   id, name, theme_category, tier, unlock_condition, image_ref, description, rarity, sort_order
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT (id) DO UPDATE SET
+                  name = EXCLUDED.name,
+                  unlock_condition = EXCLUDED.unlock_condition,
+                  image_ref = EXCLUDED.image_ref,
+                  description = EXCLUDED.description,
+                  rarity = EXCLUDED.rarity,
+                  sort_order = EXCLUDED.sort_order
                 """,
                 GGUMDORI_SEEDS,
             )
@@ -749,7 +747,9 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
                 "accountType": "social" if provider in {"naver", "google"} else "demo",
                 "provider": provider,
                 "email": account_row["email"] if account_row is not None else None,
-                "selectedGgumdoriId": selection_row["selected_variant_id"] if selection_row is not None else None,
+                "selectedGgumdoriId": selection_row["selected_variant_id"]
+                if selection_row is not None and selection_row["selected_variant_id"] in ACTIVE_VARIANT_IDS
+                else "ggumdori_default_1",
                 "rewardPolicy": "category_xp",
                 "createdAt": row["created_at"],
                 "lastActiveAt": row["last_active_at"],
@@ -797,6 +797,10 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
         """
         with self._lock, self._connection.transaction():
             self.ensure_user(user_id)
+            if variant_id not in ACTIVE_VARIANT_IDS:
+                raise ValueError("selectedGgumdoriId must reference an active variant.")
+            self._connection.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+            self._sync_completion_ggumdori(user_id)
             # 변수 의미: 사용자가 실제로 해금해 보유한 꿈돌이 row다.
             owned_row = self._connection.execute(
                 """SELECT 1 FROM user_ggumdori
@@ -1093,6 +1097,8 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
         호출 예시: result = repository.complete_quest(user_id, instance, verification, 0.2, photo_ref)
         """
         with self._lock, self._connection.transaction():
+            # 같은 사용자의 서로 다른 퀘스트 완료도 직렬화해 누적 해금을 놓치지 않는다.
+            self._connection.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
             self._freeze_quest_instance(user_id, instance["instance_id"])
             # 변수 의미: 공용 삭제 이후에도 보존된 정의와 실제 남은 외래 키다.
             saved_instance = self.get_instance_with_quest(user_id, instance["instance_id"])
@@ -1146,7 +1152,7 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
             # 변수 의미: 갱신된 뱃지와 새로 획득한 뱃지 목록이다.
             badge_result = self._update_badges(user_id, instance["category_code"], earned_xp, completed_at)
             # 변수 의미: 새로 해금된 꿈돌이 목록이다.
-            unlocked_ggumdori = self._unlock_ggumdori(user_id, badge_result["earnedBadges"], completed_at)
+            unlocked_ggumdori, _ = self._sync_completion_ggumdori(user_id)
             # 변수 의미: 수첩에 기록할 뱃지 이름 목록이다.
             badge_names = [badge["name"] for badge in badge_result["earnedBadges"]] or [
                 badge["name"] for badge in badge_result["progressBadges"][:1]
@@ -1288,47 +1294,44 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
                 earned_badges.append(badge_payload)
         return {"progressBadges": progress_badges, "earnedBadges": earned_badges}
 
-    def _unlock_ggumdori(self, user_id: str, earned_badges: list[dict[str, Any]], unlocked_at: str) -> list[dict[str, Any]]:
-        """
-        입력: 사용자 ID, 새로 획득한 뱃지 목록, 해금 시각.
-        출력: 새로 해금된 꿈돌이 목록.
-        역할: 뱃지 카테고리와 단계 조건에 맞는 꿈돌이를 해금한다.
-        호출 예시: unlocked = self._unlock_ggumdori(user_id, earned_badges, now_iso())
-        """
-        # 변수 의미: 새로 해금된 꿈돌이 목록이다.
-        unlocked_variants: list[dict[str, Any]] = []
-        for badge in earned_badges:
-            # 변수 의미: 뱃지 조건에 맞는 꿈돌이 row다.
-            variant_row = self._connection.execute(
-                "SELECT * FROM ggumdori_variants WHERE theme_category = %s AND tier = %s",
-                (badge["categoryCode"], badge["tier"]),
-            ).fetchone()
-            if variant_row is None:
+    def _sync_completion_ggumdori(self, user_id: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """완료 사본을 누적 집계하고 1·2·3회 보상을 멱등 지급한다. 호출자는 사용자 행을 잠근다."""
+        rows = self._connection.execute(
+            """
+            SELECT qc.completed_at,
+                   COALESCE(uqi.quest_snapshot_json->>'category_code', rq.category_code) AS category,
+                   COALESCE(uqi.quest_snapshot_json->>'place_name', rq.place_name, '') AS place_name,
+                   COALESCE(uqi.quest_snapshot_json->>'title', rq.title, '') AS title
+            FROM quest_completions qc
+            JOIN user_quest_instances uqi ON uqi.id = qc.user_quest_instance_id AND uqi.user_id = qc.user_id
+            LEFT JOIN reusable_quests rq ON rq.id = qc.reusable_quest_id
+            WHERE qc.user_id = %s
+            ORDER BY qc.completed_at, qc.id
+            """, (user_id,),
+        ).fetchall()
+        completion_times: dict[str, list[str]] = {}
+        for row in rows:
+            category = completion_theme(row["category"] or "", row["place_name"], row["title"])
+            if category:
+                completion_times.setdefault(category, []).append(row["completed_at"])
+        variants = self._connection.execute(
+            "SELECT * FROM ggumdori_variants WHERE id = ANY(%s) ORDER BY sort_order",
+            (ACTIVE_VARIANT_IDS,),
+        ).fetchall()
+        unlocked = []
+        for variant in variants:
+            times = completion_times.get(variant["theme_category"], [])
+            if variant["theme_category"] == "default" or len(times) < variant["tier"]:
                 continue
-            # 변수 의미: 사용자 꿈돌이 해금 ID다.
-            user_ggumdori_id = make_id("ug")
-            # 변수 의미: 사용자 꿈돌이 insert 실행 결과다.
             cursor = self._connection.execute(
-                """
-                INSERT INTO user_ggumdori(id, user_id, variant_id, unlocked_at)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (user_id, variant_id) DO NOTHING
-                """,
-                (user_ggumdori_id, user_id, variant_row["id"], unlocked_at),
+                """INSERT INTO user_ggumdori(id, user_id, variant_id, unlocked_at)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (user_id, variant_id) DO NOTHING""",
+                (make_id("ug"), user_id, variant["id"], times[variant["tier"] - 1]),
             )
-            if cursor.rowcount > 0:
-                self._connection.execute(
-                    """
-                    INSERT INTO ggumdori_selection(user_id, selected_variant_id, updated_at)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                      selected_variant_id = EXCLUDED.selected_variant_id,
-                      updated_at = EXCLUDED.updated_at
-                    """,
-                    (user_id, variant_row["id"], unlocked_at),
-                )
-            unlocked_variants.append(dict(variant_row))
-        return unlocked_variants
+            if cursor.rowcount:
+                unlocked.append(dict(variant))
+        return unlocked, {category: len(times) for category, times in completion_times.items()}
 
     def list_badges(self, user_id: str) -> list[dict[str, Any]]:
         """
@@ -1481,10 +1484,12 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
         """
         입력: 사용자 ID.
         출력: 꿈돌이 도감 전체와 사용자 해금 상태.
-        역할: 뱃지 단계 기반 꿈돌이 해금 상태를 제공한다.
+        역할: 카테고리별 누적 완료 1·2·3회 해금과 진행도를 제공한다. 이전 완료 기록도 반영한다.
         호출 예시: ggumdori = repository.list_ggumdori(\"demo-user\")
         """
-        with self._lock:
+        with self._lock, self._connection.transaction():
+            self._connection.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+            _, counts = self._sync_completion_ggumdori(user_id)
             # 변수 의미: 선택된 꿈돌이 row다.
             selected_row = self._connection.execute(
                 "SELECT selected_variant_id FROM ggumdori_selection WHERE user_id = %s",
@@ -1496,20 +1501,26 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
                 SELECT gv.*, ug.unlocked_at
                 FROM ggumdori_variants gv
                 LEFT JOIN user_ggumdori ug ON ug.variant_id = gv.id AND ug.user_id = %s
+                WHERE gv.id = ANY(%s)
                 ORDER BY gv.sort_order
                 """,
-                (user_id,),
+                (user_id, ACTIVE_VARIANT_IDS),
             ).fetchall()
             return {
-                "selectedVariantId": selected_row["selected_variant_id"] if selected_row else None,
+                "selectedVariantId": selected_row["selected_variant_id"]
+                if selected_row and selected_row["selected_variant_id"] in ACTIVE_VARIANT_IDS
+                else "ggumdori_default_1",
                 "variants": [
                     {
                         "id": row["id"],
                         "name": row["name"],
                         "themeCategory": row["theme_category"],
                         "tier": row["tier"],
+                        "completedCount": counts.get(row["theme_category"], 0),
+                        "requiredCount": 0 if row["theme_category"] == "default" else row["tier"],
                         "unlockCondition": row["unlock_condition"],
                         "imageRef": row["image_ref"],
+                        "detailImageRef": row["image_ref"].replace("_128.png", "_1024.png"),
                         "description": row["description"],
                         "rarity": row["rarity"],
                         "unlocked": row["unlocked_at"] is not None,

@@ -1199,6 +1199,105 @@ p {
   background: var(--green-dark);
 }
 
+.player-location-marker {
+  position: relative;
+  width: 88px;
+  height: 104px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.player-location-marker--mock {
+  position: absolute;
+  transform: translate(-44px, -76px);
+  z-index: 1000;
+}
+
+.player-location-marker__ring {
+  position: absolute;
+  left: 22px;
+  top: 66px;
+  width: 44px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: rgba(3, 199, 90, 0.26);
+  box-shadow: 0 0 0 3px #13864e;
+  animation: player-location-pulse 2s ease-out infinite;
+}
+
+.player-location-marker__shadow {
+  position: absolute;
+  left: 29px;
+  top: 71px;
+  width: 30px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(36, 64, 42, 0.3);
+  animation: player-location-shadow 1.6s ease-in-out infinite;
+}
+
+.player-location-marker .player-location-marker__character {
+  position: absolute;
+  left: 16px;
+  top: 10px;
+  display: block;
+  width: 56px;
+  height: 64px;
+  max-width: none;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px #fff) drop-shadow(0 0 3px #fff);
+  transform-origin: 50% 100%;
+  animation: player-location-bounce 1.6s ease-in-out infinite;
+}
+
+.player-location-marker__label {
+  position: absolute;
+  left: 50%;
+  top: 83px;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #14613c;
+  color: #fff;
+  font: 700 11px/1.2 sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes player-location-bounce {
+  0%, 65%, 100% { transform: translateY(0) scale(1); }
+  25% { transform: translateY(-12px) scale(0.98, 1.03); }
+  43% { transform: translateY(0) scale(1.06, 0.94); }
+  54% { transform: translateY(-4px) scale(1); }
+}
+
+@keyframes player-location-shadow {
+  0%, 65%, 100% { transform: scale(1); opacity: 0.8; }
+  25% { transform: scale(0.65); opacity: 0.35; }
+  43% { transform: scale(1.08); opacity: 0.85; }
+  54% { transform: scale(0.85); opacity: 0.6; }
+}
+
+@keyframes player-location-pulse {
+  from { transform: scale(0.9); opacity: 0.9; }
+  to { transform: scale(1.8); opacity: 0; }
+}
+
+body[data-reduced-motion="true"] .player-location-marker__character,
+body[data-reduced-motion="true"] .player-location-marker__shadow,
+body[data-reduced-motion="true"] .player-location-marker__ring {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-location-marker__character,
+  .player-location-marker__shadow,
+  .player-location-marker__ring { animation: none !important; }
+}
+
 .map-detail {
   margin-top: 12px;
 }

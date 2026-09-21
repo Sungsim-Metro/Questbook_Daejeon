@@ -33,19 +33,17 @@ const SUPPORTED_UI_LANGUAGES = ["kor", "eng"];
 // 화면 언어 선택을 저장하는 localStorage 키입니다.
 const UI_LANGUAGE_KEY = "questbook:user-web:ui-language";
 
-// 화면에서 선택할 수 있는 관광 카테고리 이름입니다. (명세 §4.1 카테고리 8종)
+// 퀘스트와 도감이 함께 사용하는 카테고리 이름과 표시 순서입니다.
 const CATEGORY_LABELS = {
-  all: "전체",
-  default: "기본",
-  science: "과학·우주",
-  bread: "빵·미식",
-  nature: "자연·산책",
-  heritage: "원도심·역사",
-  culture: "문화·예술",
-  market: "시장·상권",
-  tashu: "이동·타슈",
-  festival: "축제·이벤트",
+  all: "전체", default: "기본", science: "과학", bread: "빵", noodle: "음식",
+  nature: "자연", sport: "스포츠", heritage: "역사", culture: "문화",
+  market: "시장·쇼핑", tashu: "타슈", spa: "온천", festival: "축제",
 };
+
+const CATALOG_CATEGORY_LABELS = CATEGORY_LABELS;
+
+const DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/기본_128.png";
+const LEGACY_DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/default-1.svg";
 
 // 인증 5종의 표시 이름입니다. (명세 §4.3)
 const QUEST_TYPE_LABELS = {
@@ -74,19 +72,16 @@ const QUEST_SORT_LABELS = {
 const LEGACY_CATEGORY_MAP = {
   downtown: "heritage",
   mobility: "tashu",
-  hotspring: "nature",
+  hotspring: "spa",
+  food: "noodle",
   nightview: "culture",
 };
 
-// 화면 카테고리를 현재 서버의 6개 카테고리 코드로 되돌리는 표입니다.
+// 기존 관광지 분류 전체를 조회하고 서버의 rewardCategory로 세부 테마를 필터링합니다.
 const SERVER_CATEGORY_MAP = {
   all: "all",
-  science: "science",
-  nature: "nature",
-  heritage: "downtown",
-  culture: "nightview",
-  market: "market",
-  tashu: "mobility",
+  science: "all", bread: "all", noodle: "all", nature: "all", sport: "all",
+  heritage: "all", culture: "all", market: "all", tashu: "all", spa: "all", festival: "all",
 };
 
 // 현재 서버가 관심사로 저장하는 6개 카테고리입니다.
@@ -279,7 +274,7 @@ const FALLBACK_RECOMMENDATIONS = [
       badgeName: "전망 수집가",
       badgeImageRef: "/assets/badge/badge_culture_lv1_64.png",
       ggumdoriId: "culture-2",
-      ggumdoriName: "야경 꿈돌이",
+      ggumdoriName: "문화 꿈돌이",
       ggumdoriStillImageRef: "/assets/ggumdori/culture-2.png",
     },
     verificationType: "사진 인증",
@@ -446,7 +441,6 @@ const FALLBACK_GGUMDORI = [
   { id: "nature-2", name: "숲 탐험 꿈돌이", themeCategory: "nature", unlocked: true, condition: "nature Lv.2", imageRef: "/assets/ggumdori/nature-2.png" },
   { id: "tashu-1", name: "타슈 꿈돌이", themeCategory: "tashu", unlocked: false, condition: "타슈 대여소 방문", imageRef: "/assets/ggumdori/tashu-1.png" },
   { id: "festival-2", name: "온천 꿈돌이", themeCategory: "festival", unlocked: false, condition: "유성온천 방문", imageRef: "/assets/ggumdori/festival-2.png" },
-  { id: "culture-2", name: "야경 꿈돌이", themeCategory: "culture", unlocked: false, condition: "엑스포다리 야경 감상", imageRef: "/assets/ggumdori/culture-2.png" },
 ];
 
 // 브라우저에 저장할 퀘스트 상태 키입니다.
@@ -551,6 +545,7 @@ const state = {
   plannedCategory: "all",
   location: { ...FALLBACK_LOCATION },
   user: { ...FALLBACK_USER },
+  userLoadState: "idle",
   plannedLocation: {
     ...FALLBACK_LOCATION,
     label: readStoredUiLanguage() === "eng" ? "Please set a planned location" : "계획 위치를 설정해주세요",
@@ -719,6 +714,8 @@ const state = {
   naverMapInstance: null,
   naverMapMarkers: [],
   naverPositionMarker: null,
+  naverPositionMarkerKey: "",
+  naverPlanningMarker: null,
   // 지도를 마지막으로 센터링한 기준 좌표입니다. 모달 열고 닫기 등 위치 변경과 무관한
   // 재렌더링에서는 이 값이 그대로라 사용자가 손으로 옮겨 둔 지도 위치를 건드리지 않습니다.
   naverMapCenteredLocation: null,
@@ -1995,6 +1992,7 @@ function captureSession() {
  * 호출 예시: clearAccountActions();
  */
 function clearAccountActions() {
+  state.userLoadState = "idle";
   state.pendingQuestActions = {};
   state.evidenceUploads = {};
   state.questStatuses = {};
@@ -2578,7 +2576,7 @@ function normalizeRecommendation(rawItem) {
     placeContentId: String(item.placeContentId || place.contentId || item.contentId || ""),
     placeContentTypeId: String(item.placeContentTypeId || place.contentTypeId || item.contentTypeId || ""),
     category: normalizeCategory(
-      item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
+      quest.rewardCategory || item.rewardCategory || item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
     ),
     // 난이도는 보상 단계가 아니라 예상 복잡도 메타데이터입니다. (명세 §4.2)
     difficulty: String(item.difficulty || quest.difficulty || "discover"),
@@ -2898,9 +2896,12 @@ function normalizeGgumdori(rawGgumdori) {
     themeCategory: ggumdori.themeCategory || ggumdori.category || "all",
     unlocked: Boolean(ggumdori.unlocked ?? ggumdori.earnedAt),
     tier: toNumber(ggumdori.tier, 1),
+    completedCount: toNumber(ggumdori.completedCount, 0),
+    requiredCount: toNumber(ggumdori.requiredCount, ggumdori.themeCategory === "default" ? 0 : toNumber(ggumdori.tier, 1)),
     unlockedAt: String(ggumdori.unlockedAt || ggumdori.unlocked_at || ""),
     condition: ggumdori.condition || ggumdori.unlockCondition || "뱃지 조건 달성",
     imageRef: ggumdori.imageRef || ggumdori.imageUrl || "",
+    detailImageRef: ggumdori.detailImageRef || ggumdori.imageRef || ggumdori.imageUrl || "",
   };
 }
 
@@ -3091,13 +3092,29 @@ function buildNaverPlaceMarkerIcon(place, isSelected, itineraryOrder) {
  * 호출 예시: marker.setIcon(buildNaverPositionMarkerIcon())
  */
 function buildNaverPositionMarkerIcon() {
-  // 계획 모드에서 검색한 구체적인 장소는 이제 추천 API가 좁은 반경으로 돌려주는 실제
-  // 결과라, 다른 추천 장소와 똑같은 마커(buildNaverPlaceMarkerIcon)로 자연스럽게 뜬다.
-  // 이 아이콘은 "지금 기준으로 삼은 좌표" 자체를 나타내는 점 표시로만 쓴다.
   return {
-    content: '<div class="naver-position-marker" aria-label="현재 위치"><span></span></div>',
-    anchor: new window.naver.maps.Point(13, 13),
+    content: createPlayerLocationMarker(),
+    size: new window.naver.maps.Size(88, 104),
+    // 튀는 캐릭터가 아닌 바닥 원의 중심을 실제 좌표에 고정한다.
+    anchor: new window.naver.maps.Point(44, 76),
   };
+}
+
+function createPlayerLocationMarker() {
+  const item = getSelectedGgumdori();
+  const label = state.location.measured ? "내 위치" : "기준 위치";
+  const marker = createElement("div", "player-location-marker");
+  marker.setAttribute("role", "img");
+  marker.setAttribute("aria-label", `${label} · ${item?.name || "기본 꿈돌이"}`);
+  marker.append(createElement("span", "player-location-marker__ring"));
+  marker.append(createElement("span", "player-location-marker__shadow"));
+  const image = document.createElement("img");
+  image.className = "player-location-marker__character";
+  image.alt = "";
+  image.draggable = false;
+  setGgumdoriImageSource(image, getGgumdoriImageRef(item));
+  marker.append(image, createElement("span", "player-location-marker__label", label));
+  return marker;
 }
 
 /**
@@ -3219,11 +3236,32 @@ function getSelectedGgumdori() {
   // 저장된 선택 ID와 일치하는 꿈돌이입니다.
   const selected = state.ggumdori.find((item) => item.id === state.selectedGgumdoriId);
 
-  if (selected) {
+  if (selected?.unlocked) {
     return selected;
   }
 
-  return state.ggumdori.find((item) => item.unlocked) || state.ggumdori[0] || null;
+  return state.ggumdori.find((item) => item.unlocked) || null;
+}
+
+function getGgumdoriImageRef(item, detail = false) {
+  const id = item?.id || item?.ggumdoriId || "";
+  if (!item || id === "ggumdori_default_1" || item.name === "기본 꿈돌이" || item.ggumdoriName === "기본 꿈돌이") {
+    return detail ? "/assets/ggumdori/기본_1024.png" : DEFAULT_GGUMDORI_IMAGE;
+  }
+  return (detail && (item.detailImageRef || item.ggumdoriDetailImageRef))
+    || item.imageRef || item.ggumdoriImageRef || DEFAULT_GGUMDORI_IMAGE;
+}
+
+// 새 기본 이미지까지 실패하면 기존 기본 SVG로 대체하며 무한 재요청을 막는다.
+function setGgumdoriImageSource(image, primaryRef) {
+  const sources = [...new Set([primaryRef || DEFAULT_GGUMDORI_IMAGE, DEFAULT_GGUMDORI_IMAGE, LEGACY_DEFAULT_GGUMDORI_IMAGE])];
+  let index = 0;
+  const onError = () => {
+    if (index + 1 < sources.length) image.src = sources[++index];
+    else image.removeEventListener("error", onError);
+  };
+  image.addEventListener("error", onError);
+  image.src = sources[0];
 }
 
 /**
@@ -3239,11 +3277,11 @@ function createGgumdoriFigure(item, isSmall = false) {
     figure.classList.add("avatar-mark");
   }
 
-  if (item?.imageRef) {
+  if (item?.imageRef || !item) {
     // 꿈돌이 SVG 이미지를 표시하는 요소입니다.
     const image = document.createElement("img");
-    image.src = item.imageRef;
-    image.alt = item.unlocked ? item.name : `${item.name} 잠김`;
+    setGgumdoriImageSource(image, getGgumdoriImageRef(item));
+    image.alt = item ? (item.unlocked ? item.name : `${item.name} 잠김`) : "기본 꿈돌이";
     image.loading = "lazy";
     figure.append(image);
   } else {
@@ -3376,12 +3414,10 @@ function renderDrawerProfile() {
 
     // 대표 꿈돌이 썸네일입니다.
     const art = createElement("div", "drawer-profile__art");
-    if (selected?.imageRef) {
-      const image = document.createElement("img");
-      image.src = selected.imageRef;
-      image.alt = `${selected.name} 대표 꿈돌이`;
-      art.append(image);
-    }
+    const image = document.createElement("img");
+    setGgumdoriImageSource(image, getGgumdoriImageRef(selected));
+    image.alt = `${selected?.name || "기본 꿈돌이"} 대표 꿈돌이`;
+    art.append(image);
 
     // 닉네임과 레벨을 담는 영역입니다.
     const meta = createElement("div", "drawer-profile__meta");
@@ -3577,6 +3613,10 @@ function setActiveView(viewId, shouldUpdateHash = true, isBackNavigation = false
 
   state.activeView = viewId;
 
+  if (viewId === "home" && (!isSameView || shouldUpdateHash) && state.accessToken && !IS_DESIGN_PREVIEW && !IS_HOSTED_STATIC_PREVIEW) {
+    void loadUser();
+  }
+
   // 모든 화면 패널입니다.
   const panels = document.querySelectorAll("[data-view-panel]");
   panels.forEach((panel) => {
@@ -3643,7 +3683,7 @@ function goToPreviousView() {
 /**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: 프로필, 레벨, 요약 통계를 홈 화면에 표시한다.
+ * 역할: 대표 꿈돌이, 레벨, 닉네임과 EXP 진행률을 홈 화면에 표시한다.
  * 호출 예시: renderProfile()
  */
 function renderProfile() {
@@ -3654,82 +3694,180 @@ function renderProfile() {
     return;
   }
 
-  // 사용자의 다음 레벨까지 진행률입니다.
-  const progressPercent = getProgressPercent(state.user.xp, state.user.nextLevelXp);
+  if (!IS_DESIGN_PREVIEW && !IS_HOSTED_STATIC_PREVIEW && state.userLoadState !== "ready") {
+    panel.setAttribute("aria-busy", String(state.userLoadState === "loading"));
+    panel.replaceChildren(createElement("p", "data-note", state.userLoadState === "error"
+      ? "사용자 정보를 불러오지 못했습니다. 홈을 다시 선택해 주세요."
+      : state.accessToken ? "사용자 정보를 불러오는 중입니다…" : "로그인 후 프로필을 확인할 수 있습니다."));
+    return;
+  }
+  panel.setAttribute("aria-busy", "false");
 
-  // 홈에 표시할 선택 꿈돌이입니다.
+  // 사용자 레벨 및 XP입니다.
+  const level = toNumber(state.user.level, 1);
+  const currentXp = toNumber(state.user.xp, 0);
+  const nextLevelXp = toNumber(state.user.nextLevelXp, 0);
+
+  // 다음 레벨까지의 진행률입니다.
+  const progressPercent = getProgressPercent(
+      currentXp,
+      nextLevelXp,
+  );
+
+  // 홈에 표시할 대표 꿈돌이입니다.
   const selectedGgumdori = getSelectedGgumdori();
 
   panel.replaceChildren();
 
   // 프로필 상단 영역입니다.
-  const main = createElement("div", "profile-main");
-  const avatar = createGgumdoriFigure(selectedGgumdori);
+  const main = createElement(
+      "div",
+      "profile-main",
+  );
+
+  // 대표 꿈돌이 이미지입니다.
+  const avatar = createGgumdoriFigure(
+      selectedGgumdori,
+  );
+
+  // 레벨, 닉네임, 대표 꿈돌이 이름을 담는 영역입니다.
   const profileText = createElement("div");
-  const name = createElement("p", "profile-name", displayNickname(state.user.nickname) || displayNickname(FALLBACK_USER.nickname));
+
+  // 기존 profile-meta 클래스를 레벨 배지로 사용합니다.
   const meta = createElement(
-    "p",
-    "profile-meta",
-    `Lv.${toNumber(state.user.level, 1)} · ${toNumber(state.user.xp).toLocaleString("ko-KR")} XP`,
+      "p",
+      "profile-meta",
+      `Lv.${level}`,
   );
-  // 변수 의미: 대표로 선택된 꿈돌이 이름입니다(고정된 이름 집합이라 UI_STRINGS_EN에도 등록돼 있음).
-  const selectedGgumdoriName = selectedGgumdori?.name || state.user.selectedGgumdoriName || "기본 꿈돌이";
+
+  // 기존 닉네임 클래스를 그대로 유지합니다.
+  const name = createElement(
+      "p",
+      "profile-name",
+      displayNickname(state.user.nickname) ||
+      displayNickname(FALLBACK_USER.nickname),
+  );
+
+  // 대표로 선택된 꿈돌이 이름입니다.
+  const selectedGgumdoriName =
+      selectedGgumdori?.name ||
+      state.user.selectedGgumdoriName ||
+      "기본 꿈돌이";
+
   const selectedName = createElement(
-    "span",
-    "selected-ggumdori-name",
-    localize(
-      `${selectedGgumdoriName} 선택 중`,
-      `${UI_STRINGS_EN[selectedGgumdoriName] || selectedGgumdoriName} selected`,
-    ),
+      "span",
+      "selected-ggumdori-name",
+      localize(
+          `대표 꿈돌이 · ${selectedGgumdoriName}`,
+          `Main Ggumdori · ${
+              UI_STRINGS_EN[selectedGgumdoriName] ||
+              selectedGgumdoriName
+          }`,
+      ),
   );
-  const customizeLink = createElement("button", "profile-customize-link", "도감에서 대표 바꾸기 →");
+
+  // 기존 도감 이동 클래스와 이벤트 연결 값을 유지합니다.
+  const customizeLink = createElement(
+      "button",
+      "profile-customize-link",
+      "도감에서 바꾸기",
+  );
+
   customizeLink.type = "button";
   customizeLink.dataset.viewTarget = "collection";
+  customizeLink.setAttribute(
+      "aria-label",
+      "도감에서 대표 꿈돌이 바꾸기",
+  );
 
-  profileText.append(name, meta, selectedName, customizeLink);
-  main.append(avatar, profileText);
+  /*
+   * 순서:
+   * 레벨 | 닉네임
+   * 대표 꿈돌이 이름
+   * 도감에서 바꾸기
+   */
+  profileText.append(
+      meta,
+      name,
+      selectedName,
+      customizeLink,
+  );
 
-  // 레벨 진행률 설명입니다.
-  const progressCaption = createElement("div", "progress-caption");
+  main.append(
+      avatar,
+      profileText,
+  );
+
+  // EXP 제목과 수치입니다.
+  const progressCaption = createElement(
+      "div",
+      "progress-caption",
+  );
+
   progressCaption.append(
-    createElement(
-      "span",
-      "",
-      localize(`Lv.${toNumber(state.user.level, 1) + 1}까지`, `Until Lv.${toNumber(state.user.level, 1) + 1}`),
-    ),
-    createElement("span", "", `${Math.round(progressPercent)}%`),
+      createElement(
+          "span",
+          "",
+          "EXP PROGRESS",
+      ),
+      createElement(
+          "span",
+          "",
+          `${currentXp.toLocaleString("ko-KR")} / ${nextLevelXp.toLocaleString("ko-KR")}`,
+      ),
   );
 
-  // 레벨 진행 막대입니다.
-  const progressTrack = createElement("div", "progress-bar");
-  // 보조기술이 진행률을 읽을 수 있게 실제 의미와 값을 줍니다. (명세 §13.3-10)
-  progressTrack.setAttribute("role", "progressbar");
-  progressTrack.setAttribute("aria-valuemin", "0");
-  progressTrack.setAttribute("aria-valuemax", "100");
-  progressTrack.setAttribute("aria-valuenow", String(Math.round(progressPercent)));
-  progressTrack.setAttribute(
-    "aria-label",
-    `다음 레벨까지 ${Math.round(progressPercent)}퍼센트`,
+  // EXP 진행 막대입니다.
+  const progressTrack = createElement(
+      "div",
+      "progress-bar",
   );
-  const progressFill = createElement("span", "progress-fill");
+
+  progressTrack.setAttribute(
+      "role",
+      "progressbar",
+  );
+  progressTrack.setAttribute(
+      "aria-valuemin",
+      "0",
+  );
+  progressTrack.setAttribute(
+      "aria-valuemax",
+      "100",
+  );
+  progressTrack.setAttribute(
+      "aria-valuenow",
+      String(Math.round(progressPercent)),
+  );
+  progressTrack.setAttribute(
+      "aria-label",
+      `다음 레벨까지 ${Math.round(progressPercent)}퍼센트`,
+  );
+
+  const progressFill = createElement(
+      "span",
+      "progress-fill",
+  );
+
   progressFill.style.width = `${progressPercent}%`;
+
   progressTrack.append(progressFill);
 
-  // 사용자 활동 통계 행입니다.
-  const statRow = createElement("div", "stat-row");
-  [
-    ["XP", `${toNumber(state.user.xp).toLocaleString("ko-KR")}`],
-    ["완료", localize(`${toNumber(state.user.completedQuestCount)}개`, `${toNumber(state.user.completedQuestCount)}`)],
-    ["뱃지", localize(`${toNumber(state.user.badgeCount)}개`, `${toNumber(state.user.badgeCount)}`)],
-  ].forEach(([label, value]) => {
-    // 통계 한 칸을 표시하는 요소입니다.
-    const statItem = createElement("div", "stat-item");
-    statItem.append(createElement("span", "stat-value", value), createElement("span", "stat-label", label));
-    statRow.append(statItem);
-  });
-
-  panel.append(main, progressCaption, progressTrack, statRow);
+  /*
+   * 통계 행(stat-row)은 더 이상 생성하지 않습니다.
+   *
+   * 기존:
+   * panel.append(main, progressCaption, progressTrack, statRow);
+   *
+   * 변경:
+   */
+  panel.append(
+      main,
+      progressCaption,
+      progressTrack,
+  );
 }
+
 
 /**
  * 입력: 없음.
@@ -4811,7 +4949,7 @@ function createStatCell(label, value) {
 /**
  * 입력: 추천 항목과 진행 상태.
  * 출력: 보상 쌍 패널 요소.
- * 역할: 누적 카테고리 XP 정책과 서버에서 확인한 보유 보상을 보여 줍니다.
+ * 역할: 카테고리별 누적 성공 해금 기준과 보유 보상을 보여 줍니다.
  * 호출 예시: createRewardPairPanel(quest, "recommended")
  */
 function createRewardPairPanel(quest, _questStatus) {
@@ -4831,7 +4969,7 @@ function createRewardPairPanel(quest, _questStatus) {
   );
   panel.append(heading);
   panel.append(
-    createElement("p", "data-note", "완료 XP가 카테고리에 누적되며 단계 조건을 달성할 때 뱃지와 꿈돌이가 해금됩니다."),
+    createElement("p", "data-note", "이 카테고리의 퀘스트를 누적 1·2·3회 성공하면 꿈돌이 Lv.1·2·3이 해금됩니다. 뱃지는 기존 XP 기준으로 지급됩니다."),
   );
 
   if (badge || ggumdori) {
@@ -5778,9 +5916,9 @@ function renderMapBackground(canvas) {
  */
 function renderMockMapView(canvas, places) {
   // 위도 목록입니다.
-  const latitudes = places.map((item) => item.placeLatitude).concat(getRecommendationLocation().lat);
+  const latitudes = places.map((item) => item.placeLatitude).concat(getRecommendationLocation().lat, state.location.lat);
   // 경도 목록입니다.
-  const longitudes = places.map((item) => item.placeLongitude).concat(getRecommendationLocation().lng);
+  const longitudes = places.map((item) => item.placeLongitude).concat(getRecommendationLocation().lng, state.location.lng);
   // 지도 좌표 범위입니다.
   const minLatitude = Math.min(...latitudes);
   const maxLatitude = Math.max(...latitudes);
@@ -5790,17 +5928,27 @@ function renderMockMapView(canvas, places) {
   state.naverMapInstance = null;
   state.naverMapMarkers = [];
   state.naverPositionMarker = null;
+  state.naverPositionMarkerKey = "";
+  state.naverPlanningMarker = null;
   canvas.classList.remove("is-naver");
   canvas.classList.add("is-mock");
   canvas.replaceChildren();
   renderMapBackground(canvas);
 
-  // 현재 위치 표시 요소입니다.
-  const currentLocationMarker = createElement("span", "current-location-marker");
-  currentLocationMarker.title = getRecommendationLocation().label;
-  currentLocationMarker.style.left = `${toMapPercent(getRecommendationLocation().lng, minLongitude, maxLongitude)}%`;
-  currentLocationMarker.style.top = `${toMapPercent(getRecommendationLocation().lat, minLatitude, maxLatitude, true)}%`;
-  canvas.append(currentLocationMarker);
+  if (state.explorationMode === "planned") {
+    const planMarker = createElement("span", "current-location-marker");
+    planMarker.title = "계획 위치";
+    planMarker.style.left = `${toMapPercent(getRecommendationLocation().lng, minLongitude, maxLongitude)}%`;
+    planMarker.style.top = `${toMapPercent(getRecommendationLocation().lat, minLatitude, maxLatitude, true)}%`;
+    canvas.append(planMarker);
+  }
+  if (state.explorationMode !== "planned" || state.location.measured) {
+    const currentLocationMarker = createPlayerLocationMarker();
+    currentLocationMarker.classList.add("player-location-marker--mock");
+    currentLocationMarker.style.left = `${toMapPercent(state.location.lng, minLongitude, maxLongitude)}%`;
+    currentLocationMarker.style.top = `${toMapPercent(state.location.lat, minLatitude, maxLatitude, true)}%`;
+    canvas.append(currentLocationMarker);
+  }
 
   places.forEach((place) => {
     // 현재 추천 장소가 선택 상태인지 여부입니다.
@@ -5892,20 +6040,46 @@ function syncNaverPositionMarker() {
     return;
   }
 
-  // 현재 위치 좌표입니다.
-  const position = new window.naver.maps.LatLng(getRecommendationLocation().lat, getRecommendationLocation().lng);
-
-  if (state.naverPositionMarker) {
+  const planned = state.explorationMode === "planned";
+  const position = new window.naver.maps.LatLng(state.location.lat, state.location.lng);
+  const selected = getSelectedGgumdori();
+  const iconKey = JSON.stringify([selected?.id, selected?.name, getGgumdoriImageRef(selected), state.location.measured]);
+  const playerMap = !planned || state.location.measured ? state.naverMapInstance : null;
+  if (!state.naverPositionMarker) {
+    state.naverPositionMarker = new window.naver.maps.Marker({
+      map: playerMap, position, icon: buildNaverPositionMarkerIcon(),
+      zIndex: 1000, clickable: false,
+    });
+  } else {
+    state.naverPositionMarker.setMap(playerMap);
     state.naverPositionMarker.setPosition(position);
-    return;
+    // 위치 갱신만으로 애니메이션이 재시작되지 않게 외형이 바뀔 때만 교체한다.
+    if (state.naverPositionMarkerKey !== iconKey) {
+      state.naverPositionMarker.setIcon(buildNaverPositionMarkerIcon());
+    }
   }
+  state.naverPositionMarkerKey = iconKey;
 
-  state.naverPositionMarker = new window.naver.maps.Marker({
-    map: state.naverMapInstance,
-    position,
-    icon: buildNaverPositionMarkerIcon(),
-    zIndex: 100,
-  });
+  // 여행 계획 지점과 실제 GPS 위치를 구분한다.
+  if (planned) {
+    const location = getRecommendationLocation();
+    const planPosition = new window.naver.maps.LatLng(location.lat, location.lng);
+    if (!state.naverPlanningMarker) {
+      state.naverPlanningMarker = new window.naver.maps.Marker({
+        map: state.naverMapInstance, position: planPosition, title: "계획 위치",
+        icon: {
+          content: '<div class="naver-position-marker" aria-label="계획 위치"><span></span></div>',
+          anchor: new window.naver.maps.Point(13, 13),
+        },
+        zIndex: 100, clickable: false,
+      });
+    } else {
+      state.naverPlanningMarker.setMap(state.naverMapInstance);
+      state.naverPlanningMarker.setPosition(planPosition);
+    }
+  } else {
+    state.naverPlanningMarker?.setMap(null);
+  }
 }
 
 /**
@@ -7011,9 +7185,14 @@ function normalizeCatalogEntry(rawEntry) {
     ggumdoriId: String(rewardPair.ggumdoriId || entry.ggumdoriId || ""),
     ggumdoriName: String(rewardPair.ggumdoriName || entry.ggumdoriName || "꿈돌이"),
     ggumdoriImageRef: String(rewardPair.ggumdoriStillImageRef || entry.ggumdoriStillImageRef || ""),
+    ggumdoriDetailImageRef: String(entry.ggumdoriDetailImageRef || rewardPair.ggumdoriStillImageRef || entry.ggumdoriStillImageRef || ""),
+    completedCount: toNumber(entry.completedCount, 0),
+    requiredCount: toNumber(entry.requiredCount, 0),
     badgeName: String(rewardPair.badgeName || entry.badgeName || "탐험 뱃지"),
     badgeImageRef: String(rewardPair.badgeImageRef || entry.badgeImageRef || ""),
-    category: normalizeCategory(entry.category || rewardPair.category || "all"),
+    category: CATALOG_CATEGORY_LABELS[entry.category || rewardPair.category]
+      ? (entry.category || rewardPair.category)
+      : normalizeCategory(entry.category || rewardPair.category || "all"),
     // locked | earned | unavailable. 종료된 퀘스트도 슬롯을 유지합니다. (명세 §5.2)
     state: normalizeCatalogState(entry.state),
     unlockedAt: String(entry.unlockedAt || ""),
@@ -7070,8 +7249,13 @@ function normalizeCatalogPage(payload) {
  * 역할: 서버 보유 variant id와 해금 상태를 정본으로 사용합니다.
  * 호출 예시: state.catalog = buildServerCatalog()
  */
+function isNightviewGgumdori(item) {
+  return /nightview/.test(`${item.id || item.ggumdoriId || ""} ${item.imageRef || item.ggumdoriImageRef || ""}`)
+    || (item.name || item.ggumdoriName) === "야경 꿈돌이";
+}
+
 function buildServerCatalog() {
-  const entries = state.ggumdori.map((item, index) => {
+  const entries = state.ggumdori.filter((item) => !isNightviewGgumdori(item)).map((item, index) => {
     const category = normalizeCategory(item.themeCategory);
     const badge = state.badges.find(
       (candidate) => normalizeCategory(candidate.category) === category && candidate.tier === item.tier,
@@ -7082,12 +7266,15 @@ function buildServerCatalog() {
       ggumdoriId: item.id,
       ggumdoriName: item.name,
       ggumdoriStillImageRef: item.imageRef,
+      ggumdoriDetailImageRef: item.detailImageRef,
       badgeName: badge?.name || CATEGORY_LABELS[category] || "탐험 뱃지",
       category,
       state: item.unlocked ? "earned" : "locked",
       unlockedAt: item.unlockedAt || "",
       equipped: item.id === state.selectedGgumdoriId,
       unlockDescription: item.condition,
+      completedCount: item.completedCount,
+      requiredCount: item.requiredCount,
       catalogOrder: index,
     });
   });
@@ -7178,11 +7365,12 @@ function buildFallbackCatalog() {
 /**
  * 입력: 이어 받을 커서. 비우면 첫 페이지입니다.
  * 출력: 도감 로드 Promise.
- * 역할: /api/catalog 를 호출하고 실패하면 퀘스트에서 파생한 도감을 쓴다. (명세 §5.2)
+ * 역할: 서버에 등록된 테마·레벨별 보상과 실제 누적 완료 상태로 도감을 구성한다.
  * 호출 예시: await loadCatalog()
  */
 async function loadCatalog(_cursor = "") {
   state.catalog = buildServerCatalog();
+  state.catalogMessage = "";
 }
 
 /**
@@ -7284,6 +7472,8 @@ function renderCollection() {
     const buttonCategory = button.dataset.collectionCategory || "all";
     button.classList.toggle("is-active", buttonCategory === state.catalogCategory);
     button.setAttribute("aria-pressed", buttonCategory === state.catalogCategory ? "true" : "false");
+    const count = state.catalog.entries.filter((entry) => buttonCategory === "all" || entry.category === buttonCategory).length;
+    button.setAttribute("aria-label", `${CATALOG_CATEGORY_LABELS[buttonCategory]} ${count}종`);
   });
 
   // 현재 필터를 통과한 도감 항목입니다.
@@ -7334,7 +7524,7 @@ function createCatalogCard(entry) {
   const art = createElement("div", "catalog-card__art");
   if (entry.ggumdoriImageRef) {
     const image = document.createElement("img");
-    image.src = entry.ggumdoriImageRef;
+    setGgumdoriImageSource(image, getGgumdoriImageRef(entry));
     image.alt = "";
     image.loading = "lazy";
     art.append(image);
@@ -7377,6 +7567,9 @@ function createCatalogCard(entry) {
 
   // 획득 상태를 텍스트로도 표시합니다. 색만으로 구분하지 않습니다. (명세 §3.2)
   card.append(createElement("span", "catalog-card__state", getCatalogStateLabel(entry.state)));
+  if (entry.requiredCount > 0) {
+    card.append(createElement("span", "catalog-card__state", `성공 ${Math.min(entry.completedCount, entry.requiredCount)} / ${entry.requiredCount}회`));
+  }
 
   return card;
 }
@@ -7502,7 +7695,7 @@ function renderCatalogSheet() {
   titleGroup.append(title);
 
   const tags = createElement("div", "quest-sheet__tags");
-  const categoryTag = createElement("span", "px-tag", CATEGORY_LABELS[entry.category] || "테마");
+  const categoryTag = createElement("span", "px-tag", CATALOG_CATEGORY_LABELS[entry.category] || "테마");
   categoryTag.dataset.category = entry.category;
   tags.append(
     categoryTag,
@@ -7530,7 +7723,7 @@ function renderCatalogSheet() {
   const figure = createElement("div", `catalog-detail__art${isEarned ? "" : " is-locked"}`);
   if (entry.ggumdoriImageRef) {
     const image = document.createElement("img");
-    image.src = entry.ggumdoriImageRef;
+    setGgumdoriImageSource(image, getGgumdoriImageRef(entry, true));
     image.alt = isEarned
       ? entry.ggumdoriName
       : localize(`${entry.ggumdoriName} 미획득`, `${UI_STRINGS_EN[entry.ggumdoriName] || entry.ggumdoriName} (not yet earned)`);
@@ -7594,6 +7787,9 @@ function renderCatalogSheet() {
     ),
   );
   body.append(conditionPanel);
+  if (entry.requiredCount > 0) {
+    conditionPanel.append(createElement("p", "px-body", `이 카테고리 누적 성공 ${entry.completedCount}회 / 해금 기준 ${entry.requiredCount}회`));
+  }
 
   // 대표 설정 결과 등을 알리는 문구입니다.
   const message = createElement("p", "data-note quest-sheet__message", state.catalogMessage);
@@ -7682,6 +7878,7 @@ async function setFeaturedGgumdori(entry) {
     item.equipped = item.ggumdoriId === entry.ggumdoriId;
   });
   state.catalogMessage = "홈 대표 꿈돌이를 바꿨어요.";
+  syncNaverPositionMarker();
   renderAll();
 }
 
@@ -10756,15 +10953,7 @@ function setCategory(category) {
     return;
   }
 
-  if (!toServerCategory(category)) {
-    state.recommendationMeta = {
-      ...state.recommendationMeta,
-      sourceStatus: "unsupported_category",
-      attribution: "빵·미식과 축제·이벤트 분류는 준비 중입니다.",
-    };
-    renderRecommendationMeta();
-    return;
-  }
+  if (!CATEGORY_LABELS[category]) return;
 
   state.selectedCategory = category;
   state.explorationMode === "planned"
@@ -10774,6 +10963,7 @@ function setCategory(category) {
   const filterButtons = document.querySelectorAll("[data-category]");
   filterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.category === category);
+    button.setAttribute("aria-pressed", String(button.dataset.category === category));
   });
 
   loadRecommendations().catch(() => {
@@ -11247,8 +11437,8 @@ function resolveCompletionReward(actionResult) {
   const ggumdori = unlocked[0] || {};
   return {
     name: badge.name || badge.badgeName || ggumdori.name || "새 보상",
-    category: normalizeCategory(badge.categoryCode || badge.category || ggumdori.themeCategory || "default"),
-    tier: toNumber(badge.tier, 1),
+    category: normalizeCategory(ggumdori.themeCategory || ggumdori.theme_category || badge.categoryCode || badge.category || "default"),
+    tier: toNumber(ggumdori.tier || badge.tier, 1),
     badgeImageRef: badge.imageRef || badge.image_ref || "",
     ggumdoriId: ggumdori.id || ggumdori.variantId || "",
     ggumdoriName: ggumdori.name || ggumdori.variantName || "",
@@ -11415,6 +11605,7 @@ async function loadRecommendations(forceRefresh = false) {
   const mode = state.explorationMode;
   const location = getRecommendationLocation();
   const serverCategory = toServerCategory(state.selectedCategory);
+  const selectedCategory = state.selectedCategory;
   const requestId = ++state.requestVersions.recommendation;
   const sessionVersion = state.sessionVersion;
 
@@ -11424,7 +11615,9 @@ async function loadRecommendations(forceRefresh = false) {
     state.recommendationMeta = {
       sourceStatus: "unsupported_category",
       cacheHit: false,
-      attribution: "현재 서버에서 이 분류를 준비 중입니다.",
+      attribution: state.selectedCategory === "default"
+        ? "기본 꿈돌이는 기본 지급되며, 연결된 퀘스트가 없습니다."
+        : `${CATEGORY_LABELS[state.selectedCategory] || "선택한 분류"} 퀘스트는 준비 중입니다.`,
       fetchedAt: "",
       expiresAt: "",
     };
@@ -11455,6 +11648,9 @@ async function loadRecommendations(forceRefresh = false) {
       return;
     }
     state.recommendations = unwrapList(payload).map(normalizeRecommendation);
+    if (selectedCategory !== "all") {
+      state.recommendations = state.recommendations.filter((item) => item.category === selectedCategory);
+    }
     // 변수 의미: 계획 위치가 상호명 검색 결과면, 반경 안에 있는 다른 장소가 섞여 나오지
     // 않도록 검색한 이름과 실제로 일치하는 장소만 남긴다("그 장소만" 요구사항).
     if (mode === "planned" && location.isPlaceSearch) {
@@ -11688,13 +11884,15 @@ async function loadAttractions() {
 /**
  * 입력: 없음.
  * 출력: 사용자 정보 로드 Promise.
- * 역할: /api/me를 호출하고 실패 시 기본 사용자 정보를 유지한다.
+ * 역할: /api/me 조회 상태를 표시하고 최신 응답을 받은 뒤 프로필을 갱신한다.
  * 호출 예시: await loadUser()
  */
 async function loadUser() {
   const requestId = ++state.requestVersions.user;
   const sessionVersion = state.sessionVersion;
   const accessToken = state.accessToken;
+  state.userLoadState = "loading";
+  renderProfile();
 
   try {
     const payload = await fetchJson("/api/me");
@@ -11729,6 +11927,7 @@ async function loadUser() {
     state.selectedGgumdoriId = String(user.selectedGgumdoriId || state.selectedGgumdoriId || "");
     state.preference = normalizePreference(user.preference || user.preferences || {});
     state.interestDraft = [...state.preference.categories];
+    state.userLoadState = "ready";
   } catch (error) {
     if (
       !isCurrentRequest("user", requestId, sessionVersion) ||
@@ -11736,7 +11935,13 @@ async function loadUser() {
     ) {
       return;
     }
-    state.user = { ...FALLBACK_USER };
+    state.userLoadState = "error";
+  } finally {
+    if (isCurrentRequest("user", requestId, sessionVersion) && accessToken === state.accessToken) {
+      renderProfile();
+      renderAppHeader();
+      renderDrawerProfile();
+    }
   }
 }
 
@@ -11832,8 +12037,9 @@ async function loadGgumdori() {
     if (!isCurrentRequest("ggumdori", requestId, sessionVersion) || accessToken !== state.accessToken) {
       return;
     }
-    state.ggumdori = unwrapList(payload).map(normalizeGgumdori);
+    state.ggumdori = unwrapList(payload).map(normalizeGgumdori).filter((item) => !isNightviewGgumdori(item));
     state.selectedGgumdoriId = payload.selectedVariantId || state.selectedGgumdoriId;
+    if (/nightview/.test(state.selectedGgumdoriId)) state.selectedGgumdoriId = "";
   } catch (error) {
     if (!isCurrentRequest("ggumdori", requestId, sessionVersion) || accessToken !== state.accessToken) {
       return;
@@ -12293,6 +12499,7 @@ function setExplorationMode(mode) {
   state.selectedCategory = nextMode === "planned" ? state.plannedCategory : state.currentCategory;
   document.querySelectorAll("[data-category]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.category === state.selectedCategory);
+    button.setAttribute("aria-pressed", String(button.dataset.category === state.selectedCategory));
   });
   state.requestVersions.recommendation += 1;
 

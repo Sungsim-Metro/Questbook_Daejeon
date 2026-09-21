@@ -626,3 +626,674 @@ body {
 .app-main {
   padding-bottom: 84px !important;
 }
+
+
+/* =========================================================
+   S03 HOME — Field Map reference layout
+   2026-09-21
+   ========================================================= */
+
+/* ---------- HOME 전체 ---------- */
+
+body[data-active-view="home"] .app-main {
+  padding: 10px 10px 28px !important;
+  background: var(--fm-paper);
+}
+
+body[data-active-view="home"] #view-home {
+  gap: 10px;
+}
+
+
+/* ---------- 상단 헤더 ---------- */
+
+body[data-active-view="home"] .app-header {
+  min-height: 50px;
+  padding: 8px 10px;
+  gap: 7px;
+
+  background: #fffaf0;
+  border-bottom: 1px solid #d7cbb5;
+  box-shadow: none;
+}
+
+body[data-active-view="home"] .app-mark {
+  width: 22px;
+  height: 22px;
+
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+
+  color: #9a5d24;
+}
+
+body[data-active-view="home"] .app-eyebrow {
+  display: none;
+}
+
+body[data-active-view="home"] .app-title {
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+body[data-active-view="home"] .header-status {
+  margin-left: auto;
+  gap: 5px;
+}
+
+body[data-active-view="home"] .level-pill,
+body[data-active-view="home"] .system-status {
+  min-height: 25px;
+  padding: 3px 6px;
+
+  border: 1px solid var(--fm-soft-line);
+  border-radius: 4px;
+
+  box-shadow: none;
+  font-size: 10px;
+}
+
+
+/* ---------- 위치 / 날씨 HUD ---------- */
+
+body[data-active-view="home"] .context-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 8px;
+
+  padding: 7px 8px;
+
+  background: #fffaf0;
+  border: 1.5px solid var(--fm-line);
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+body[data-active-view="home"] .context-place {
+  grid-column: 1;
+  grid-row: 1;
+
+  min-width: 0;
+
+  padding: 0;
+
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+body[data-active-view="home"] .context-place__name {
+  min-width: 0;
+
+  font-size: 11px;
+  font-weight: 700;
+}
+
+body[data-active-view="home"] #home-gps-state {
+  padding: 2px 5px;
+
+  border: 1px solid #b8aa92;
+  border-radius: 3px;
+
+  background: #fff;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+body[data-active-view="home"] .context-bar > .context-row:first-child {
+  grid-column: 2;
+  grid-row: 1;
+
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+body[data-active-view="home"] #home-weather-pill {
+  gap: 3px;
+
+  padding: 0;
+
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+
+  font-size: 10px;
+}
+
+body[data-active-view="home"] #home-weather-text {
+  font-size: 10px;
+}
+
+body[data-active-view="home"] #home-plan-controls {
+  grid-column: 1 / -1;
+}
+
+
+/* ---------- 프로필 ---------- */
+
+body[data-active-view="home"] .home-profile-section {
+  margin: 0;
+}
+
+body[data-active-view="home"] #profile-panel {
+  padding: 9px 10px;
+
+  gap: 5px;
+
+  border-radius: 5px !important;
+  border: 2px solid var(--fm-line) !important;
+
+  background: #fffdf6 !important;
+
+  box-shadow:
+          2px 2px 0 rgba(43, 38, 32, 0.82) !important;
+}
+
+body[data-active-view="home"] #profile-panel .profile-main {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+
+  gap: 10px;
+}
+
+body[data-active-view="home"] #profile-panel .ggumdori-figure {
+  width: 72px;
+  height: 72px;
+
+  border-radius: 4px !important;
+
+  background: #fff8e7 !important;
+
+  box-shadow: none !important;
+}
+
+body[data-active-view="home"] #profile-panel .ggumdori-figure img {
+  width: 100%;
+  height: 100%;
+
+  padding: 5px;
+
+  object-fit: contain;
+}
+
+body[data-active-view="home"] #profile-panel .profile-name {
+  margin: 0 0 3px;
+
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+body[data-active-view="home"] #profile-panel .profile-meta {
+  margin: 0 0 4px;
+
+  color: var(--fm-sub);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+body[data-active-view="home"] #profile-panel .selected-ggumdori-name {
+  display: none;
+}
+
+body[data-active-view="home"] #profile-panel .profile-customize-link {
+  min-height: 0;
+
+  padding: 0;
+
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+
+  color: var(--fm-blue);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+body[data-active-view="home"] #profile-panel .progress-caption {
+  margin-left: 82px;
+
+  font-size: 9px;
+}
+
+body[data-active-view="home"] #profile-panel .progress-bar {
+  width: calc(100% - 82px);
+  height: 9px;
+
+  margin-left: 82px;
+
+  padding: 1px;
+
+  border-width: 1px;
+}
+
+body[data-active-view="home"] #profile-panel .stat-row {
+  display: none;
+}
+
+
+/* ---------- 지도 ---------- */
+
+body[data-active-view="home"] .map-shell {
+  margin: 0;
+
+  overflow: hidden;
+
+  border: 2px solid var(--fm-line);
+  border-radius: 4px;
+
+  background: #fff;
+
+  box-shadow:
+          2px 2px 0 rgba(43, 38, 32, 0.82);
+}
+
+body[data-active-view="home"] .map-canvas {
+  width: 100%;
+  height: 170px !important;
+  min-height: 170px;
+
+  border-radius: 0;
+}
+
+body[data-active-view="home"] .map-marker-label,
+body[data-active-view="home"] .naver-marker-label {
+  font-size: 9px;
+}
+
+body[data-active-view="home"] .map-badge {
+  width: 23px;
+  height: 23px;
+
+  border-width: 1.5px !important;
+  border-radius: 3px !important;
+
+  box-shadow: none !important;
+}
+
+body[data-active-view="home"] #map-copy {
+  margin: 0;
+
+  padding: 2px 2px 0;
+
+  border: 0;
+  background: transparent;
+
+  color: #786d5b;
+
+  font-size: 9px;
+  line-height: 1.3;
+  text-align: right;
+}
+
+
+/* ---------- 하단 탐험 시트 ---------- */
+
+body[data-active-view="home"] .home-sheet {
+  gap: 8px;
+
+  padding: 9px 9px 10px;
+
+  border: 2px solid var(--fm-line);
+  border-radius: 5px;
+
+  background: #fffaf0;
+
+  box-shadow:
+          2px 2px 0 rgba(43, 38, 32, 0.82);
+}
+
+body[data-active-view="home"] .home-sheet__grip {
+  width: 32px;
+  height: 4px;
+
+  border: 0;
+  border-radius: 999px !important;
+
+  background: #c7bdad;
+}
+
+body[data-active-view="home"] .home-sheet__heading {
+  display: flex;
+  align-items: center;
+
+  gap: 7px;
+
+  padding-bottom: 5px;
+
+  border-bottom: 1px solid #d8cebc;
+}
+
+body[data-active-view="home"] .home-sheet__title {
+  flex: 1;
+
+  margin: 0;
+
+  font-size: 12px;
+  font-weight: 800;
+}
+
+body[data-active-view="home"] .home-sheet__title::before {
+  content: "◎";
+
+  margin-right: 5px;
+
+  color: var(--fm-amber);
+}
+
+body[data-active-view="home"] .home-sheet__count {
+  padding: 2px 5px;
+
+  border: 1px solid #b7a98f;
+  border-radius: 3px;
+
+  background: #fff;
+
+  color: var(--fm-sub);
+
+  font-size: 9px;
+  font-weight: 700;
+}
+
+
+/*
+ * 기존 지도 제공자 / 현재 위치 줄.
+ * 위치 정보는 이미 위 context bar에 있으므로
+ * 목표 UI에서는 중복 표시하지 않는다.
+ */
+body[data-active-view="home"] .home-sheet > .context-row {
+  display: none;
+}
+
+
+/*
+ * 중요한 부분:
+ * 아래 DOM은 JS renderMapView()가 찾기 때문에 HTML에서 삭제하면 안 된다.
+ * 화면에서만 숨긴다.
+ */
+body[data-active-view="home"]
+.home-sheet__body
+> section[aria-label="선택한 장소 정보"],
+body[data-active-view="home"]
+.home-sheet__body
+> section[aria-label="탐험 상태 요약"],
+body[data-active-view="home"]
+.home-sheet__body
+> section[aria-label="지도 장소 목록"],
+body[data-active-view="home"]
+.home-sheet__body
+> section[aria-label="최근 획득 뱃지"] {
+  display: none;
+}
+
+body[data-active-view="home"]
+.home-sheet[data-snap="mid"]
+.home-sheet__body {
+  max-height: none;
+  overflow: visible;
+}
+
+
+/* ---------- 주변 퀘스트 ---------- */
+
+body[data-active-view="home"] .home-nearby-section {
+  margin: 0;
+}
+
+body[data-active-view="home"] #home-recommendation-list {
+  gap: 7px;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card {
+  position: relative;
+
+  display: grid;
+
+  grid-template-columns: 39px minmax(0, 1fr);
+  grid-template-areas:
+    "icon top"
+    "icon title"
+    "icon place"
+    "meta meta";
+
+  column-gap: 8px;
+  row-gap: 2px;
+
+  width: 100%;
+  min-height: 76px;
+
+  padding: 8px;
+
+  text-align: left;
+
+  border: 1.5px solid var(--fm-line) !important;
+  border-radius: 4px !important;
+
+  background: #fffdf6 !important;
+
+  box-shadow:
+          1px 1px 0 rgba(43, 38, 32, 0.72) !important;
+}
+
+
+/* 왼쪽 퀘스트 타입 아이콘 */
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card::before {
+  content: "✦";
+
+  grid-area: icon;
+
+  display: grid;
+  place-items: center;
+
+  width: 34px;
+  height: 34px;
+
+  align-self: center;
+
+  border: 1.5px solid var(--fm-line);
+  border-radius: 3px;
+
+  background: var(--fm-blue);
+  color: #fff;
+
+  font-size: 15px;
+  font-weight: 800;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card[data-category="nature"]::before {
+  content: "▲";
+  background: var(--fm-green);
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card[data-category="science"]::before {
+  content: "△";
+  background: var(--fm-blue);
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card[data-category="market"]::before {
+  content: "◆";
+  background: var(--fm-amber);
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card[data-category="tashu"]::before {
+  content: "↗";
+  background: #54747d;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.recommendation-card[data-category="heritage"]::before {
+  content: "■";
+  background: #9d6048;
+}
+
+
+/* 분류 + 상태 */
+body[data-active-view="home"]
+#home-recommendation-list
+.card-topline {
+  grid-area: top;
+
+  display: flex;
+
+  margin: 0;
+
+  gap: 4px;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.px-tag {
+  padding: 1px 4px;
+
+  font-size: 8.5px;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.status-badge {
+  margin-left: auto;
+
+  padding: 1px 4px;
+
+  font-size: 8.5px;
+}
+
+
+/* 퀘스트 이름 */
+body[data-active-view="home"]
+#home-recommendation-list
+.card-title {
+  grid-area: title;
+
+  margin: 0;
+
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+
+/* 장소 */
+body[data-active-view="home"]
+#home-recommendation-list
+.card-place {
+  grid-area: place;
+
+  margin: 0;
+
+  color: var(--fm-sub);
+
+  font-size: 9.5px;
+}
+
+
+/* 거리 / 예상 시간 */
+body[data-active-view="home"]
+#home-recommendation-list
+.card-summary {
+  grid-area: meta;
+
+  display: flex;
+
+  margin-top: 4px;
+  padding-top: 5px;
+
+  gap: 9px;
+
+  border-top: 1px solid #e0d6c5;
+
+  color: var(--fm-sub);
+
+  font-size: 9px;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.card-summary .px-counter {
+  font-size: 9px;
+}
+
+body[data-active-view="home"]
+#home-recommendation-list
+.mini-badge {
+  display: none;
+}
+
+
+/* TourAPI 각주는 작게 */
+body[data-active-view="home"] #home-data-note {
+  margin: 7px 0 0;
+
+  padding: 0;
+
+  border: 0;
+
+  background: transparent;
+
+  font-size: 9px;
+  text-align: center;
+}
+
+
+/* ---------- 우측 책갈피 ---------- */
+
+.bookmark-handle {
+  top: 154px;
+
+  width: 34px;
+  min-width: 34px;
+  min-height: 52px;
+
+  padding: 7px 3px;
+
+  gap: 2px;
+
+  border: 2px solid var(--fm-line);
+  border-right: 0;
+
+  border-radius: 6px 0 0 6px !important;
+
+  background: var(--fm-yellow);
+
+  box-shadow:
+          -2px 2px 0 rgba(43, 38, 32, 0.8);
+}
+
+.bookmark-handle__letter {
+  display: none;
+}
+
+.bookmark-handle::before {
+  content: "bookmark";
+
+  font-family: "Material Symbols Outlined";
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.bookmark-handle::after {
+  content: "메뉴";
+
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+}

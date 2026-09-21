@@ -8,7 +8,7 @@
 //   - 릴리스 버전 하나로 캐시 이름과 정적 자산 버전을 원자적으로 올린다.
 
 // 이 릴리스의 버전입니다. 아래 캐시 이름과 자산 주소가 모두 이 값을 씁니다.
-const RELEASE_VERSION = "20260915-integration-62";
+const RELEASE_VERSION = "20260921-drawer-avatar-68";
 
 // 앱 셸 캐시입니다.
 const STATIC_CACHE_NAME = `questbook-static-${RELEASE_VERSION}`;
