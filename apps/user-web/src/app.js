@@ -42,8 +42,7 @@ const CATEGORY_LABELS = {
 
 const CATALOG_CATEGORY_LABELS = CATEGORY_LABELS;
 
-const DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/기본_128.png";
-const LEGACY_DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/default-1.svg";
+const DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/default-1.svg";
 
 // 인증 5종의 표시 이름입니다. (명세 §4.3)
 const QUEST_TYPE_LABELS = {
@@ -3275,7 +3274,7 @@ function getSelectedGgumdori() {
 function getGgumdoriImageRef(item, detail = false) {
   const id = item?.id || item?.ggumdoriId || "";
   if (!item || id === "ggumdori_default_1" || item.name === "기본 꿈돌이" || item.ggumdoriName === "기본 꿈돌이") {
-    return detail ? "/assets/ggumdori/기본_1024.png" : DEFAULT_GGUMDORI_IMAGE;
+    return DEFAULT_GGUMDORI_IMAGE;
   }
   return (detail && (item.detailImageRef || item.ggumdoriDetailImageRef))
     || item.imageRef || item.ggumdoriImageRef || DEFAULT_GGUMDORI_IMAGE;
@@ -3283,7 +3282,7 @@ function getGgumdoriImageRef(item, detail = false) {
 
 // 새 기본 이미지까지 실패하면 기존 기본 SVG로 대체하며 무한 재요청을 막는다.
 function setGgumdoriImageSource(image, primaryRef) {
-  const sources = [...new Set([primaryRef || DEFAULT_GGUMDORI_IMAGE, DEFAULT_GGUMDORI_IMAGE, LEGACY_DEFAULT_GGUMDORI_IMAGE])];
+  const sources = [...new Set([primaryRef || DEFAULT_GGUMDORI_IMAGE, DEFAULT_GGUMDORI_IMAGE])];
   let index = 0;
   const onError = () => {
     if (index + 1 < sources.length) image.src = sources[++index];

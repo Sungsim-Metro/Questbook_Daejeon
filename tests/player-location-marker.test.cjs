@@ -37,7 +37,7 @@ function setup() {
     hasNaverMaps: () => true, getRecommendationLocation: () => ({lat: 35, lng: 128}),
     createElement: (tag, className, text) => Object.assign(new Element(tag), {className, textContent: text}),
   });
-  vm.runInContext('const DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/기본_128.png"; const LEGACY_DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/default-1.svg";', context);
+  vm.runInContext(source.match(/^const DEFAULT_GGUMDORI_IMAGE = .*;$/m)[0], context);
   for (const name of ['getSelectedGgumdori', 'getGgumdoriImageRef', 'setGgumdoriImageSource', 'createPlayerLocationMarker', 'buildNaverPositionMarkerIcon', 'syncNaverPositionMarker']) {
     const start = source.indexOf('function ' + name + '(');
     assert.ok(start >= 0);
@@ -46,16 +46,21 @@ function setup() {
   return {context, state, markers};
 }
 
-test('default image prefers new Korean filename and stops after legacy fallback', () => {
+test('default image uses SVG for thumbnails and details and stops retrying on error', () => {
   const {context, state} = setup();
   const image = new Element('img');
   context.setGgumdoriImageSource(image, context.getGgumdoriImageRef(state.ggumdori[0]));
-  assert.ok(image.src.endsWith('기본_128.png'));
-  image.error();
   assert.ok(image.src.endsWith('default-1.svg'));
   image.error();
   assert.equal(image.events.error, undefined);
-  assert.ok(context.getGgumdoriImageRef(null).endsWith('기본_128.png'));
+  assert.ok(context.getGgumdoriImageRef(null).endsWith('default-1.svg'));
+  assert.ok(context.getGgumdoriImageRef(state.ggumdori[0], true).endsWith('default-1.svg'));
+  const themedImage = new Element('img');
+  context.setGgumdoriImageSource(themedImage, '/missing.png');
+  themedImage.error();
+  assert.ok(themedImage.src.endsWith('default-1.svg'));
+  themedImage.error();
+  assert.equal(themedImage.events.error, undefined);
 });
 
 test('wearing changes refresh the character but GPS updates do not reset its animation', () => {
@@ -72,7 +77,7 @@ test('wearing changes refresh the character but GPS updates do not reset its ani
   assert.equal(marker.iconChanges, 0);
   state.selectedGgumdoriId = 'ggumdori_default_1';
   context.syncNaverPositionMarker();
-  assert.ok(marker.icon.content.children[2].src.endsWith('기본_128.png'));
+  assert.ok(marker.icon.content.children[2].src.endsWith('default-1.svg'));
   assert.equal(marker.iconChanges, 1);
 });
 

@@ -24,7 +24,7 @@ def artwork(prefix: str, tier: int, new: bool) -> str:
 
 GGUMDORI_SEEDS = [
     ("ggumdori_default_1", "기본 꿈돌이", "default", 1, "기본 지급",
-     "/assets/ggumdori/기본_128.png", "대전 탐험을 시작하는 기본 꿈돌이입니다.", "common", 0),
+     "/assets/ggumdori/default-1.svg", "대전 탐험을 시작하는 기본 꿈돌이입니다.", "common", 0),
     *[
         (f"ggumdori_{code}_{tier}", f"{label} 꿈돌이 Lv.{tier}", code, tier,
          f"{label} 퀘스트 누적 {tier}회 성공", artwork(prefix, tier, new),

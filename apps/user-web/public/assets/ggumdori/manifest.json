@@ -3,17 +3,16 @@
   "unlockPolicy": "category-completions",
   "entries": [
     {
-      "assetId": "기본_128",
+      "assetId": "default-1",
       "variantId": "ggumdori_default_1",
       "name": "기본 꿈돌이",
       "category": "default",
       "tier": 1,
       "requiredCount": 0,
       "unlockCondition": "기본 지급",
-      "stillImageRef": "/assets/ggumdori/기본_128.png",
-      "thumbImageRef": "/assets/ggumdori/기본_128.png",
-      "animationImageRef": "/assets/ggumdori/기본_128.gif",
-      "detailImageRef": "/assets/ggumdori/기본_1024.png"
+      "stillImageRef": "/assets/ggumdori/default-1.svg",
+      "thumbImageRef": "/assets/ggumdori/default-1.svg",
+      "detailImageRef": "/assets/ggumdori/default-1.svg"
     },
     {
       "assetId": "science_lv1_128",
