@@ -1,0 +1,821 @@
+/* ==================================================
+   Home layout overrides
+
+   Load after styles.css, stitch-theme.css and reward-fx.css.
+   The selectors intentionally stay inside #view-home so collection and
+   drawer profile components keep their original layout.
+   ================================================== */
+
+/* ---------- Home context: plan / location / weather ---------- */
+
+#home-context-bar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+#home-context-bar .context-plan-row {
+  display: none;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+
+body[data-exploration-mode="planned"] #home-context-bar .context-plan-row {
+  display: flex;
+}
+
+#home-context-bar #home-plan-flag {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 8px;
+  color: var(--px-panel);
+  background: var(--px-plan);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--px-outline);
+  font-family: var(--font-display);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+body[data-exploration-mode="planned"] #home-context-bar #home-plan-flag {
+  display: inline-flex;
+}
+
+#home-context-bar #home-plan-flag .px-icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+}
+
+#home-context-bar .context-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+#home-context-bar .context-place {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 9px;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--px-outline);
+}
+
+body[data-exploration-mode="planned"] #home-context-bar .context-place {
+  border-inline-start: 6px solid var(--px-plan);
+}
+
+#home-context-bar .context-place__name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--px-ink);
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+#home-context-bar .context-place__name .px-icon {
+  flex: 0 0 auto;
+  color: var(--px-danger);
+  font-size: 16px;
+}
+
+#home-place-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#home-gps-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 4px 7px;
+  color: var(--px-ink);
+  background: var(--px-panel-muted);
+  border: 1px solid var(--px-outline);
+  border-radius: 0;
+  font-family: var(--font-display);
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+#home-gps-state.is-active,
+#home-gps-state[data-state="active"] {
+  color: var(--px-panel);
+  background: var(--px-success);
+}
+
+#home-weather-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 112px;
+  min-height: 44px;
+  padding: 7px 9px;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--px-outline);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#home-weather-pill:focus-visible {
+  outline: 3px solid var(--px-blue);
+  outline-offset: 2px;
+}
+
+#home-weather-pill .px-icon {
+  flex: 0 0 auto;
+  color: var(--px-gold);
+  font-size: 18px;
+}
+
+#home-weather-text {
+  display: block;
+  max-width: 105px;
+  overflow: hidden;
+  color: var(--px-ink);
+  font-family: var(--font-display);
+  font-size: 10px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#home-plan-controls {
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+#home-plan-controls[hidden] {
+  display: none;
+}
+
+#home-plan-date-slot {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+#home-plan-date-slot .date-field,
+#home-plan-date-slot .date-field__toggle {
+  width: 100%;
+}
+
+#home-plan-search {
+  flex: 0 0 auto;
+}
+
+body[data-exploration-mode="planned"] #home-context-bar {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+/* ---------- Representative Ggumdori card ---------- */
+
+#view-home > .home-profile-strip {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 9px 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+#view-home .home-profile-strip #profile-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  column-gap: 10px;
+  row-gap: 4px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 40px 9px 9px;
+  overflow: visible;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--px-outline);
+}
+
+/* Let the current renderProfile() children join the panel grid. */
+#view-home .home-profile-strip .profile-main {
+  display: contents;
+}
+
+#view-home .home-profile-strip .profile-main .ggumdori-figure,
+#view-home .home-profile-strip .profile-main .ggumdori-figure.avatar-mark {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1 / 4;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  width: 82px;
+  height: auto;
+  min-width: 82px;
+  min-height: 82px;
+  inline-size: 82px;
+  block-size: auto;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+#view-home .home-profile-strip .profile-main .ggumdori-figure::before {
+  content: "SCI";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  padding: 2px 4px;
+  color: #fff;
+  background: var(--cat-science);
+  border: 1px solid var(--px-outline);
+  font-family: var(--font-display);
+  font-size: 8px;
+  line-height: 1;
+}
+
+#view-home .home-profile-strip .profile-main .ggumdori-figure::after {
+  display: none;
+}
+
+#view-home .home-profile-strip .profile-main .ggumdori-figure img {
+  position: relative;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  inline-size: 72px;
+  block-size: 72px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+#view-home .home-profile-strip .profile-main > div:last-child {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 7px;
+  min-width: 0;
+  padding-right: 0;
+}
+
+#view-home .home-profile-strip .profile-meta {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  margin: 0;
+  padding: 4px 6px;
+  color: #fff;
+  background: #c8712f;
+  border: 1px solid var(--px-outline);
+  border-radius: 0;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+#view-home .home-profile-strip .profile-name {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--px-ink);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#view-home .home-profile-strip .selected-ggumdori-name {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: block;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--px-ink-sub);
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#view-home .home-profile-strip .progress-caption {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: 1px 0 0;
+  color: var(--px-ink);
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+#view-home .home-profile-strip .progress-caption > span {
+  white-space: nowrap;
+}
+
+#view-home .home-profile-strip .progress-bar {
+  position: relative;
+  grid-column: 2;
+  grid-row: 3;
+  display: block;
+  width: 100%;
+  height: 12px;
+  min-height: 12px;
+  margin: 0;
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    to right,
+    var(--px-panel-muted) 0,
+    var(--px-panel-muted) 16px,
+    var(--px-panel) 16px,
+    var(--px-panel) 19px
+  );
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+}
+
+#view-home .home-profile-strip .progress-fill {
+  display: block;
+  height: 100%;
+  background: repeating-linear-gradient(
+    to right,
+    var(--px-gold) 0,
+    var(--px-gold) 16px,
+    #fff1a8 16px,
+    #fff1a8 19px
+  );
+  border-radius: 0;
+}
+
+/* 도감에서 바꾸기 — 일반 사각형 버튼 */
+#view-home
+.home-profile-strip
+.profile-customize-link {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: auto;
+  min-width: 96px;
+  height: 30px;
+  min-height: 30px;
+  padding: 5px 8px;
+
+  color: var(--px-ink);
+  background: var(--px-gold);
+  border: 2px solid var(--px-outline);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 var(--px-outline);
+
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  word-break: keep-all;
+
+  cursor: pointer;
+}
+
+/* 기존 북마크 아래쪽 V 모양 제거 */
+#view-home
+.home-profile-strip
+.profile-customize-link::before {
+  display: none;
+}
+
+/* 기존 클릭 영역용 가상 요소 제거 */
+#view-home
+.home-profile-strip
+.profile-customize-link::after {
+  display: none;
+}
+
+/* 버튼 공간만큼 닉네임 영역 오른쪽 여백 확보 */
+#view-home
+.home-profile-strip
+.profile-main
+> div:last-child {
+  padding-right: 106px;
+}
+
+/* 키보드 접근성 */
+#view-home
+.home-profile-strip
+.profile-customize-link:focus-visible {
+  outline: 3px solid var(--px-blue);
+  outline-offset: 2px;
+}
+
+#view-home
+.home-profile-strip
+.profile-customize-link:hover {
+  filter: brightness(1.04);
+}
+
+#view-home
+.home-profile-strip
+.profile-customize-link:active {
+  box-shadow: none;
+  transform: translate(2px, 2px);
+}
+
+/* Removed by the updated renderProfile(); kept as cache-safe fallback. */
+#view-home .home-profile-strip .stat-row {
+  display: none;
+}
+
+/* ---------- Map spacing ---------- */
+
+#view-home > .map-shell {
+  margin-top: 0;
+}
+
+#view-home > #map-copy {
+  margin-top: 7px;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 380px) {
+  #home-context-bar {
+    gap: 6px;
+  }
+
+  #home-context-bar .context-status-row {
+    grid-template-columns: minmax(0, 1fr) minmax(94px, auto);
+    gap: 6px;
+  }
+
+  #home-context-bar .context-place,
+  #home-weather-pill {
+    min-height: 40px;
+    padding: 6px;
+  }
+
+  #home-context-bar .context-place__name {
+    gap: 3px;
+    font-size: 9px;
+  }
+
+  #home-context-bar .context-place__name .px-icon {
+    font-size: 14px;
+  }
+
+  #home-gps-state {
+    padding: 3px 4px;
+    font-size: 8px;
+  }
+
+  #home-weather-pill {
+    min-width: 94px;
+    gap: 4px;
+  }
+
+  #home-weather-pill .px-icon {
+    font-size: 16px;
+  }
+
+  #home-weather-text {
+    max-width: 76px;
+    font-size: 8px;
+  }
+
+  #view-home .home-profile-strip #profile-panel {
+    grid-template-columns: 72px minmax(0, 1fr);
+    column-gap: 8px;
+    padding: 8px 34px 8px 8px;
+  }
+
+  #view-home .home-profile-strip .profile-main .ggumdori-figure,
+  #view-home .home-profile-strip .profile-main .ggumdori-figure.avatar-mark {
+    width: 72px;
+    min-width: 72px;
+    min-height: 78px;
+    inline-size: 72px;
+  }
+
+  #view-home .home-profile-strip .profile-main .ggumdori-figure img {
+    width: 64px;
+    height: 64px;
+    inline-size: 64px;
+    block-size: 64px;
+  }
+
+  #view-home .home-profile-strip .profile-name {
+    font-size: 14px;
+  }
+
+  #view-home .home-profile-strip .profile-meta {
+    min-height: 20px;
+    padding: 3px 4px;
+    font-size: 8px;
+  }
+
+  #view-home .home-profile-strip .selected-ggumdori-name {
+    font-size: 9px;
+  }
+
+  #view-home .home-profile-strip .progress-caption {
+    font-size: 8px;
+  }
+
+  #view-home .home-profile-strip .profile-customize-link {
+    right: -31px;
+    width: 34px;
+    min-width: 34px;
+    font-size: 7px;
+  }
+}
+
+@media (max-width: 340px) {
+  #home-context-bar .context-status-row {
+    grid-template-columns: minmax(0, 1fr) 86px;
+    gap: 5px;
+  }
+
+  #home-weather-pill {
+    min-width: 86px;
+    padding-inline: 4px;
+  }
+
+  #home-weather-text {
+    max-width: 66px;
+  }
+
+  #view-home .home-profile-strip #profile-panel {
+    grid-template-columns: 66px minmax(0, 1fr);
+    padding-right: 31px;
+  }
+
+  #view-home .home-profile-strip .profile-main .ggumdori-figure,
+  #view-home .home-profile-strip .profile-main .ggumdori-figure.avatar-mark {
+    width: 66px;
+    min-width: 66px;
+    inline-size: 66px;
+  }
+
+  #view-home .home-profile-strip .profile-main .ggumdori-figure img {
+    width: 58px;
+    height: 58px;
+    inline-size: 58px;
+    block-size: 58px;
+  }
+
+  #view-home .home-profile-strip .profile-name {
+    font-size: 12px;
+  }
+
+  #view-home
+  .home-profile-strip
+  .profile-main
+  > div:last-child {
+    padding-right: 88px;
+  }
+
+  #view-home
+  .home-profile-strip
+  .profile-customize-link {
+    min-width: 80px;
+    height: 28px;
+    min-height: 28px;
+    padding-inline: 6px;
+    font-size: 8px;
+  }
+}
+
+
+/* ==================================================
+   우측 메뉴 탭
+
+   버튼의 오른쪽 끝을 앱 셸 오른쪽 끝에 맞춥니다.
+   right 규칙 하나로 화면 폭에 따른 위치 충돌을 막습니다.
+   ================================================== */
+
+:root {
+  --bookmark-handle-width: 50px;
+}
+
+#bookmark-handle.bookmark-handle {
+  position: fixed;
+  top: 155px;
+
+  /*
+   * 모바일에서는 right: 0입니다.
+   * 520px보다 넓은 미리보기에서는 중앙 모바일 셸의 오른쪽 여백만큼
+   * right 값을 주어 셸 테두리에 붙입니다.
+   */
+  left: auto !important;
+  right: max(0px, calc((100vw - var(--shell-max-width)) / 2)) !important;
+  z-index: 45;
+
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  grid-template-rows: 25px auto;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0;
+  row-gap: 2px;
+
+  width: 50px;
+  min-width: 50px;
+  height: 68px;
+  min-height: 68px;
+  margin: 0 !important;
+  padding: 7px 6px 9px;
+
+  color: var(--px-ink);
+  background: var(--px-gold);
+  border: 2px solid var(--px-outline);
+  border-right: 0;
+  border-inline-end: 0;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -3px 3px 0 rgba(44, 29, 22, 0.35);
+
+  font-family: var(--font-display);
+  cursor: pointer;
+
+  transform: none;
+}
+
+/* 첫 번째 글자 자리를 북마크 아이콘으로 사용합니다. */
+#bookmark-handle .bookmark-handle__letter:first-child {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 25px;
+  font-size: 0;
+  line-height: 1;
+}
+
+#bookmark-handle .bookmark-handle__letter:first-child::before {
+  content: "bookmark_border";
+  display: block;
+  color: var(--px-ink);
+  font-family: "Material Symbols Outlined";
+  font-size: 24px;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  font-feature-settings: "liga";
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 두 번째 글자 자리에 메뉴 전체 문구를 표시합니다. */
+#bookmark-handle .bookmark-handle__letter:nth-child(2) {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-size: 0;
+  line-height: 1;
+}
+
+#bookmark-handle .bookmark-handle__letter:nth-child(2)::before {
+  content: "메뉴";
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* 기존 책갈피 꼬리와 확장 클릭 영역을 모두 제거합니다. */
+#bookmark-handle.bookmark-handle::after {
+  content: none !important;
+  display: none !important;
+}
+
+#bookmark-handle:hover {
+  filter: brightness(1.04);
+}
+
+#bookmark-handle:active {
+  box-shadow: -1px 1px 0 rgba(44, 29, 22, 0.35);
+  transform: translateY(2px);
+}
+
+#bookmark-handle:focus-visible {
+  outline: 3px solid var(--px-blue);
+  outline-offset: 3px;
+}
+
+#bookmark-handle[aria-expanded="true"] {
+  visibility: hidden;
+}
+
+@media (max-width: 380px) {
+  :root {
+    --bookmark-handle-width: 46px;
+  }
+
+  #bookmark-handle.bookmark-handle {
+    top: 150px;
+    width: 46px;
+    min-width: 46px;
+    height: 64px;
+    min-height: 64px;
+    padding-inline: 5px;
+  }
+
+  #bookmark-handle .bookmark-handle__letter:first-child::before {
+    font-size: 22px;
+  }
+
+  #bookmark-handle .bookmark-handle__letter:nth-child(2)::before {
+    font-size: 10px;
+  }
+}
