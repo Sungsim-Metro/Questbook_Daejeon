@@ -3,6 +3,8 @@ CLAUDE.md
 .env
 .env.*
 !.env.example
+server.env
+.idea/
 
 # macOS AppleDouble
 ._*

@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -89,8 +89,10 @@ def safe_static_path(raw_path: str) -> tuple[Path, Path] | None:
     역할: public과 src 밖의 파일 접근을 차단한다.
     호출 예시: result = safe_static_path(\"/src/app.js\")
     """
-    # 변수 의미: URL 디코딩 전 경로에서 쿼리를 제거한 값이다.
-    request_path = raw_path if raw_path != "/" else "/index.html"
+    # 브라우저가 한글 파일명을 percent encoding하므로 경계 검사 전에 한 번 디코딩한다.
+    request_path = unquote(raw_path) if raw_path != "/" else "/index.html"
+    if "\x00" in request_path:
+        return None
     if request_path.startswith("/src/"):
         # 변수 의미: src 기준 상대 경로다.
         relative_path = request_path.removeprefix("/src/").lstrip("/")
