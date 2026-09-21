@@ -1896,6 +1896,28 @@ async function createApiError(response) {
 }
 
 /**
+ * 입력: Authorization에 쓰는 access token 문자열.
+ * 출력: 만료(또는 해석 불가) 여부.
+ * 역할: 서버에 물어보지 않고 토큰 payload의 exp만 디코딩해 로컬에서 판단한다. 만료된 토큰이
+ *       로컬에 남아있으면 ensureSessionReady()가 "로그인된 것"으로 착각해 로그인 화면을
+ *       다시 못 띄우는 문제를 막는다.
+ * 호출 예시: if (isAccessTokenExpired(state.accessToken)) resetExpiredSession()
+ */
+function isAccessTokenExpired(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) {
+    return true;
+  }
+
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return !payload.exp || Date.now() >= Number(payload.exp) * 1000;
+  } catch (error) {
+    return true;
+  }
+}
+
+/**
  * 입력: 오류 객체.
  * 출력: 인증 만료 오류 여부.
  * 역할: API 호출 실패 중 401만 세션 만료 처리 대상으로 구분한다.
@@ -2385,10 +2407,17 @@ function consumeOAuthRedirect() {
 /**
  * 입력: 없음.
  * 출력: 인증 준비 여부.
- * 역할: 저장된 access token이 없으면 동의 패널을 표시한다.
+ * 역할: 저장된 access token이 없으면 동의 패널을 표시한다. 토큰이 있어도 이미 만료됐으면
+ *       (실제 JWT가 아닌 디자인 프리뷰용 "design-preview" 토큰은 제외) 서버에 물어보지 않고
+ *       바로 로그인 화면으로 되돌려서, 죽은 토큰 때문에 로그인 화면을 다시 못 띄우는 문제를 막는다.
  * 호출 예시: if (ensureSessionReady()) await loadInitialData()
  */
 function ensureSessionReady() {
+  if (state.accessToken && state.accessToken !== "design-preview" && isAccessTokenExpired(state.accessToken)) {
+    resetExpiredSession();
+    return false;
+  }
+
   if (state.accessToken) {
     setConsentPanelVisible(false);
     return true;
@@ -10988,6 +11017,24 @@ function readCurrentPosition(options = {}) {
 }
 
 /**
+ * 입력: Geolocation API 옵션, 남은 재시도 횟수.
+ * 출력: 현재 위치 Position Promise.
+ * 역할: 실내/재부팅 직후처럼 Wi-Fi 기반 위치추정이 느려 첫 시도가 타임아웃나는 경우를 대비해,
+ *       실패 시 지정된 횟수만큼 곧바로 재시도한 뒤에도 안 되면 그제서야 예외를 던진다.
+ * 호출 예시: const position = await readCurrentPositionWithRetry({ enableHighAccuracy: true, timeout: 15000 }, 1)
+ */
+async function readCurrentPositionWithRetry(options = {}, retries = 1) {
+  try {
+    return await readCurrentPosition(options);
+  } catch (error) {
+    if (retries <= 0) {
+      throw error;
+    }
+    return readCurrentPositionWithRetry(options, retries - 1);
+  }
+}
+
+/**
  * 입력: 위도/경도 두 쌍.
  * 출력: 두 좌표 사이의 대략적인 거리(미터).
  * 역할: GPS 오차 좌표를 걸러내는 판정에만 쓸 근사 거리를 구한다(정밀한 지도 표시용 계산이 아님).
@@ -11551,7 +11598,7 @@ function requestLocation() {
     return;
   }
 
-  readCurrentPosition({ enableHighAccuracy: true, timeout: 7000, maximumAge: 300000 })
+  readCurrentPositionWithRetry({ enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }, 1)
     .then((position) => {
       state.location = normalizeMeasuredLocation(position);
       syncNaverPositionMarker();
@@ -11576,10 +11623,14 @@ function requestLocation() {
  *       로딩바가 사라지기 전에 끝내 그 전환 자체가 보이지 않게 한다. 세션 준비 여부와 무관하게
  *       항상 시도한다(ensureSessionReady()는 미동의 사용자를 동의 화면으로 강제 이동시키는
  *       부작용이 있어 로딩 중 호출에 부적합, 위치 요청 자체는 로그인 여부와 무관함).
+ *       주의: setupStartScreenLoading()의 START_SCREEN_TASK_TIMEOUT_MS(8초)가 지나면 이 요청과
+ *       무관하게 로딩화면은 강제로 사라진다. 이 함수의 대기 시간을 requestLocation()처럼 늘리면
+ *       로딩화면이 사라진 뒤에도 이 요청이 계속 돌다가 뒤늦게 위치가 바뀌어 위 설명대로 전환이
+ *       그대로 노출된다 — 그래서 재시도 없이 8초 예산 안에 끝나는 단발 시도로 짧게 유지한다.
  * 호출 예시: prefetchLocation()
  */
 function prefetchLocation() {
-  readCurrentPosition({ enableHighAccuracy: true, timeout: 7000, maximumAge: 300000 })
+  readCurrentPositionWithRetry({ enableHighAccuracy: true, timeout: 7000, maximumAge: 300000 }, 0)
     .then((position) => {
       state.location = normalizeMeasuredLocation(position);
       syncNaverPositionMarker();
