@@ -9,7 +9,6 @@ from typing import Any
 
 from questbook_api.application.quest_generation import QUEST_TEMPLATES, build_template_quest
 from questbook_api.domain.models import QuestTemplate, TourPlaceCandidate
-from questbook_api.domain.ggumdori_rewards import completion_theme
 from questbook_api.infrastructure.cache import TourPlaceRedisCache, utc_now
 from questbook_api.infrastructure.repository import QuestbookRepository
 from questbook_api.integrations.object_storage.client import sanitize_object_key_token
@@ -936,7 +935,6 @@ class BaselineQuestbookService:
             "description": reusable_quest["description"],
             "type": reusable_quest["type"],
             "categoryCode": reusable_quest["category_code"],
-            "rewardCategory": completion_theme(reusable_quest["category_code"], reusable_quest["place_name"], reusable_quest["title"]),
             "rewardXp": reusable_quest["reward_xp"],
             "verificationType": reusable_quest["verification_type"],
             "placeReference": {
@@ -966,7 +964,6 @@ class BaselineQuestbookService:
             "description": instance["description"],
             "type": instance["type"],
             "categoryCode": instance["category_code"],
-            "rewardCategory": completion_theme(instance["category_code"], instance["place_name"], instance["title"]),
             "rewardXp": instance["reward_xp"],
             "verificationType": instance["verification_type"],
             "placeReference": {
