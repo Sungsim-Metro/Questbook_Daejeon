@@ -43,6 +43,7 @@ const CATEGORY_LABELS = {
 const CATALOG_CATEGORY_LABELS = CATEGORY_LABELS;
 
 const DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/default-1.svg";
+const DEFAULT_GGUMDORI_ANIMATED_IMAGE = "/assets/ggumdori/default-1.gif";
 
 // 인증 5종의 표시 이름입니다. (명세 §4.3)
 const QUEST_TYPE_LABELS = {
@@ -3271,13 +3272,29 @@ function getSelectedGgumdori() {
   return state.ggumdori.find((item) => item.unlocked) || null;
 }
 
-function getGgumdoriImageRef(item, detail = false) {
+/**
+ * 입력: 정적(.png) 꿈돌이 이미지 경로.
+ * 출력: 같은 이름의 움직이는(.gif) 이미지 경로(없으면 원본 그대로).
+ * 역할: 메뉴 프로필처럼 정지 이미지가 필요한 자리를 제외한 모든 화면에서 움직이는 꿈돌이를
+ *       보여달라는 요청에 따라, DB의 image_ref(.png)를 화면 표시 시점에만 .gif로 바꿔치기한다.
+ *       기본 꿈돌이(.svg)처럼 움직이는 버전이 없는 이미지는 그대로 둔다.
+ * 호출 예시: image.src = toAnimatedGgumdoriRef(item.imageRef)
+ */
+function toAnimatedGgumdoriRef(ref) {
+  if (ref === DEFAULT_GGUMDORI_IMAGE) {
+    return DEFAULT_GGUMDORI_ANIMATED_IMAGE;
+  }
+  return String(ref || "").replace(/\.png(\?.*)?$/i, ".gif$1");
+}
+
+function getGgumdoriImageRef(item, detail = false, animated = false) {
   const id = item?.id || item?.ggumdoriId || "";
   if (!item || id === "ggumdori_default_1" || item.name === "기본 꿈돌이" || item.ggumdoriName === "기본 꿈돌이") {
-    return DEFAULT_GGUMDORI_IMAGE;
+    return animated ? DEFAULT_GGUMDORI_ANIMATED_IMAGE : DEFAULT_GGUMDORI_IMAGE;
   }
-  return (detail && (item.detailImageRef || item.ggumdoriDetailImageRef))
+  const ref = (detail && (item.detailImageRef || item.ggumdoriDetailImageRef))
     || item.imageRef || item.ggumdoriImageRef || DEFAULT_GGUMDORI_IMAGE;
+  return animated ? toAnimatedGgumdoriRef(ref) : ref;
 }
 
 // 새 기본 이미지까지 실패하면 기존 기본 SVG로 대체하며 무한 재요청을 막는다.
@@ -3308,7 +3325,7 @@ function createGgumdoriFigure(item, isSmall = false) {
   if (item?.imageRef || !item) {
     // 꿈돌이 SVG 이미지를 표시하는 요소입니다.
     const image = document.createElement("img");
-    setGgumdoriImageSource(image, getGgumdoriImageRef(item));
+    setGgumdoriImageSource(image, getGgumdoriImageRef(item, false, true));
     image.alt = item ? (item.unlocked ? item.name : `${item.name} 잠김`) : "기본 꿈돌이";
     image.loading = "lazy";
     figure.append(image);
@@ -5006,7 +5023,7 @@ function createRewardPairPanel(quest, _questStatus) {
       pair.append(createRewardSlot("보유 뱃지", badge.name, badge.imageRef || "", true, category));
     }
     if (ggumdori) {
-      pair.append(createRewardSlot("보유 꿈돌이", ggumdori.name, ggumdori.imageRef, true, category));
+      pair.append(createRewardSlot("보유 꿈돌이", ggumdori.name, toAnimatedGgumdoriRef(ggumdori.imageRef), true, category));
     }
     panel.append(pair);
   } else {
@@ -7552,7 +7569,7 @@ function createCatalogCard(entry) {
   const art = createElement("div", "catalog-card__art");
   if (entry.ggumdoriImageRef) {
     const image = document.createElement("img");
-    setGgumdoriImageSource(image, getGgumdoriImageRef(entry));
+    setGgumdoriImageSource(image, getGgumdoriImageRef(entry, false, true));
     image.alt = "";
     image.loading = "lazy";
     art.append(image);
@@ -7751,7 +7768,7 @@ function renderCatalogSheet() {
   const figure = createElement("div", `catalog-detail__art${isEarned ? "" : " is-locked"}`);
   if (entry.ggumdoriImageRef) {
     const image = document.createElement("img");
-    setGgumdoriImageSource(image, getGgumdoriImageRef(entry, true));
+    setGgumdoriImageSource(image, getGgumdoriImageRef(entry, true, true));
     image.alt = isEarned
       ? entry.ggumdoriName
       : localize(`${entry.ggumdoriName} 미획득`, `${UI_STRINGS_EN[entry.ggumdoriName] || entry.ggumdoriName} (not yet earned)`);
@@ -9829,7 +9846,7 @@ function renderPhotoSheet() {
     if (entry?.ggumdoriImageRef) {
       const overlay = document.createElement("img");
       overlay.className = "photo-overlay";
-      overlay.src = entry.ggumdoriImageRef;
+      overlay.src = toAnimatedGgumdoriRef(entry.ggumdoriImageRef);
       overlay.alt = "";
       overlay.style.height = `${state.photo.scale}%`;
       overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
@@ -10821,7 +10838,7 @@ function createShareCard(note) {
   if (featured?.imageRef) {
     const image = document.createElement("img");
     image.className = "share-card__art";
-    image.src = featured.imageRef;
+    image.src = toAnimatedGgumdoriRef(featured.imageRef);
     image.alt = "";
     card.append(image);
   }
