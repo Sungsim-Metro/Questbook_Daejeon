@@ -258,6 +258,7 @@ def with_distances(places: list[TourPlaceCandidate], latitude: float, longitude:
                 round(distance_meters, 1),
                 place.source,
                 place.content_type_id,
+                place.image_url,
             )
         )
     return places_with_distances
@@ -321,6 +322,20 @@ def normalize_service_key(raw_service_key: str) -> str:
     if not stripped_key:
         return ""
     return unquote(stripped_key)
+
+
+def normalize_image_url(raw_url: Any) -> str:
+    """
+    입력: TourAPI가 준 이미지 URL 후보(firstimage, galWebImageUrl 등).
+    출력: 화면에 바로 쓸 https URL. 쓸 수 없는 값이면 빈 문자열.
+    역할: TourAPI 이미지 URL은 http로 오는 경우가 많아 https 페이지에서 혼합 콘텐츠가 되므로
+          https로 올리고, http(s)가 아닌 값은 버린다.
+    호출 예시: normalize_image_url("http://tong.visitkorea.or.kr/cms/a.jpg")
+    """
+    url = str(raw_url or "").strip()
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    return url if url.startswith("https://") and len(url) <= 1024 else ""
 
 
 def build_operation_url(service_host: str, operation: str) -> str:
@@ -862,6 +877,57 @@ class TourApiClient:
             }
         return best_story
 
+    def find_gallery_image(self, place_title: str) -> str | None:
+        """
+        입력: 관광지 이름.
+        출력: 관광사진 https URL. 맞는 사진이 없으면 빈 문자열, 호출 자체가 실패하면 None.
+        역할: 목록 응답에 대표 사진(firstimage)이 없는 장소를 관광사진 정보(PhotoGalleryService1)
+              키워드 검색으로 보충한다. 관광사진은 contentId로 연결되지 않아 이름으로 찾으므로,
+              제목·키워드·촬영지에 장소명이 들어 있고 대전에서 찍은 사진만 인정한다.
+              요청마다가 아니라 일일 배치에서만 부른다(catalog_sync.sync_place_images).
+        호출 예시: url = client.find_gallery_image("한밭수목원")
+        """
+        # 변수 의미: 비교용으로 공백·특수문자를 뺀 장소명이다.
+        normalized_title = normalize_match_text(place_title)
+        if not self.service_key or len(normalized_title) < 2:
+            return ""
+        query_params = {
+            "serviceKey": self.service_key,
+            "MobileOS": "ETC",
+            "MobileApp": "QuestbookDaejeon",
+            "_type": "json",
+            "numOfRows": "20",
+            "pageNo": "1",
+            "arrange": "B",
+            "keyword": place_title,
+        }
+        request_url = f"{build_operation_url('PhotoGalleryService1', 'gallerySearchList1')}?{urlencode(query_params)}"
+        self._record_quota_call()
+        try:
+            with urlopen(request_url, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if extract_result_code(payload) != TOURAPI_SUCCESS_RESULT_CODE:
+                return None
+            candidates = extract_response_items(extract_response_body(payload))
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return None
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            location = str(candidate.get("galPhotographyLocation", ""))
+            if location and "대전" not in location:
+                continue
+            haystack = normalize_match_text(
+                f"{candidate.get('galTitle', '')} {candidate.get('galSearchKeyword', '')} {location}"
+            )
+            if normalized_title not in haystack:
+                continue
+            image_url = normalize_image_url(candidate.get("galWebImageUrl"))
+            if image_url:
+                return image_url
+        return ""
+
     def _search_nearby_raw(
         self, service_host: str, latitude: float, longitude: float, radius_meters: int,
     ) -> list[dict[str, Any]]:
@@ -1082,6 +1148,8 @@ class TourApiClient:
             category_code, category_name = map_tourapi_category(raw_item)
             # 변수 의미: 장소 상세(detailIntro2) 조회에 필요한 TourAPI 콘텐츠 타입 ID다.
             content_type_id = str(raw_item.get("contenttypeid") or "").strip()
+            # 변수 의미: 목록 응답에 함께 오는 대표 사진이다. 원본(firstimage)이 없으면 썸네일을 쓴다.
+            image_url = normalize_image_url(raw_item.get("firstimage")) or normalize_image_url(raw_item.get("firstimage2"))
             places.append(
                 TourPlaceCandidate(
                     content_id,
@@ -1094,6 +1162,7 @@ class TourApiClient:
                     None,
                     "tourapi",
                     content_type_id,
+                    image_url,
                 )
             )
         return places

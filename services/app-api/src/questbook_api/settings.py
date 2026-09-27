@@ -204,6 +204,9 @@ class AppSettings:
     naver_api_hub_key_id: str = ""
     # 변수 의미: NAVER API HUB(지역검색) Client Secret이다.
     naver_api_hub_key: str = ""
+    # 변수 의미: 기상청 단기예보(getVilageFcst) 서비스 키다. 비어 있으면 /api/weather가
+    # 항상 unavailable로 응답한다.
+    kma_weather_service_key: str = ""
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -291,4 +294,5 @@ class AppSettings:
             ),
             naver_api_hub_key_id=get_env("NAVER_API_HUB_KEY_ID"),
             naver_api_hub_key=get_env("NAVER_API_HUB_KEY"),
+            kma_weather_service_key=get_env("KMA_WEATHER_SERVICE_KEY"),
         )

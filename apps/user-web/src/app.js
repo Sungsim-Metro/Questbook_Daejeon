@@ -42,6 +42,20 @@ const CATEGORY_LABELS = {
 
 const CATALOG_CATEGORY_LABELS = CATEGORY_LABELS;
 
+// 지도 마커로 쓰는 카테고리별 픽셀아트 핀입니다. culture/nature는 아직 전용 마커가
+// 없어서 테이블에 없고, 이 경우 지도 코드가 기존 이모지(getCategoryIcon)로 폴백합니다.
+const CATEGORY_MARKER_ICONS = {
+  science: "/assets/markers/marker-science.svg",
+  bread: "/assets/markers/marker-bread.svg",
+  noodle: "/assets/markers/marker-food.svg",
+  sport: "/assets/markers/marker-baseball.svg",
+  heritage: "/assets/markers/marker-history.svg",
+  market: "/assets/markers/marker-shopping.svg",
+  tashu: "/assets/markers/marker-tashu.svg",
+  spa: "/assets/markers/marker-spa.svg",
+  festival: "/assets/markers/marker-festival.svg",
+};
+
 const DEFAULT_GGUMDORI_IMAGE = "/assets/ggumdori/default-1.svg";
 const DEFAULT_GGUMDORI_ANIMATED_IMAGE = "/assets/ggumdori/default-1.gif";
 
@@ -167,6 +181,36 @@ const LEGACY_VIEW_MAP = {
   badges: "collection",
   customize: "collection",
   notes: "me",
+};
+
+// 화면마다 처음(또는 "다시 보지 않기" 전까지 매번) 보여 줄 스포트라이트 안내입니다.
+// targetSelector가 가리키는 요소만 밝게 남기고 나머지는 어둡게 덮어 게임 튜토리얼처럼 보여 줍니다.
+const VIEW_TUTORIAL_TIPS = {
+  home: {
+    targetSelector: "#map-location-button",
+    title: "현재 위치로 이동",
+    text: "지도가 다른 곳을 보고 있어도 이 버튼을 누르면 바로 내 위치로 돌아와요.",
+  },
+  adventure: {
+    targetSelector: "[data-adventure-sort]",
+    title: "정렬 기준 바꾸기",
+    text: "가까운 순·시작한 순으로 진행 중인 퀘스트 순서를 바꿔볼 수 있어요.",
+  },
+  quests: {
+    targetSelector: "[data-quests-view]",
+    title: "보기 방식 바꾸기",
+    text: "카드형·목록형으로 퀘스트 목록 보는 방식을 바꿀 수 있어요.",
+  },
+  collection: {
+    targetSelector: "#collection-photo-button",
+    title: "꿈돌이와 사진 찍기",
+    text: "여기를 누르면 보유한 꿈돌이를 골라 바로 사진을 찍을 수 있어요.",
+  },
+  me: {
+    targetSelector: "#me-record-open",
+    title: "나의 모험 기록",
+    text: "여기서 완료한 퀘스트를 월별로 모아 다시 볼 수 있어요.",
+  },
 };
 
 // NAVER Maps JavaScript SDK URL입니다.
@@ -474,6 +518,9 @@ const APP_SETTINGS_KEY = "questbook:user-web:app-settings";
 // 마이페이지의 모션 줄이기 설정을 저장하는 키입니다.
 const REDUCED_MOTION_KEY = "questbook:user-web:reduced-motion";
 
+// 화면별 첫 안내(스포트라이트 튜토리얼)를 "다시 보지 않기"로 끈 화면 id 목록을 저장하는 키입니다.
+const VIEW_TUTORIAL_DISMISSED_KEY = "questbook:user-web:view-tutorial-dismissed";
+
 // 브라우저에 저장할 baseline access token 키입니다.
 const ACCESS_TOKEN_KEY = "questbook:user-web:access-token";
 
@@ -584,7 +631,9 @@ const state = {
   // 마이페이지의 모션 줄이기 설정입니다. (명세 §12)
   reducedMotion: readAppSettings().reducedMotion,
   // 홈 3단 시트의 현재 스냅입니다. (명세 §10 S03)
-  homeSheetSnap: "mid",
+  // 기본값을 "full"로 둬서 지도 아래 섹션들(특히 주변 퀘스트 목록)이 40dvh로
+  // 눌리지 않고 펼쳐진 채로 시작합니다. 그립을 눌러 여전히 mid/collapsed로 접을 수 있습니다.
+  homeSheetSnap: "full",
   // 모험 중 화면의 정렬 기준입니다. (명세 §10 S04)
   adventureSort: "distance",
   // 사용자가 정렬을 직접 고른 적이 있는지 여부입니다. 고르기 전에는 위치 권한에 따라 기본값이 정해집니다. (명세 §10 S04)
@@ -679,6 +728,10 @@ const state = {
   catalogMessage: "",
   // 도감 시트를 열기 직전에 포커스가 있던 요소입니다.
   catalogSheetReturnFocus: null,
+  // 도감 상단 "사진 찍기"로 연 꿈돌이 선택 시트가 열려 있는지 여부입니다.
+  ggumdoriPickerOpen: false,
+  // 꿈돌이 선택 시트를 열기 직전에 포커스가 있던 요소입니다.
+  ggumdoriPickerReturnFocus: null,
   // S05 퀘스트 목록의 보기 방식입니다. 목록형과 카드형이 같은 데이터를 씁니다. (명세 §10 S05)
   questsViewMode: "card",
   // S05 난이도 필터입니다. "all" 이면 전체입니다. (명세 §4.2, §10 S05)
@@ -2029,6 +2082,8 @@ function clearAccountActions() {
   state.recordSheetOpen = false;
   state.recordDetailId = "";
   state.catalogSheetId = "";
+  state.ggumdoriPickerOpen = false;
+  state.ggumdoriPickerReturnFocus = null;
   state.questSheetId = "";
   state.planSheetOpen = false;
   state.weatherSheetOpen = false;
@@ -2054,6 +2109,8 @@ function setConsentPanelVisible(isVisible) {
   const appViews = select("#app-views");
   // 우측 책갈피 손잡이입니다. 동의 전에는 이동할 화면이 없어 감춥니다.
   const handle = select("#bookmark-handle");
+  // 헤더의 레벨 배지입니다. 로그인 전에는 아직 의미 있는 레벨이 없어 감춥니다.
+  const levelBadge = select("#header-level");
 
   if (panel) {
     panel.hidden = !isVisible;
@@ -2064,8 +2121,16 @@ function setConsentPanelVisible(isVisible) {
   if (handle) {
     handle.hidden = isVisible;
   }
+  if (levelBadge) {
+    levelBadge.hidden = isVisible;
+  }
   if (isVisible) {
     closeDrawer();
+  } else {
+    // 동의 화면이 사라지고 실제 화면이 처음 보이는 순간입니다. setActiveView()의
+    // isSameView 판정(초기 activeView와 첫 setActiveView 호출 값이 같아 걸러짐)에
+    // 걸리지 않는 유일한 지점이라, 첫 화면 소개는 여기서 직접 띄웁니다.
+    maybeShowViewTutorial(state.activeView);
   }
 }
 
@@ -2604,6 +2669,8 @@ function normalizeRecommendation(rawItem) {
     // 관광지 상세 모달 조회에 쓰는 TourAPI 식별자입니다.
     placeContentId: String(item.placeContentId || place.contentId || item.contentId || ""),
     placeContentTypeId: String(item.placeContentTypeId || place.contentTypeId || item.contentTypeId || ""),
+    // 관광지 대표 사진입니다. 카드와 상세 시트에 쓰며, 없으면 사진 없이 그립니다.
+    placeImageUrl: toSafeImageUrl(item.placeImageUrl || place.imageUrl),
     category: normalizeCategory(
       quest.rewardCategory || item.rewardCategory || item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
     ),
@@ -2641,6 +2708,35 @@ function normalizeRecommendation(rawItem) {
     // 실제 수행할 수 있는 행사 회차 목록입니다. (명세 §11.1, §16.2)
     festivalTargets: unwrapList(item.festivalTargets || quest.festivalTargets).map(normalizeFestivalTarget),
   };
+}
+
+/**
+ * 입력: 서버가 준 이미지 URL 후보.
+ * 출력: https 또는 같은 출처(/로 시작) URL. 아니면 "".
+ * 역할: 관광지 사진 주소로 쓸 수 있는 값만 남긴다.
+ * 호출 예시: toSafeImageUrl("https://tong.visitkorea.or.kr/a.jpg")
+ */
+function toSafeImageUrl(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  return url.startsWith("https://") || (url.startsWith("/") && !url.startsWith("//")) ? url : "";
+}
+
+/**
+ * 입력: 사진 URL, CSS 클래스, 대체 텍스트.
+ * 출력: 관광지 사진 요소.
+ * 역할: 사진을 늦게 불러오고, 주소가 깨졌으면 빈 자리를 남기지 않고 요소를 지운다.
+ * 호출 예시: createPlacePhoto(url, "card-photo", "")
+ */
+function createPlacePhoto(url, className, altText) {
+  const frame = createElement("div", className);
+  const image = document.createElement("img");
+  image.src = url;
+  image.alt = altText;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.addEventListener("error", () => frame.remove(), { once: true });
+  frame.append(image);
+  return frame;
 }
 
 /**
@@ -3097,20 +3193,25 @@ function buildNaverPlaceMarkerIcon(place, isSelected, itineraryOrder) {
   const itineraryClass = itineraryOrder ? " is-itinerary" : "";
   // HTML 마커에 넣을 안전한 장소명입니다.
   const safePlaceName = escapeHtml(place.placeName);
-  // 변수 의미: 뱃지 안에 넣을 내용입니다. 일정에 담긴 장소는 순번을, 그 외에는 카테고리
-  // 아이콘을 보여줘서 지도에서 바로 몇 번째 방문지인지 알 수 있게 한다.
-  const badgeContent = itineraryOrder ? String(itineraryOrder) : getCategoryIcon(place.category);
+  // 변수 의미: 뱃지 안에 넣을 마크업입니다. 일정에 담긴 장소는 순번을, 그 외에는 카테고리
+  // 마커(SVG 있으면 그 이미지, 없으면 이모지)를 보여줘서 지도에서 바로 몇 번째
+  // 방문지인지, 또는 어떤 종류의 장소인지 알 수 있게 한다.
+  const badgeMarkup = itineraryOrder
+    ? `<span class="map-badge">${itineraryOrder}</span>`
+    : buildCategoryBadgeMarkup(place.category);
   // NAVER Maps가 렌더링할 HTML 마커입니다.
   const content = `
     <button class="naver-marker${selectedClass}${itineraryClass}" type="button" aria-label="${safePlaceName}">
-      <span class="map-badge">${badgeContent}</span>
+      ${badgeMarkup}
       <span class="naver-marker-label">${safePlaceName}</span>
     </button>
   `;
 
   return {
     content,
-    anchor: new window.naver.maps.Point(24, 58),
+    // 카테고리 SVG 마커(32x40, 꼬리 달린 핀)는 기존 원형 배지(34px)보다 세로로 길어서
+    // 핀 끝점이 좌표에 고정되도록 anchor y를 함께 늘렸다.
+    anchor: new window.naver.maps.Point(24, 64),
   };
 }
 
@@ -3141,7 +3242,8 @@ function createPlayerLocationMarker() {
   image.className = "player-location-marker__character";
   image.alt = "";
   image.draggable = false;
-  setGgumdoriImageSource(image, getGgumdoriImageRef(item));
+  // 지도 마커도 다른 곳(홈 프로필 카드, 도감)과 똑같이 착용 캐릭터의 움직이는 GIF로 표시한다.
+  setGgumdoriImageSource(image, getGgumdoriImageRef(item, false, true));
   marker.append(image, createElement("span", "player-location-marker__label", label));
   return marker;
 }
@@ -3275,9 +3377,10 @@ function getSelectedGgumdori() {
 /**
  * 입력: 정적(.png) 꿈돌이 이미지 경로.
  * 출력: 같은 이름의 움직이는(.gif) 이미지 경로(없으면 원본 그대로).
- * 역할: 메뉴 프로필처럼 정지 이미지가 필요한 자리를 제외한 모든 화면에서 움직이는 꿈돌이를
- *       보여달라는 요청에 따라, DB의 image_ref(.png)를 화면 표시 시점에만 .gif로 바꿔치기한다.
- *       기본 꿈돌이(.svg)처럼 움직이는 버전이 없는 이미지는 그대로 둔다.
+ * 역할: 캐릭터가 노출되는 모든 화면(홈 프로필 카드, 도감, 지도 마커, 드로어·마이페이지)에서
+ *       움직이는 꿈돌이를 일관되게 보여달라는 요청에 따라, DB의 image_ref(.png)를 화면
+ *       표시 시점에만 .gif로 바꿔치기한다. 기본 꿈돌이(.svg)처럼 움직이는 버전이 없는
+ *       이미지는 그대로 둔다.
  * 호출 예시: image.src = toAnimatedGgumdoriRef(item.imageRef)
  */
 function toAnimatedGgumdoriRef(ref) {
@@ -3372,8 +3475,12 @@ function renderAppHeader() {
   const levelElement = select("#header-level");
 
   if (iconElement) {
-    iconElement.classList.add("px-icon");
-    iconElement.textContent = meta.icon;
+    // 헤더 마크가 브랜드 로고 이미지로 교체된 경우에는 화면별 아이콘 글자를 덮어쓰지 않습니다.
+    // (드로어 네비게이션에서는 meta.icon 을 그대로 씁니다.)
+    if (iconElement.tagName !== "IMG") {
+      iconElement.classList.add("px-icon");
+      iconElement.textContent = meta.icon;
+    }
   }
   if (eyebrowElement) {
     eyebrowElement.textContent = meta.eyebrow;
@@ -3409,10 +3516,12 @@ function renderDrawerNavigation() {
     const meta = VIEW_META[viewId];
     // 현재 메뉴가 활성 상태인지 여부입니다.
     const isActive = state.activeView === viewId;
-    // 카트리지형 메뉴 버튼입니다.
+    // 바인더 탭(색인) 메뉴 버튼입니다. '수첩' 컨셉에 맞춰 각 화면을 바인더의 색인 탭처럼
+    // 보여줍니다. --cat-color는 오른쪽에 튀어나온 색인 탭(.nav-link__index)의 색으로 쓰입니다.
     const button = createElement("button", `nav-link${isActive ? " is-active" : ""}`.trim());
     button.type = "button";
     button.dataset.viewTarget = viewId;
+    button.style.setProperty("--cat-color", meta.accent);
     // 현재 메뉴는 aria-current 와 시각 표시를 함께 제공합니다. (명세 §7.2)
     if (isActive) {
       button.setAttribute("aria-current", "page");
@@ -3460,7 +3569,8 @@ function renderDrawerProfile() {
     // 대표 꿈돌이 썸네일입니다.
     const art = createElement("div", "drawer-profile__art");
     const image = document.createElement("img");
-    setGgumdoriImageSource(image, getGgumdoriImageRef(selected));
+    // 드로어와 마이페이지 둘 다(이 함수가 공유) 다른 곳과 동일하게 움직이는 GIF로 보여준다.
+    setGgumdoriImageSource(image, getGgumdoriImageRef(selected, false, true));
     image.alt = `${selected?.name || "기본 꿈돌이"} 대표 꿈돌이`;
     art.append(image);
 
@@ -3688,6 +3798,12 @@ function setActiveView(viewId, shouldUpdateHash = true, isBackNavigation = false
   renderAppHeader();
   renderDrawerNavigation();
 
+  if (!isSameView) {
+    // 이전 화면의 소개가 떠 있으면 닫고(다시 보지 않기는 저장하지 않음), 새 화면 소개를 띄웁니다.
+    closeViewTutorial(false);
+    maybeShowViewTutorial(viewId);
+  }
+
   if (shouldUpdateHash) {
     window.history.replaceState(null, "", `#view-${viewId}`);
   }
@@ -3723,6 +3839,166 @@ function goToPreviousView() {
     return;
   }
   setActiveView(previousView, true, true);
+}
+
+// 현재 열려 있는 화면 스포트라이트 튜토리얼입니다({ viewId, target } 또는 null).
+let activeViewTutorial = null;
+
+/**
+ * 입력: 없음.
+ * 출력: "다시 보지 않기"로 끈 화면 id를 key로 하는 객체.
+ * 역할: 저장된 스포트라이트 튜토리얼 해제 상태를 읽는다.
+ * 호출 예시: const dismissed = readDismissedViewTutorials()
+ */
+function readDismissedViewTutorials() {
+  try {
+    const saved = JSON.parse(readStorageValue(VIEW_TUTORIAL_DISMISSED_KEY) || "{}");
+    return saved && typeof saved === "object" ? saved : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * 입력: 화면 id.
+ * 출력: 없음.
+ * 역할: 해당 화면의 스포트라이트 튜토리얼을 앞으로 다시 보여 주지 않도록 저장한다.
+ * 호출 예시: dismissViewTutorial("home")
+ */
+function dismissViewTutorial(viewId) {
+  const dismissed = readDismissedViewTutorials();
+  dismissed[viewId] = true;
+  writeStorageValue(VIEW_TUTORIAL_DISMISSED_KEY, JSON.stringify(dismissed));
+}
+
+/**
+ * 입력: 화면 id.
+ * 출력: 없음.
+ * 역할: 이 화면에 등록된 스포트라이트 안내가 있고 "다시 보지 않기"로 끄지 않았다면 보여 준다.
+ * 로그인 전(온보딩 화면)이나 정적 미리보기 모드에서는 계정별 설정이 의미가 없어 건너뛴다.
+ * 호출 예시: maybeShowViewTutorial("home")
+ */
+function maybeShowViewTutorial(viewId) {
+  const tip = VIEW_TUTORIAL_TIPS[viewId];
+  if (!tip || !state.accessToken || IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+    return;
+  }
+  if (readDismissedViewTutorials()[viewId]) {
+    return;
+  }
+
+  // 화면 전환(책장 넘김) 애니메이션이 끝나고 대상 요소가 자리 잡은 뒤 위치를 잽니다.
+  window.requestAnimationFrame(() => {
+    // 백그라운드 탭에서는 이 콜백이 한참 뒤에 돌 수 있어, 그 사이 화면이 바뀌었으면 띄우지 않습니다.
+    if (state.activeView !== viewId) {
+      return;
+    }
+    const target = document.querySelector(`[data-view-panel="${viewId}"] ${tip.targetSelector}`);
+    if (!target) {
+      return;
+    }
+    activeViewTutorial = { viewId, target };
+    renderViewTutorial();
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: activeViewTutorial 상태에 맞춰 스포트라이트 오버레이를 그리거나 지운다.
+ * 호출 예시: renderViewTutorial()
+ */
+function renderViewTutorial() {
+  const layer = select("#view-tutorial-layer");
+  if (!layer) {
+    return;
+  }
+
+  if (!activeViewTutorial) {
+    layer.hidden = true;
+    layer.replaceChildren();
+    window.removeEventListener("resize", repositionViewTutorialHighlight);
+    return;
+  }
+
+  const tip = VIEW_TUTORIAL_TIPS[activeViewTutorial.viewId];
+  layer.hidden = false;
+  layer.replaceChildren();
+
+  // 배경을 어둡게 덮는 층입니다. 눌러도 확인과 같은 효과(체크 안 한 채 닫기)입니다.
+  const scrim = createElement("div", "tutorial-scrim");
+  scrim.addEventListener("click", () => closeViewTutorial(false));
+
+  // 소개 대상 버튼 주위의 밝은 테두리입니다. 위치는 repositionViewTutorialHighlight가 잡습니다.
+  const highlight = createElement("div", "tutorial-highlight");
+  highlight.id = "view-tutorial-highlight";
+
+  const callout = createElement("section", "tutorial-callout");
+  callout.setAttribute("role", "dialog");
+  callout.setAttribute("aria-modal", "true");
+
+  const title = createElement("h2", "tutorial-callout__title", tip.title);
+  title.id = "view-tutorial-title";
+  callout.setAttribute("aria-labelledby", "view-tutorial-title");
+
+  const text = createElement("p", "tutorial-callout__text", tip.text);
+
+  const dismissRow = createElement("label", "tutorial-callout__dismiss");
+  const dismissCheckbox = document.createElement("input");
+  dismissCheckbox.type = "checkbox";
+  dismissRow.append(dismissCheckbox, createElement("span", "", "다시 보지 않기"));
+
+  const confirmButton = createElement("button", "px-button px-button--primary tutorial-callout__confirm", "확인");
+  confirmButton.type = "button";
+  confirmButton.addEventListener("click", () => closeViewTutorial(dismissCheckbox.checked));
+
+  callout.append(title, text, dismissRow, confirmButton);
+
+  layer.append(scrim, highlight, callout);
+
+  repositionViewTutorialHighlight();
+  window.addEventListener("resize", repositionViewTutorialHighlight);
+  confirmButton.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 대상 요소의 최신 위치에 맞춰 스포트라이트 테두리를 다시 그린다(화면 회전·리사이즈 대응).
+ * 호출 예시: repositionViewTutorialHighlight()
+ */
+function repositionViewTutorialHighlight() {
+  if (!activeViewTutorial) {
+    return;
+  }
+  const highlight = select("#view-tutorial-highlight");
+  if (!highlight) {
+    return;
+  }
+  // 하이라이트 테두리와 대상 버튼 사이의 여유 간격입니다.
+  const padding = 8;
+  const rect = activeViewTutorial.target.getBoundingClientRect();
+  highlight.style.top = `${rect.top - padding}px`;
+  highlight.style.left = `${rect.left - padding}px`;
+  highlight.style.width = `${rect.width + padding * 2}px`;
+  highlight.style.height = `${rect.height + padding * 2}px`;
+}
+
+/**
+ * 입력: "다시 보지 않기" 체크 여부.
+ * 출력: 없음.
+ * 역할: 스포트라이트 튜토리얼을 닫는다. 체크했으면 이 화면에서는 다시 뜨지 않는다.
+ * 호출 예시: closeViewTutorial(true)
+ */
+function closeViewTutorial(dontShowAgain) {
+  if (!activeViewTutorial) {
+    return;
+  }
+  if (dontShowAgain) {
+    dismissViewTutorial(activeViewTutorial.viewId);
+  }
+  activeViewTutorial = null;
+  renderViewTutorial();
 }
 
 /**
@@ -3986,23 +4262,80 @@ function renderRecentBadges() {
 
 /**
  * 입력: 카테고리 코드.
- * 출력: 카테고리에 맞는 표시 아이콘.
- * 역할: 뱃지와 지도 마커를 기존 정적 MVP와 비슷한 스탬프 느낌으로 표시한다.
+ * 출력: 카테고리에 맞는 표시 아이콘(이모지).
+ * 역할: 뱃지 스탬프와, 전용 SVG 마커가 없는 카테고리(culture/nature/all)의 지도 마커
+ * 폴백으로 쓴다. 실제 카테고리 체계인 CATEGORY_LABELS(11종)에 맞춰뒀다.
  * 호출 예시: const icon = getCategoryIcon("science")
  */
 function getCategoryIcon(category) {
   // 카테고리별 아이콘입니다.
   const icons = {
     all: "✦",
-    nature: "🌿",
+    default: "✦",
     science: "🔭",
-    downtown: "🏙️",
+    bread: "🍞",
+    noodle: "🍜",
+    nature: "🌿",
+    sport: "⚾",
+    heritage: "🏛️",
+    culture: "🎭",
     market: "🥐",
-    mobility: "🚲",
-    nightview: "🌉",
+    tashu: "🚲",
+    spa: "♨️",
+    festival: "🎉",
   };
 
   return icons[category] || "✦";
+}
+
+/**
+ * 입력: 카테고리 코드.
+ * 출력: 해당 카테고리의 지도 마커 SVG 경로, 없으면 null.
+ * 역할: 카테고리별로 준비된 픽셀아트 지도 마커 이미지를 찾는다. culture/nature처럼
+ * 아직 전용 마커가 없는 카테고리는 null을 반환해 호출부가 이모지로 폴백하게 한다.
+ * 호출 예시: const src = getCategoryMarkerImage("science")
+ */
+function getCategoryMarkerImage(category) {
+  return CATEGORY_MARKER_ICONS[category] || null;
+}
+
+/**
+ * 입력: 카테고리 코드.
+ * 출력: 지도 마커 배지의 HTML 조각(문자열).
+ * 역할: NAVER Maps HTML 마커처럼 문자열 템플릿으로 마커를 조립하는 곳에서 쓴다.
+ * 전용 SVG 마커가 있으면 <img>로, 없으면 기존 이모지 <span>으로 만든다.
+ * 호출 예시: buildCategoryBadgeMarkup("science")
+ */
+function buildCategoryBadgeMarkup(category) {
+  const markerImage = getCategoryMarkerImage(category);
+
+  if (markerImage) {
+    return `<img class="map-badge map-badge--icon" src="${markerImage}" alt="" draggable="false" />`;
+  }
+
+  return `<span class="map-badge">${getCategoryIcon(category)}</span>`;
+}
+
+/**
+ * 입력: 카테고리 코드.
+ * 출력: 지도 마커 배지 DOM 요소.
+ * 역할: 목업 지도처럼 DOM 요소를 직접 append하는 곳에서 쓴다. buildCategoryBadgeMarkup과
+ * 같은 규칙(전용 SVG가 있으면 이미지, 없으면 이모지)을 DOM 요소로 만들어준다.
+ * 호출 예시: marker.append(createCategoryBadgeElement("science"))
+ */
+function createCategoryBadgeElement(category) {
+  const markerImage = getCategoryMarkerImage(category);
+
+  if (markerImage) {
+    const image = document.createElement("img");
+    image.className = "map-badge map-badge--icon";
+    image.src = markerImage;
+    image.alt = "";
+    image.draggable = false;
+    return image;
+  }
+
+  return createElement("span", "map-badge", getCategoryIcon(category));
 }
 
 /**
@@ -4019,13 +4352,22 @@ function renderHomeRecommendations() {
     return;
   }
 
+  // 홈에서는 답답해 보이지 않도록 4개까지 보여주고, 더 있으면 전용 퀘스트 탭으로 안내합니다.
+  const homeCardLimit = 4;
+
   list.replaceChildren();
-  state.recommendations.slice(0, 2).forEach((recommendation) => {
+  state.recommendations.slice(0, homeCardLimit).forEach((recommendation) => {
     list.append(createRecommendationCard(recommendation));
   });
 
   if (state.recommendations.length === 0) {
     list.append(createElement("p", "empty-message", "표시할 추천 퀘스트가 없습니다."));
+  } else if (state.recommendations.length > homeCardLimit) {
+    // 전체 퀘스트 탭(무제한 목록)으로 이동하는 더보기 버튼입니다.
+    const moreButton = createElement("button", "secondary-action", "퀘스트 더보기");
+    moreButton.type = "button";
+    moreButton.addEventListener("click", () => setActiveView("quests"));
+    list.append(moreButton);
   }
 }
 
@@ -4223,6 +4565,11 @@ function createRecommendationCard(recommendation, options = {}) {
     createElement("span", "px-counter", formatDuration(recommendation.estimatedMinutes)),
     createMiniBadge(recommendation),
   );
+
+  // 관광지 사진이 있으면 카드 맨 위에 둡니다. 장소명이 바로 아래 있어 대체 텍스트는 비웁니다.
+  if (recommendation.placeImageUrl) {
+    body.append(createPlacePhoto(recommendation.placeImageUrl, "card-photo", ""));
+  }
 
   body.append(topline, title, place, summary);
 
@@ -4847,6 +5194,13 @@ function createQuestSheetBody(quest, questStatus) {
   // 스크롤되는 본문 영역입니다.
   const body = createElement("div", "quest-sheet__body");
 
+  // 0. 관광지 사진. 한국관광공사 사진은 출처 표시가 이용 조건이라 캡션을 함께 둡니다.
+  if (quest.placeImageUrl) {
+    const photo = createPlacePhoto(quest.placeImageUrl, "quest-sheet__photo", `${quest.placeName} 사진`);
+    photo.append(createElement("span", "quest-sheet__photo-credit", "사진 제공: 한국관광공사"));
+    body.append(photo);
+  }
+
   // 1. 관광지명, 2. 장소명과 도로명주소, 주소 복사
   body.append(createQuestPlacePanel(quest));
 
@@ -5323,6 +5677,9 @@ function renderAdventure() {
     state.catalogSearch = event.target.value || "";
     renderCollection();
   });
+
+  // S09 상단 "사진 찍기": 보유 꿈돌이를 골라 바로 촬영 시트(S11)로 넘어갑니다.
+  select("#collection-photo-button")?.addEventListener("click", openGgumdoriPickerSheet);
 
   // S09 획득 상태 필터입니다. (명세 §10 S09)
   document.querySelectorAll("[data-collection-filter]").forEach((button) => {
@@ -6005,7 +6362,7 @@ function renderMockMapView(canvas, places) {
     marker.style.top = `${toMapPercent(place.placeLatitude, minLatitude, maxLatitude, true)}%`;
     marker.addEventListener("click", () => selectMapPlace(place.instanceId));
     marker.append(
-      createElement("span", "map-badge", getCategoryIcon(place.category)),
+      createCategoryBadgeElement(place.category),
       createElement("span", "map-marker-label", place.placeName),
     );
     canvas.append(marker);
@@ -7693,6 +8050,139 @@ function getCatalogSheetTarget() {
 /**
  * 입력: 없음.
  * 출력: 없음.
+ * 역할: 도감 상단 "사진 찍기"로 꿈돌이 선택 시트를 연다. 여기서 고르면 바로 촬영
+ * 시트(S11)로 넘어간다. (명세 §10 S09, §10 S11)
+ * 호출 예시: openGgumdoriPickerSheet()
+ */
+function openGgumdoriPickerSheet() {
+  state.ggumdoriPickerReturnFocus = document.activeElement;
+  state.ggumdoriPickerOpen = true;
+  renderGgumdoriPickerSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 꿈돌이 선택 시트를 닫고 포커스를 되돌린다.
+ * 호출 예시: closeGgumdoriPickerSheet()
+ */
+function closeGgumdoriPickerSheet() {
+  if (!state.ggumdoriPickerOpen) {
+    return;
+  }
+
+  state.ggumdoriPickerOpen = false;
+  renderGgumdoriPickerSheet();
+
+  // 포커스는 시트를 열었던 "사진 찍기" 버튼으로 되돌립니다.
+  const target = state.ggumdoriPickerReturnFocus;
+  if (target instanceof HTMLElement && target.isConnected) {
+    target.focus({ preventScroll: true });
+  }
+  state.ggumdoriPickerReturnFocus = null;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 획득한 꿈돌이만 썸네일로 보여 주고, 고르면 바로 촬영 시트를 연다.
+ * 호출 예시: renderGgumdoriPickerSheet()
+ */
+function renderGgumdoriPickerSheet() {
+  const sheet = select("#ggumdori-picker-sheet");
+  if (!sheet) {
+    return;
+  }
+
+  if (!state.ggumdoriPickerOpen) {
+    sheet.hidden = true;
+    sheet.replaceChildren();
+    return;
+  }
+
+  sheet.hidden = false;
+  sheet.replaceChildren();
+
+  const scrim = createElement("div", "quest-sheet__scrim");
+  scrim.addEventListener("click", closeGgumdoriPickerSheet);
+
+  const panel = createElement("section", "quest-sheet__panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "ggumdori-picker-title");
+
+  const head = createElement("header", "quest-sheet__head px-dialog__bar");
+  const titleGroup = createElement("div", "quest-sheet__title-group");
+  const title = createElement(
+    "h2",
+    "px-label",
+    localize("사진 찍을 꿈돌이 선택", "Choose a Ggumdori to photograph"),
+  );
+  title.id = "ggumdori-picker-title";
+  title.tabIndex = -1;
+  titleGroup.append(title);
+
+  const closeButton = createElement("button", "px-button px-button--ghost quest-sheet__close");
+  closeButton.type = "button";
+  closeButton.append(createElement("span", "px-sr-only", "선택 닫기"));
+  const closeIcon = createElement("span", "px-icon px-icon--sm", "close");
+  closeIcon.setAttribute("aria-hidden", "true");
+  closeButton.append(closeIcon);
+  closeButton.addEventListener("click", closeGgumdoriPickerSheet);
+
+  head.append(titleGroup, closeButton);
+
+  const body = createElement("div", "quest-sheet__body");
+
+  // 획득한 꿈돌이만 카메라에 데려갈 수 있습니다. (명세 §10 S11)
+  const earnedEntries = state.catalog.entries.filter((entry) => entry.state === "earned");
+
+  if (earnedEntries.length === 0) {
+    body.append(
+      createElement("p", "empty-message", "아직 획득한 꿈돌이가 없어요. 퀘스트를 완료해 꿈돌이를 모아보세요."),
+    );
+  } else {
+    const grid = createElement("div", "ggumdori-grid");
+    earnedEntries.forEach((entry) => {
+      // 선택 카드입니다. 도감 카드와 같은 모양이지만 잠금·대표 표시는 필요 없습니다.
+      const card = createElement("button", "catalog-card");
+      card.type = "button";
+      card.dataset.category = entry.category;
+
+      const art = createElement("div", "catalog-card__art");
+      if (entry.ggumdoriImageRef) {
+        const image = document.createElement("img");
+        setGgumdoriImageSource(image, getGgumdoriImageRef(entry, false, true));
+        image.alt = "";
+        image.loading = "lazy";
+        art.append(image);
+      }
+      card.append(art);
+
+      const meta = createElement("div", "catalog-card__meta");
+      meta.append(createElement("span", "catalog-card__name", entry.ggumdoriName));
+      card.append(meta);
+
+      card.addEventListener("click", () => {
+        closeGgumdoriPickerSheet();
+        openPhotoSheet(entry.ggumdoriId);
+      });
+
+      grid.append(card);
+    });
+    body.append(grid);
+  }
+
+  panel.append(head, body);
+  sheet.append(scrim, panel);
+  // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
+  trapFocus(panel);
+  panel.querySelector("#ggumdori-picker-title")?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
  * 역할: 미획득과 획득을 다르게 보여 주는 도감 상세를 그린다. (명세 §10 S10)
  * 호출 예시: renderCatalogSheet()
  */
@@ -8465,15 +8955,49 @@ function normalizeWeather(payload) {
  * 호출 예시: await loadWeather()
  */
 async function loadWeather(_forceRefresh = false) {
+  // 변수 의미: 이 요청을 시작한 시점의 캐시 키입니다. 응답이 오는 동안 위치·날짜·시간대가
+  // 바뀌면(예: 계획일 변경) 낡은 응답을 반영하지 않으려고 저장해 둡니다.
+  const requestCacheKey = buildWeatherCacheKey();
+
   state.weather = {
-    ...createEmptyWeather(),
-    status: "unavailable",
-    unavailable: true,
-    cacheKey: buildWeatherCacheKey(),
-    outdoorNote: state.explorationMode === "planned"
-      ? "계획 날짜는 일정 메모이며 현재 날씨·행사 조회에는 사용되지 않습니다."
-      : "날씨 연동은 준비 중입니다.",
+    ...state.weather,
+    status: "loading",
+    cacheKey: requestCacheKey,
   };
+  renderWeather();
+
+  // 날씨를 조회할 기준 위치입니다. 계획 모드면 계획 위치, 아니면 현재 위치입니다.
+  const location = getRecommendationLocation();
+  // 서버에 보낼 쿼리 파라미터입니다. date는 계획 모드면 선택일, 아니면 오늘(KST)입니다.
+  const params = new URLSearchParams({
+    lat: String(location.lat),
+    lng: String(location.lng),
+    date: getQuestReferenceDate(),
+  });
+
+  try {
+    const payload = await fetchJson(`/api/weather?${params.toString()}`);
+    if (requestCacheKey !== buildWeatherCacheKey()) {
+      // 응답이 오는 동안 위치나 날짜가 바뀌어서 이미 낡은 응답입니다. 화면을 덮어쓰지 않습니다.
+      return;
+    }
+    // 변수 의미: 서버 응답을 화면 형태로 정리한 값입니다.
+    const normalized = normalizeWeather(payload);
+    state.weather = {
+      ...normalized,
+      status: normalized.unavailable ? "unavailable" : "ready",
+      cacheKey: requestCacheKey,
+    };
+  } catch (error) {
+    if (requestCacheKey !== buildWeatherCacheKey()) {
+      return;
+    }
+    state.weather = {
+      ...createEmptyWeather(),
+      status: "failed",
+      cacheKey: requestCacheKey,
+    };
+  }
   renderWeather();
 }
 
@@ -9470,9 +9994,11 @@ function createEmptyPhotoState() {
     ggumdoriId: "",
     // idle | camera | file | denied
     source: "idle",
-    // 캐릭터 크기 배율과 좌우 위치(0~100%)입니다. (명세 §10 S11)
+    // 캐릭터 크기 배율과 좌우·상하 위치(0~100%)입니다. offsetY는 캐릭터 발(아래쪽 끝)이
+    // 무대 높이의 몇 %에 오는지를 뜻합니다. (명세 §10 S11)
     scale: 40,
     offsetX: 50,
+    offsetY: 96,
     // 셔터를 누른 뒤 만들어진 정지 PNG 입니다.
     resultDataUrl: "",
     message: "",
@@ -9632,7 +10158,7 @@ async function capturePhoto() {
   const context = canvas.getContext("2d");
   context.drawImage(source, 0, 0, sourceWidth, sourceHeight);
 
-  // 합성할 꿈돌이 그림입니다. GIF 여도 셔터 순간의 한 프레임이 그려집니다. (명세 §10 S11)
+  // 합성할 꿈돌이 그림입니다. 정지 PNG라서 미리보기와 결과물이 항상 같은 그림입니다. (명세 §10 S11)
   const entry = state.catalog.entries.find((item) => item.ggumdoriId === state.photo.ggumdoriId);
   if (entry?.ggumdoriImageRef) {
     try {
@@ -9642,8 +10168,8 @@ async function capturePhoto() {
       const drawWidth = art.naturalWidth ? (drawHeight * art.naturalWidth) / art.naturalHeight : drawHeight;
       // 좌우 위치는 offsetX% 지점을 중심으로 둡니다.
       const drawX = (sourceWidth * state.photo.offsetX) / 100 - drawWidth / 2;
-      // 발이 사진 아래쪽에 닿게 둡니다.
-      const drawY = sourceHeight - drawHeight - sourceHeight * 0.04;
+      // 상하 위치는 offsetY% 지점에 발(아래쪽 끝)이 오게 둡니다.
+      const drawY = (sourceHeight * state.photo.offsetY) / 100 - drawHeight;
       context.drawImage(art, drawX, drawY, drawWidth, drawHeight);
     } catch (error) {
       state.photo = { ...state.photo, message: "꿈돌이 그림을 불러오지 못했어요." };
@@ -9842,24 +10368,30 @@ function renderPhotoSheet() {
       stage.append(createElement("p", "photo-placeholder", "카메라를 켜거나 사진을 골라주세요."));
     }
 
-    // 미리보기 위에 얹는 꿈돌이입니다. 모션 에셋이 있으면 여기서 움직입니다. (명세 §5.4)
+    // 미리보기 위에 얹는 꿈돌이입니다. 정지 PNG라서 손가락으로 옮기는 동안에도
+    // 촬영 결과와 똑같은 그림을 보여줍니다. (명세 §5.4)
     if (entry?.ggumdoriImageRef) {
       const overlay = document.createElement("img");
       overlay.className = "photo-overlay";
-      overlay.src = toAnimatedGgumdoriRef(entry.ggumdoriImageRef);
+      overlay.src = entry.ggumdoriImageRef;
       overlay.alt = "";
       overlay.style.height = `${state.photo.scale}%`;
       overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
+      overlay.style.insetBlockStart = `${state.photo.offsetY}%`;
       stage.append(overlay);
+      // 손가락 하나로 옮기고 두 손가락으로 오므리고 벌려서 크기를 바꿉니다. (명세 §10 S11)
+      attachPhotoStageGestures(stage);
     }
 
     body.append(stage);
 
-    // 크기와 좌우 위치 조절입니다. (명세 §10 S11)
+    // 크기·좌우·상하 위치 조절입니다. 슬라이더는 터치 제스처가 어려운 경우(마우스,
+    // 스크린리더)를 위한 보조 수단으로 함께 둡니다. (명세 §10 S11)
     const controls = createElement("section", "px-panel");
     controls.append(createElement("h3", "section-title", "캐릭터 조절"));
     controls.append(createPhotoSlider("크기", "scale", 15, 90, state.photo.scale));
     controls.append(createPhotoSlider("좌우 위치", "offsetX", 5, 95, state.photo.offsetX));
+    controls.append(createPhotoSlider("상하 위치", "offsetY", 15, 98, state.photo.offsetY));
     body.append(controls);
   }
 
@@ -9938,15 +10470,109 @@ function createPhotoSlider(label, key, min, max, value) {
   input.addEventListener("input", (event) => {
     state.photo = { ...state.photo, [key]: Number(event.target.value) };
     // 미리보기만 즉시 갱신해 슬라이더 조작이 끊기지 않게 합니다.
-    const overlay = select(".photo-overlay");
-    if (overlay) {
-      overlay.style.height = `${state.photo.scale}%`;
-      overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
-    }
+    syncPhotoOverlayStyle();
   });
 
   row.append(labelElement, input);
   return row;
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: state.photo(scale/offsetX/offsetY)를 화면의 .photo-overlay 스타일에 반영한다.
+ * 슬라이더 조작과 터치 제스처가 이 함수 하나로 같은 갱신 로직을 공유한다. (명세 §10 S11)
+ * 호출 예시: syncPhotoOverlayStyle()
+ */
+function syncPhotoOverlayStyle() {
+  const overlay = select(".photo-overlay");
+  if (!overlay) {
+    return;
+  }
+  overlay.style.height = `${state.photo.scale}%`;
+  overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
+  overlay.style.insetBlockStart = `${state.photo.offsetY}%`;
+}
+
+/**
+ * 입력: 사진 촬영 무대(.photo-stage) 요소.
+ * 출력: 없음.
+ * 역할: 손가락 하나로는 캐릭터를 옮기고, 두 손가락으로 오므리고 벌리면 크기를 바꾼다.
+ * 세 손가락 이상은 무시한다. (명세 §10 S11)
+ * 호출 예시: attachPhotoStageGestures(stage)
+ */
+function attachPhotoStageGestures(stage) {
+  // 현재 무대를 누르고 있는 손가락(포인터)들의 마지막 위치입니다. pointerId → {x, y}.
+  const pointers = new Map();
+  // 핀치 시작 시점의 두 손가락 사이 거리와 그때의 캐릭터 크기입니다. 핀치 중 배율 계산의 기준입니다.
+  let pinchStartDistance = 0;
+  let pinchStartScale = state.photo.scale;
+
+  // 현재 누르고 있는 두 손가락 사이 거리입니다.
+  const measurePinchDistance = () => {
+    const points = [...pointers.values()];
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  };
+
+  // 값을 [min, max] 범위 안으로 눌러 담습니다.
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+  stage.addEventListener("pointerdown", (event) => {
+    // 세 손가락 이상은 무시합니다.
+    if (pointers.size >= 2) {
+      return;
+    }
+    stage.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 2) {
+      pinchStartDistance = measurePinchDistance();
+      pinchStartScale = state.photo.scale;
+    }
+  });
+
+  stage.addEventListener("pointermove", (event) => {
+    if (!pointers.has(event.pointerId)) {
+      return;
+    }
+
+    // 두 손가락이면 핀치로 크기만 바꿉니다.
+    if (pointers.size >= 2) {
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinchStartDistance > 0) {
+        const distance = measurePinchDistance();
+        state.photo = {
+          ...state.photo,
+          scale: Math.round(clamp((pinchStartScale * distance) / pinchStartDistance, 15, 90)),
+        };
+        syncPhotoOverlayStyle();
+      }
+      return;
+    }
+
+    // 손가락 하나면 이전 위치와의 차이만큼 캐릭터를 옮깁니다(무대 크기 대비 %).
+    const rect = stage.getBoundingClientRect();
+    const previous = pointers.get(event.pointerId);
+    const deltaXPercent = ((event.clientX - previous.x) / rect.width) * 100;
+    const deltaYPercent = ((event.clientY - previous.y) / rect.height) * 100;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    state.photo = {
+      ...state.photo,
+      offsetX: clamp(state.photo.offsetX + deltaXPercent, 5, 95),
+      offsetY: clamp(state.photo.offsetY + deltaYPercent, 15, 98),
+    };
+    syncPhotoOverlayStyle();
+  });
+
+  const releasePointer = (event) => {
+    pointers.delete(event.pointerId);
+    if (pointers.size < 2) {
+      pinchStartDistance = 0;
+    }
+  };
+
+  stage.addEventListener("pointerup", releasePointer);
+  stage.addEventListener("pointercancel", releasePointer);
 }
 
 /* ──────────────────────────────────────────────
@@ -10983,6 +11609,7 @@ function renderAll() {
   renderAccountPanel();
   renderCollection();
   renderCatalogSheet();
+  renderGgumdoriPickerSheet();
   renderQuestSheet();
   renderActionDialog();
 }

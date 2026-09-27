@@ -27,6 +27,8 @@ SAFE_SOURCE_STATUSES = frozenset({
     "incomplete:wrong_page", "incomplete:row_count", "incomplete:invalid_item",
     "incomplete:duplicate_id", "incomplete:page_limit",
 })
+# 변수 의미: 한 번의 일일 실행에서 관광사진 정보를 조회할 최대 장소 수다. 개발계정 일일 한도를 아낀다.
+MAX_GALLERY_LOOKUPS_PER_RUN = 100
 
 
 class CatalogDatabaseUnavailable(RuntimeError):
@@ -94,6 +96,36 @@ def sync_place_name_translations(
         repository.upsert_place_name_translations(translated_rows)
 
 
+def sync_place_images(
+    repository: QuestbookRepository,
+    client: TourApiClient,
+    places: list,
+    max_lookups: int = MAX_GALLERY_LOOKUPS_PER_RUN,
+) -> None:
+    """
+    입력: 저장소, TourAPI 클라이언트, 이번 관측의 전체 장소, 이번 실행의 최대 조회 수.
+    출력: 없음. place_images 캐시를 갱신한다.
+    역할: 대부분의 장소는 목록 응답의 대표 사진(firstimage)을 그대로 쓰므로 호출이 필요 없다.
+          대표 사진이 없고 아직 한 번도 찾아보지 않은 장소만 관광사진 정보에서 찾아 캐싱한다.
+          일일 호출 한도를 아끼려고 실행마다 max_lookups개까지만 찾고 나머지는 다음 날로 넘긴다.
+          호출 자체가 실패한 장소는 캐싱하지 않아 다음 실행에서 다시 시도한다.
+    호출 예시: sync_place_images(repository, client, places)
+    """
+    # 변수 의미: 대표 사진이 없어 관광사진으로 보충해야 하는 장소다.
+    missing_places = [place for place in places if not place.image_url]
+    if not missing_places:
+        return
+    # 변수 의미: 이미 찾아본 장소(사진이 없던 경우 포함)는 다시 찾지 않기 위한 기존 캐시다.
+    existing = repository.get_place_images([place.content_id for place in missing_places])
+    # 변수 의미: 이번에 새로 찾은 (contentId, 사진 URL 또는 빈 문자열) 행이다.
+    found_rows: list[tuple[str, str]] = []
+    for place in [place for place in missing_places if place.content_id not in existing][:max_lookups]:
+        image_url = client.find_gallery_image(place.title)
+        if image_url is not None:
+            found_rows.append((place.content_id, image_url))
+    repository.upsert_place_images(found_rows)
+
+
 def run_catalog_sync(
     repository: QuestbookRepository,
     client: TourApiClient,
@@ -147,6 +179,11 @@ def run_catalog_sync(
                 if result["status"] == "live":
                     # 변수 의미: 국문명이 바뀌었거나 신규인 장소만 영문명을 새로 확보해 캐싱한다.
                     sync_place_name_translations(repository, client, translation_client, places)
+                    # 사진 보충은 부가 기능이라 실패해도 카탈로그 동기화 자체를 막지 않는다.
+                    try:
+                        sync_place_images(repository, client, places)
+                    except Exception:
+                        _raise_if_database_unavailable(repository)
                     # 변수 의미: 사용자를 지정하지 않는 공용 재사용 퀘스트 정의 목록이다.
                     quest_definitions: list[dict[str, Any]] = []
                     # 변수 의미: 지원되는 테마인지 확인하며 생성할 현재 관광지다.

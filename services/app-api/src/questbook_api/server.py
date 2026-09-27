@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import json
 import math
 import re
@@ -23,6 +24,7 @@ from questbook_api.integrations.ocr.client import OcrClient, normalize_ocr_image
 from questbook_api.integrations.oauth import client as oauth_client
 from questbook_api.integrations.tourapi.client import TourApiClient
 from questbook_api.integrations.translation.client import TranslationClient
+from questbook_api.integrations.weather.client import WeatherClient
 from questbook_api.settings import AppSettings
 
 
@@ -75,6 +77,8 @@ class AppState:
     # 변수 의미: Google Cloud Translation 클라이언트다. 장소 상세 모달의 설명 텍스트에만
     # 쓰인다(퀘스트 제목/설명은 translate_recommendation_texts()가 템플릿+장소명으로 조립).
     translation: TranslationClient | None = None
+    # 변수 의미: 기상청 단기예보 조회 클라이언트다.
+    weather: WeatherClient | None = None
 
 
 def build_json_bytes(payload: dict[str, Any]) -> bytes:
@@ -188,6 +192,30 @@ def translate_recommendation_texts(
             place_reference = quest.get("placeReference")
             if isinstance(place_reference, dict):
                 place_reference["placeName"] = english_place_name
+
+
+def attach_place_images(payload: dict[str, Any], repository: QuestbookRepository) -> None:
+    """
+    입력: 추천 응답 딕셔너리, 저장소.
+    출력: 없음. payload를 제자리에서 수정한다.
+    역할: 대부분의 장소는 TourAPI 목록 응답의 대표 사진(imageUrl)이 이미 들어 있다. 비어 있는
+          장소만 매일 배치(catalog_sync.sync_place_images)가 관광사진 정보에서 채워 둔
+          place_images 캐시로 보충한다 — 요청 경로에서는 외부 호출이 전혀 없다.
+    호출 예시: attach_place_images(payload, state.repository)
+    """
+    # 변수 의미: 대표 사진이 비어 있는 장소 객체 목록이다.
+    missing_places = [
+        item["place"] for item in payload.get("recommendations", [])
+        if isinstance(item.get("place"), dict) and item["place"].get("contentId")
+        and not item["place"].get("imageUrl")
+    ]
+    if not missing_places:
+        return
+    images = repository.get_place_images([str(place["contentId"]) for place in missing_places])
+    for place in missing_places:
+        cached = images.get(str(place["contentId"]))
+        if cached:
+            place["imageUrl"] = cached
 
 
 def is_safe_oauth_nonce(value: str) -> bool:
@@ -473,6 +501,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                         force_refresh,
                         mode,
                     )
+                    attach_place_images(recommendations_payload, state.repository)
                     translate_recommendation_texts(recommendations_payload, state.repository, language)
                     self._send_json(HTTPStatus.OK, recommendations_payload)
                     return
@@ -488,6 +517,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     place_recommendations_payload = state.service.get_place_recommendations(
                         user_id, category_key, force_refresh,
                     )
+                    attach_place_images(place_recommendations_payload, state.repository)
                     translate_recommendation_texts(place_recommendations_payload, state.repository, language)
                     self._send_json(HTTPStatus.OK, place_recommendations_payload)
                     return
@@ -539,6 +569,9 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     return
                 if path == "/api/naver-map/reverse-geocode":
                     self._handle_naver_reverse_geocode(query)
+                    return
+                if path == "/api/weather":
+                    self._handle_weather(query)
                     return
             except PermissionError as error:
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(error)})
@@ -1308,6 +1341,40 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             }
             self._forward_naver_json_response(NAVER_REVERSE_GEOCODE_PATH, upstream_params)
 
+        def _handle_weather(self, query: dict[str, list[str]]) -> None:
+            """
+            입력: 위도·경도와(선택) 조회 날짜가 포함된 쿼리 딕셔너리.
+            출력: 프론트 normalizeWeather()가 기대하는 형태의 JSON 날씨 응답.
+            역할: 기상청 단기예보를 조회해 기온·강수확률·시간별 예보를 돌려준다. 서비스 키가
+            없거나 상위 API가 실패해도 unavailable 응답으로 화면이 계속 동작하게 한다.
+            호출 예시: GET /api/weather?lat=36.3504&lng=127.3845&date=2026-09-22
+            """
+            try:
+                # 변수 의미: 예보를 조회할 기준 위도다.
+                latitude = parse_required_float(first_query_value(query, "lat"), "lat", -90.0, 90.0)
+                # 변수 의미: 예보를 조회할 기준 경도다.
+                longitude = parse_required_float(first_query_value(query, "lng"), "lng", -180.0, 180.0)
+            except ValueError as error:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+
+            # 변수 의미: 프론트가 보낸 "YYYY-MM-DD" 형식의 조회 날짜다. 없으면 오늘(KST)을 쓴다.
+            raw_date = first_query_value(query, "date")
+            target_date: date | None = None
+            if raw_date:
+                try:
+                    target_date = date.fromisoformat(raw_date)
+                except ValueError:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "date must be YYYY-MM-DD."})
+                    return
+
+            if state.weather is None:
+                self._send_json(HTTPStatus.OK, {"unavailable": True})
+                return
+
+            payload, _status = state.weather.fetch_forecast(latitude, longitude, target_date)
+            self._send_json(HTTPStatus.OK, payload)
+
         def _forward_naver_json_response(self, path: str, params: dict[str, Any]) -> None:
             """
             입력: NAVER JSON API 경로와 쿼리 파라미터.
@@ -1436,6 +1503,8 @@ def build_state(settings: AppSettings) -> AppState:
     ocr = OcrClient(settings)
     # 변수 의미: NAVER Papago 번역 클라이언트다.
     translation = TranslationClient(settings)
+    # 변수 의미: 기상청 단기예보 조회 클라이언트다.
+    weather = WeatherClient(settings.kma_weather_service_key)
     return AppState(
         settings=settings,
         repository=repository,
@@ -1445,6 +1514,7 @@ def build_state(settings: AppSettings) -> AppState:
         object_storage=object_storage,
         ocr=ocr,
         translation=translation,
+        weather=weather,
     )
 
 

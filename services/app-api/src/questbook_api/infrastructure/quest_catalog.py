@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS place_name_translations (
   translated_at TIMESTAMPTZ NOT NULL
 );
 
+-- 목록 응답에 대표 사진(firstimage)이 없는 장소만, 배치가 관광사진 정보(PhotoGalleryService1)에서
+-- 하루 한 번 찾아 영구 캐싱한다. image_url이 빈 문자열이면 찾아봤지만 맞는 사진이 없었다는
+-- 뜻이라 다시 조회하지 않는다(요청 경로에서는 절대 외부 호출하지 않음).
+CREATE TABLE IF NOT EXISTS place_images (
+  content_id TEXT PRIMARY KEY,
+  image_url TEXT NOT NULL,
+  fetched_at TIMESTAMPTZ NOT NULL
+);
+
 ALTER TABLE reusable_quests
   ADD COLUMN IF NOT EXISTS catalog_managed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE reusable_quests
@@ -439,6 +448,40 @@ class QuestCatalogRepositoryMixin:
                      source = EXCLUDED.source, translated_at = EXCLUDED.translated_at""",
                 [(content_id, name_kor, name_eng, source, datetime.now(timezone.utc))
                  for content_id, name_kor, name_eng, source in rows],
+            )
+
+    def get_place_images(self, content_ids: list[str]) -> dict[str, str]:
+        """
+        입력: 조회할 장소 contentId 목록.
+        출력: contentId별 캐시된 관광사진 URL. 찾아봤지만 없던 장소는 빈 문자열이다.
+        역할: 배치가 미리 채워 둔 관광사진 캐시를 한 번의 쿼리로 읽는다.
+        호출 예시: images = repository.get_place_images(["126508"])
+        """
+        if not content_ids:
+            return {}
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT content_id, image_url FROM place_images WHERE content_id = ANY(%s)",
+                (content_ids,),
+            ).fetchall()
+        return {row["content_id"]: row["image_url"] for row in rows}
+
+    def upsert_place_images(self, rows: list[tuple[str, str]]) -> None:
+        """
+        입력: (contentId, 사진 URL 또는 빈 문자열) 목록.
+        출력: 없음.
+        역할: 배치가 관광사진 정보에서 찾은 결과를 영구 캐시에 반영한다.
+        호출 예시: repository.upsert_place_images([("126508", "https://tong.visitkorea.or.kr/a.jpg")])
+        """
+        if not rows:
+            return
+        with self._lock, self._connection.cursor() as cursor:
+            cursor.executemany(
+                """INSERT INTO place_images(content_id, image_url, fetched_at)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (content_id) DO UPDATE SET
+                     image_url = EXCLUDED.image_url, fetched_at = EXCLUDED.fetched_at""",
+                [(content_id, image_url, datetime.now(timezone.utc)) for content_id, image_url in rows],
             )
 
     def catalog_status(self) -> dict[str, Any]:

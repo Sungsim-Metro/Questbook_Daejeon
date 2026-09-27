@@ -670,9 +670,9 @@ body[data-exploration-mode="planned"] #home-context-bar {
 
 
 /* ==================================================
-   우측 메뉴 탭
+   우측 하단 메뉴 FAB
 
-   버튼의 오른쪽 끝을 앱 셸 오른쪽 끝에 맞춥니다.
+   버튼의 오른쪽 끝을 앱 셸 오른쪽 끝에 맞추고, 화면 하단에 코너 FAB로 띄웁니다.
    right 규칙 하나로 화면 폭에 따른 위치 충돌을 막습니다.
    ================================================== */
 
@@ -682,15 +682,16 @@ body[data-exploration-mode="planned"] #home-context-bar {
 
 #bookmark-handle.bookmark-handle {
   position: fixed;
-  top: 155px;
+  top: auto;
+  bottom: calc(var(--safe-bottom) + 16px);
 
   /*
-   * 모바일에서는 right: 0입니다.
-   * 520px보다 넓은 미리보기에서는 중앙 모바일 셸의 오른쪽 여백만큼
-   * right 값을 주어 셸 테두리에 붙입니다.
+   * 모바일에서는 화면 우측에서 16px 안쪽입니다.
+   * 520px보다 넓은 미리보기에서는 중앙 모바일 셸의 오른쪽 여백 + 16px만큼
+   * right 값을 주어 셸 안쪽 코너에 뜨게 합니다.
    */
   left: auto !important;
-  right: max(0px, calc((100vw - var(--shell-max-width)) / 2)) !important;
+  right: max(16px, calc((100vw - var(--shell-max-width)) / 2 + 16px)) !important;
   z-index: 45;
 
   display: grid;
@@ -711,10 +712,8 @@ body[data-exploration-mode="planned"] #home-context-bar {
   color: var(--px-ink);
   background: var(--px-gold);
   border: 2px solid var(--px-outline);
-  border-right: 0;
-  border-inline-end: 0;
-  border-radius: 8px 0 0 8px;
-  box-shadow: -3px 3px 0 rgba(44, 29, 22, 0.35);
+  border-radius: 10px;
+  box-shadow: 2px 2px 0 rgba(44, 29, 22, 0.35);
 
   font-family: var(--font-display);
   cursor: pointer;
@@ -784,7 +783,7 @@ body[data-exploration-mode="planned"] #home-context-bar {
 }
 
 #bookmark-handle:active {
-  box-shadow: -1px 1px 0 rgba(44, 29, 22, 0.35);
+  box-shadow: 1px 1px 0 rgba(44, 29, 22, 0.35);
   transform: translateY(2px);
 }
 
@@ -803,7 +802,6 @@ body[data-exploration-mode="planned"] #home-context-bar {
   }
 
   #bookmark-handle.bookmark-handle {
-    top: 150px;
     width: 46px;
     min-width: 46px;
     height: 64px;

@@ -249,6 +249,14 @@ video,
   box-shadow: var(--px-bevel);
 }
 
+/* 온보딩 패널은 styles.css(v1)의 grid + --content-gap 이 그대로 새고 있어서
+   명시적인 v2 flex 컬럼으로 다시 정의합니다. */
+.consent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--u3);
+}
+
 /* 제목 줄이 잉크색으로 반전된 대화창형 패널. */
 .px-dialog {
   background: var(--px-panel);
@@ -526,13 +534,10 @@ html:not(.fonts-icons-ready) .px-icon {
   color: var(--px-ink-sub);
 }
 
+/* 헤더에서는 감춥니다. 각 화면 본문에 이미 같은 이름의 접근성 전용 h2 제목(예:
+   #home-title)이 있어서, 화면 낭독기 안내는 그대로 유지됩니다. */
 .app-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 400;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none;
 }
 
 .header-status {
@@ -603,7 +608,8 @@ html:not(.fonts-icons-ready) .px-icon {
 .bookmark-handle {
   position: fixed;
   inset-inline-end: 0;
-  top: 168px;
+  top: auto;
+  bottom: calc(var(--safe-bottom) + 16px);
   z-index: 45;
   display: flex;
   flex-direction: column;
@@ -640,10 +646,10 @@ html:not(.fonts-icons-ready) .px-icon {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(44, 29, 22, 0.75);
+  background: rgba(44, 29, 22, 0.88);
   /* 흐릿한 블러 대신 픽셀 디더 패턴으로 어둡게 덮습니다. (§3.2) */
   background-image: repeating-conic-gradient(
-    rgba(44, 29, 22, 0.35) 0% 25%,
+    rgba(44, 29, 22, 0.5) 0% 25%,
     transparent 0% 50%
   );
   background-size: 4px 4px;
@@ -656,22 +662,48 @@ html:not(.fonts-icons-ready) .px-icon {
 
 .app-drawer {
   position: fixed;
-  inset-block: 0;
-  inset-inline-end: 0;
+  /* 우측 하단 팝오버 형태입니다. 상시 노출되는 손잡이(FAB) 바로 위에 떠 있습니다. (§7.2) */
+  inset-block-start: auto;
+  inset-block-end: calc(var(--safe-bottom) + 84px);
+  inset-inline-end: 16px;
   z-index: 60;
-  inline-size: min(var(--drawer-width), 82vw);
+  inline-size: min(var(--drawer-width), calc(100vw - 32px));
+  /* 목차(홈/모험 중/퀘스트/도감/마이페이지) 다섯 개가 스크롤 없이 한 번에 보이도록
+     뷰포트 높이 기준으로만 여유 있게 제한합니다. 일반적인 화면에서는 이 값에
+     닿지 않고 내용 높이만큼만 차지합니다. */
+  max-block-size: calc(100dvh - var(--safe-bottom) - 32px);
   display: flex;
   flex-direction: column;
   background: var(--px-panel);
-  border-inline-start: 2px solid var(--px-outline);
-  box-shadow: -4px 0 0 rgba(44, 29, 22, 0.35);
+  /* '수첩' 컨셉에 맞춰 왼쪽 여백을 넉넉히 두고, 그 자리에 바인더 제본선(뚫린 링 구멍)을
+     넣습니다. (아래 ::before) */
+  padding-inline-start: 14px;
+  border: 2px solid var(--px-outline);
+  border-radius: 10px;
+  box-shadow: 3px 3px 0 rgba(44, 29, 22, 0.35);
   translate: 100% 0;
   transition: translate 180ms steps(6, end);
 }
 
+/* 바인더 제본선. 왼쪽 여백 위에 뚫린 링 구멍이 세로로 반복되는 패턴을 겹쳐 그려서
+   드로어 전체가 실제 바인더 표지처럼 보이게 합니다. */
+.app-drawer::before {
+  content: "";
+  position: absolute;
+  inset-block: 10px;
+  inset-inline-start: 4px;
+  inline-size: 8px;
+  background-image: radial-gradient(circle, var(--px-outline) 2.4px, transparent 2.6px);
+  background-size: 100% 22px;
+  background-repeat: repeat-y;
+  background-position: center top;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 @media (min-width: 560px) {
   .app-drawer {
-    inset-inline-end: max(0px, calc(50vw - var(--shell-max-width) / 2));
+    inset-inline-end: max(16px, calc(50vw - var(--shell-max-width) / 2 + 16px));
   }
 }
 
@@ -701,8 +733,9 @@ html:not(.fonts-icons-ready) .px-icon {
 }
 
 .drawer-close {
-  min-inline-size: var(--touch-min);
+  min-inline-size: 36px;
   min-block-size: 36px;
+  padding: var(--u2);
 }
 
 .drawer-language-row {
@@ -770,7 +803,9 @@ html:not(.fonts-icons-ready) .px-icon {
 
 .drawer-body {
   flex: 1 1 auto;
-  overflow-y: auto;
+  /* 목차 항목이 스크롤 없이 전부 고정으로 보이도록 내부 스크롤을 두지 않습니다.
+     .app-drawer의 max-block-size가 뷰포트 기준 여유값이라 보통은 넘치지 않습니다. */
+  overflow: visible;
   padding: var(--u2) var(--u3) var(--u4) var(--u4);
   display: flex;
   flex-direction: column;
@@ -796,14 +831,19 @@ html:not(.fonts-icons-ready) .px-icon {
   list-style: none;
 }
 
-/* 카트리지형 메뉴 항목. */
+/* 바인더 색인 페이지 한 장. 오른쪽 끝에 색깔 있는 색인 탭(.nav-link__index)이 튀어나와
+   있어서, 실제 바인더에서 원하는 페이지를 탭으로 찾아가는 느낌을 준다. */
 .nav-link {
+  position: relative;
   inline-size: 100%;
   min-block-size: var(--touch-min);
   display: flex;
   align-items: center;
   gap: var(--u2);
   padding: var(--u2);
+  /* 왼쪽은 원형 아이콘이, 오른쪽은 색인 탭이 튀어나올 자리를 비워 둔다. */
+  padding-inline-start: 26px;
+  padding-inline-end: 40px;
   text-align: start;
   color: var(--px-ink);
   background: #ffffff;
@@ -811,6 +851,20 @@ html:not(.fonts-icons-ready) .px-icon {
   border-radius: 0;
   box-shadow: 2px 2px 0 var(--px-bevel-dark);
   cursor: pointer;
+}
+
+/* 왼쪽 아이콘을 원형으로 바꿔서 페이지 왼쪽 밖으로 반원처럼 튀어나오게 한다.
+   오른쪽의 화살촉형 색인 탭(.nav-link__index)과 대칭을 이루는 바인더 표식이다. */
+.nav-link .px-icon-box {
+  position: absolute;
+  inset-inline-start: -16px;
+  top: 50%;
+  translate: 0 -50%;
+  inline-size: 32px;
+  block-size: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--px-outline);
+  box-shadow: 1px 1px 0 rgba(44, 29, 22, 0.25);
 }
 
 .nav-link:active {
@@ -844,14 +898,31 @@ html:not(.fonts-icons-ready) .px-icon {
   color: var(--px-ink);
 }
 
+/* 바인더 색인 탭. 화살촉(플래그) 모양으로 페이지 오른쪽 밖까지 튀어나와서, 진짜 바인더
+   색인지처럼 보이게 한다. 색은 화면마다 다른 --cat-color(VIEW_META.accent)를 쓴다. */
 .nav-link__index {
-  margin-inline-start: auto;
+  position: absolute;
+  inset-inline-end: -2px;
+  inset-block: 5px;
+  inline-size: 34px;
   flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   font-family: var(--font-display);
-  font-size: 11px;
-  padding: 0 var(--u1);
-  background: var(--px-paper);
-  border: 1px solid var(--px-outline);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 0 0 var(--u1);
+  color: var(--px-panel);
+  background: var(--cat-color, var(--px-ink));
+  border: 2px solid var(--px-outline);
+  border-inline-end: 0;
+  clip-path: polygon(0 0, 68% 0, 100% 50%, 68% 100%, 0 100%);
+  box-shadow: 1px 0 0 rgba(44, 29, 22, 0.25);
+}
+
+.nav-link.is-active .nav-link__index {
+  outline: 2px solid var(--px-panel);
+  outline-offset: -4px;
 }
 
 /* 하단 고정 탭은 v2 에서 폐기합니다. (§0.1) */
@@ -866,9 +937,9 @@ html:not(.fonts-icons-ready) .px-icon {
 .app-main {
   flex: 1 1 auto;
   inline-size: 100%;
+  /* 책갈피 손잡이가 우측 하단 FAB로 옮겨져 더 이상 본문을 침범하지 않으므로,
+     좌우 대칭 패딩만 둬서 본문이 전체 폭을 씁니다. (§7.2) */
   padding: var(--u3) var(--gutter-page) calc(var(--u12) + var(--safe-bottom));
-  /* 상시 노출되는 책갈피 손잡이가 본문을 덮지 않도록 오른쪽에 자리를 비웁니다. (명세 §7.2) */
-  padding-inline-end: calc(var(--gutter-page) + var(--bookmark-handle-width));
   background: var(--px-paper);
 }
 
@@ -1110,6 +1181,30 @@ body[data-exploration-mode="planned"] .plan-flag {
   block-size: clamp(220px, 38dvh, 340px);
   inline-size: 100%;
   background: #cfe0c3;
+}
+
+/* 지도 위에 겹쳐 뜨는 현재 위치 버튼입니다. 지도 앱들의 통상적인 재중심 버튼처럼
+   지도 영역 우측 하단에 원형으로 띄웁니다. */
+.map-location-button {
+  position: absolute;
+  inset-block-end: var(--u3);
+  inset-inline-end: var(--u3);
+  z-index: 5;
+  inline-size: 40px;
+  block-size: 40px;
+  display: grid;
+  place-items: center;
+  color: var(--px-ink);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 50%;
+  box-shadow: var(--px-shadow);
+  cursor: pointer;
+}
+
+.map-location-button:active {
+  translate: 2px 2px;
+  box-shadow: 1px 1px 0 var(--px-outline);
 }
 
 .home-sheet {
@@ -1960,6 +2055,18 @@ select {
   cursor: pointer;
 }
 
+/* 온보딩 화면의 "공용 체험 계정" / "네이버·구글로 시작" 세 버튼을 폭·패딩·폰트 크기까지
+   동일하게 맞춥니다. .primary-action은 다른 화면(닉네임 단계 등)에서 좁은 칸에 나란히
+   쓰이기도 해서 전역으로 폭을 바꾸면 안 되므로 #consent-step 안으로 범위를 한정합니다. */
+#consent-step .primary-action,
+#consent-step .social-login-button {
+  inline-size: 100%;
+  min-block-size: var(--touch-min);
+  padding: var(--u2) var(--u4);
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
 /* ────────────────────────────────────────────────
    15. 접근성 (§13.3)
    ──────────────────────────────────────────────── */
@@ -2511,7 +2618,8 @@ body[data-catalog-sheet-open="true"] {
 
 /* ── S11 꿈돌이 2D 촬영 (명세 §10 S11) ── */
 
-/* 배경 사진과 꿈돌이를 겹치는 무대입니다. */
+/* 배경 사진과 꿈돌이를 겹치는 무대입니다. 손가락으로 캐릭터를 옮기고 핀치로 크기를
+   바꾸는 동안 브라우저가 화면 스크롤·확대로 가로채지 않게 touch-action을 끕니다. */
 .photo-stage {
   position: relative;
   display: flex;
@@ -2522,6 +2630,7 @@ body[data-catalog-sheet-open="true"] {
   overflow: hidden;
   background: var(--px-panel-muted);
   border: 2px solid var(--px-outline);
+  touch-action: none;
 }
 
 .photo-source,
@@ -2541,11 +2650,13 @@ body[data-catalog-sheet-open="true"] {
   color: var(--px-ink-sub);
 }
 
-/* 합성 미리보기의 꿈돌이입니다. 발이 바닥에 닿게 아래에 붙입니다. */
+/* 합성 미리보기의 꿈돌이입니다. inset-inline-start/inset-block-start는 JS가
+   state.photo.offsetX/offsetY(%)로 매번 지정합니다. translate로 캐릭터의 발(가로
+   중앙, 세로 아래쪽 끝)이 그 지점에 오게 기준점을 옮깁니다 — capturePhoto()의
+   drawX/drawY 계산과 같은 기준점입니다. */
 .photo-overlay {
   position: absolute;
-  inset-block-end: 4%;
-  translate: -50% 0;
+  translate: -50% -100%;
   inline-size: auto;
   object-fit: contain;
   image-rendering: pixelated;
@@ -2923,4 +3034,121 @@ body[data-record-sheet-open="true"] {
   .start-screen__hint {
     animation: none;
   }
+}
+
+/* ────────────────────────────────────────────────
+   관광지 사진 (한국관광공사 TourAPI 대표 사진 / 관광사진 정보)
+   ──────────────────────────────────────────────── */
+
+/* 퀘스트 카드 맨 위 사진입니다. 비율을 고정해 사진마다 카드 높이가 들쭉날쭉하지 않게 한다. */
+.card-photo {
+  aspect-ratio: 16 / 9;
+  margin-block-end: var(--u2);
+  overflow: hidden;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+/* 퀘스트 상세 시트 맨 위 사진입니다. 출처 캡션을 사진 오른쪽 아래에 겹쳐 둔다.
+   시트 본문은 스크롤되는 flex 열이라, overflow:hidden 자식이 0 높이로 눌리지 않게 flex-shrink를 끈다. */
+.quest-sheet__photo {
+  position: relative;
+  flex-shrink: 0;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+/* 실제 사진이라 픽셀아트용 보간 끄기를 적용하지 않는다. */
+.card-photo img,
+.quest-sheet__photo img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+}
+
+.quest-sheet__photo-credit {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  padding: 2px var(--u2);
+  font-size: 10px;
+  color: #fff;
+  background: rgba(20, 14, 10, 0.6);
+}
+
+/* ────────────────────────────────────────────────
+   화면별 스포트라이트 튜토리얼
+   화면을 처음(또는 "다시 보지 않기" 전까지 매번) 보여줄 때, 소개할 버튼 주위를
+   밝은 테두리로 감싸고 나머지는 어둡게 덮어 게임 튜토리얼처럼 안내한다.
+   ──────────────────────────────────────────────── */
+
+#view-tutorial-layer[hidden] {
+  display: none;
+}
+
+.tutorial-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(20, 14, 10, 0.72);
+}
+
+/* 소개 대상 버튼 자리에 겹쳐 그리는 테두리입니다. JS가 대상의 위치·크기에 맞춰
+   top/left/width/height를 그때그때 지정한다. */
+.tutorial-highlight {
+  position: fixed;
+  z-index: 151;
+  border: 3px solid var(--px-gold);
+  border-radius: 12px;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.35), 0 0 16px rgba(253, 188, 41, 0.85);
+  pointer-events: none;
+}
+
+/* 설명 카드입니다. 대상 위치에 따라 화면 곳곳에 걸치지 않도록, 항상 화면 하단
+   고정 자리에 둔다. */
+.tutorial-callout {
+  position: fixed;
+  z-index: 152;
+  inset-inline: var(--gutter-page);
+  inset-block-end: calc(var(--safe-bottom) + var(--u3));
+  max-inline-size: calc(var(--shell-max-width) - var(--gutter-page) * 2);
+  margin-inline: auto;
+  padding: var(--u3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 10px;
+  box-shadow: var(--px-shadow);
+}
+
+.tutorial-callout__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
+.tutorial-callout__text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--px-ink-sub);
+}
+
+.tutorial-callout__dismiss {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  font-size: 12px;
+  color: var(--px-ink-sub);
+  cursor: pointer;
+}
+
+.tutorial-callout__confirm {
+  align-self: flex-end;
+  min-inline-size: 96px;
 }

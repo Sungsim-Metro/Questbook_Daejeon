@@ -19,6 +19,7 @@ sys.path.insert(0, str(APP_API_SRC))
 from questbook_api.integrations.tourapi.client import (
     TourApiClient,
     map_tourapi_category,
+    normalize_image_url,
     normalize_service_key,
 )
 
@@ -434,8 +435,11 @@ class TourApiDaejeonTest(unittest.TestCase):
             self.assertLessEqual(request_call.kwargs["timeout"], 5)
         self.assertEqual(
             set(places[-1].to_public_dict()),
-            {"contentId", "title", "latitude", "longitude", "categoryCode", "categoryName", "summary", "distanceMeters", "source"},
+            {"contentId", "title", "latitude", "longitude", "categoryCode", "categoryName", "summary",
+             "distanceMeters", "source", "contentTypeId", "imageUrl"},
         )
+        # 주소 같은 원본 필드는 여전히 빠지고, URL이 아닌 이미지 값은 버린다.
+        self.assertEqual(places[-1].image_url, "")
 
     def test_daejeon_filter_keeps_lcls_priority_and_never_substitutes_other_categories(self) -> None:
         """
@@ -656,6 +660,102 @@ class TourApiDaejeonTest(unittest.TestCase):
                 "questbook_api.integrations.tourapi.client.urlopen", return_value=FakeTourApiResponse(payload)
             ):
                 self.assertEqual(TourApiClient("test-key").fetch_daejeon()[1], "fallback:upstream_error")
+
+
+def gallery_payload(items: object) -> dict:
+    """
+    입력: 관광사진 정보 응답의 items 필드.
+    출력: 정상 헤더를 가진 PhotoGalleryService1 가짜 응답.
+    역할: 관광사진 키워드 검색 결과를 실제 키 없이 구성한다.
+    호출 예시: payload = gallery_payload({"item": [{"galTitle": "한밭수목원"}]})
+    """
+    return {
+        "response": {
+            "header": {"resultCode": "0000", "resultMsg": "OK"},
+            "body": {"items": items, "totalCount": 1},
+        }
+    }
+
+
+class TourApiPlaceImageTest(unittest.TestCase):
+    """
+    입력: unittest 실행 컨텍스트.
+    출력: 관광지 대표 사진 처리 단위 검증 결과.
+    역할: firstimage 파싱, https 보정, 관광사진 검색 매칭 규칙을 확인한다.
+    호출 예시: uv run --project services/app-api pytest services/app-api/tests/test_tourapi_client.py
+    """
+
+    def test_normalize_image_url_upgrades_http_and_rejects_other_values(self) -> None:
+        """
+        입력: http, https, 잘못된 값.
+        출력: 없음.
+        역할: https 페이지에서 혼합 콘텐츠가 되지 않도록 http를 올리고, URL이 아니면 버리는지 확인한다.
+        호출 예시: self.test_normalize_image_url_upgrades_http_and_rejects_other_values()
+        """
+        self.assertEqual(
+            normalize_image_url("http://tong.visitkorea.or.kr/cms/a.jpg"),
+            "https://tong.visitkorea.or.kr/cms/a.jpg",
+        )
+        self.assertEqual(normalize_image_url(" https://x.kr/b.jpg "), "https://x.kr/b.jpg")
+        for bad_value in ["", None, "javascript:alert(1)", "private-image", "//x.kr/c.jpg"]:
+            with self.subTest(value=bad_value):
+                self.assertEqual(normalize_image_url(bad_value), "")
+
+    def test_parse_uses_firstimage_then_falls_back_to_firstimage2(self) -> None:
+        """
+        입력: 대표 사진, 썸네일만 있는 장소, 사진 없는 장소.
+        출력: 없음.
+        역할: 목록 응답의 대표 사진을 추가 호출 없이 장소 후보에 담는지 확인한다.
+        호출 예시: self.test_parse_uses_firstimage_then_falls_back_to_firstimage2()
+        """
+        payload = daejeon_payload({"item": [
+            daejeon_item("1", firstimage="http://tong.visitkorea.or.kr/1.jpg", firstimage2="http://tong.visitkorea.or.kr/1s.jpg"),
+            daejeon_item("2", firstimage="", firstimage2="http://tong.visitkorea.or.kr/2s.jpg"),
+            daejeon_item("3"),
+        ]}, 3)
+        places = TourApiClient("test-key")._parse_tourapi_payload(payload)
+        self.assertEqual(
+            [place.image_url for place in places],
+            ["https://tong.visitkorea.or.kr/1.jpg", "https://tong.visitkorea.or.kr/2s.jpg", ""],
+        )
+        self.assertEqual(places[0].to_public_dict()["imageUrl"], "https://tong.visitkorea.or.kr/1.jpg")
+
+    def test_find_gallery_image_only_accepts_matching_daejeon_photo(self) -> None:
+        """
+        입력: 이름이 다른 사진, 다른 지역 사진, 맞는 사진이 섞인 검색 결과.
+        출력: 없음.
+        역할: 관광사진은 contentId로 연결되지 않으므로 이름과 대전 촬영지로 맞는 사진만 고르는지 확인한다.
+        호출 예시: self.test_find_gallery_image_only_accepts_matching_daejeon_photo()
+        """
+        payload = gallery_payload({"item": [
+            {"galTitle": "제주 식물원", "galPhotographyLocation": "제주특별자치도", "galWebImageUrl": "http://a/1.jpg"},
+            {"galTitle": "수목원 산책", "galPhotographyLocation": "대전광역시 서구", "galWebImageUrl": "http://a/2.jpg"},
+            {"galTitle": "한밭 수목원 가을", "galPhotographyLocation": "대전광역시 서구", "galWebImageUrl": "http://a/3.jpg"},
+        ]})
+        with patch(
+            "questbook_api.integrations.tourapi.client.urlopen", return_value=FakeTourApiResponse(payload),
+        ) as mocked_urlopen:
+            image_url = TourApiClient("test-key").find_gallery_image("한밭수목원")
+        self.assertEqual(image_url, "https://a/3.jpg")
+        request_url = urlparse(mocked_urlopen.call_args.args[0])
+        self.assertEqual(request_url.path, "/B551011/PhotoGalleryService1/gallerySearchList1")
+        self.assertEqual(parse_qs(request_url.query)["keyword"], ["한밭수목원"])
+
+    def test_find_gallery_image_distinguishes_no_match_from_failure(self) -> None:
+        """
+        입력: 맞는 사진이 없는 응답, 네트워크 오류, 키 미설정.
+        출력: 없음.
+        역할: 없으면 ""(캐싱해서 다시 안 찾음), 실패면 None(다음 배치에서 재시도)으로 구분하는지 확인한다.
+        호출 예시: self.test_find_gallery_image_distinguishes_no_match_from_failure()
+        """
+        with patch(
+            "questbook_api.integrations.tourapi.client.urlopen",
+            return_value=FakeTourApiResponse(gallery_payload("")),
+        ):
+            self.assertEqual(TourApiClient("test-key").find_gallery_image("한밭수목원"), "")
+        with patch("questbook_api.integrations.tourapi.client.urlopen", side_effect=URLError("down")):
+            self.assertIsNone(TourApiClient("test-key").find_gallery_image("한밭수목원"))
+        self.assertEqual(TourApiClient("").find_gallery_image("한밭수목원"), "")
 
 
 if __name__ == "__main__":
