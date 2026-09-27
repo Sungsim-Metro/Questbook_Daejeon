@@ -145,3 +145,16 @@ def test_reward_category_matches_frozen_quest_and_retired_variant_cannot_be_sele
 ])
 def test_legacy_quest_has_one_reward_category(category, name, expected):
     assert completion_theme(category, name) == expected
+
+
+def test_test_account_unlock_grants_everything_only_to_that_account(store):
+    store.unlock_everything_for_testing("owner")
+    assert all(v["unlocked"] for v in store.list_ggumdori("owner")["variants"])
+    assert all(b["earnedAt"] for b in store.list_badges("owner"))
+    # 다른 계정과 실제 완료 기록은 그대로다.
+    assert not any(v["unlocked"] for v in variants(store, "other"))
+    assert not any(b["earnedAt"] for b in store.list_badges("other"))
+    assert all(v["completedCount"] == 0 for v in variants(store))
+    # 여러 번 불러도 오류 없이 같은 상태다.
+    store.unlock_everything_for_testing("owner")
+    assert len(store.list_ggumdori("owner")["variants"]) == 34
