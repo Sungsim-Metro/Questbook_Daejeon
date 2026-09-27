@@ -79,7 +79,20 @@ http
         req.on("data", (d) => (raw += d));
         req.on("end", () => {
           try { MOCK.nickname = JSON.parse(raw).nickname || MOCK.nickname; } catch {}
-          json(200, { ok: true, nickname: MOCK.nickname });
+          // 실제 서버(services/app-api)의 /api/me/nickname은 { user: {...} } 형태로
+          // 갱신된 사용자 프로필 전체를 돌려준다. app.js의 saveNickname()이
+          // payload.user.nickname을 읽으므로 목업도 같은 모양이어야 한다.
+          json(200, {
+            user: {
+              nickname: MOCK.nickname,
+              accountType: MOCK.accountType,
+              email: MOCK.email,
+              provider: MOCK.provider,
+              currentLevel: 3,
+              xp: 1240,
+              nextLevelXp: 1800,
+            },
+          });
         });
         return;
       }

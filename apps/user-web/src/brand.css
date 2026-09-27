@@ -1,0 +1,25 @@
+/* 브랜드 로고(qbook-logo) 적용 레이어입니다.
+   styles.css / stitch-theme.css 뒤에 읽혀서, 헤더 마크만 덮어씁니다.
+   - 로고 원본: apps/user-web/public/assets/brand/qbook-logo.png */
+
+:root {
+  /* 로고 높이입니다. 제목 텍스트 크기(stitch-theme.css의 .app-title)가 이 값을
+     그대로 따라가서, 뷰포트가 바뀌어도 둘의 높이가 항상 맞습니다. */
+  --brand-mark-size: clamp(34px, 9vw, 42px);
+}
+
+/* ── 헤더 좌측 브랜드 마크 ──
+   styles.css / stitch-theme.css 가 .app-mark 에 씌워 둔 픽셀 프레임(테두리·그림자·배경 박스)을
+   전부 걷어내고, 로고 이미지만 조금 더 크게 보여줍니다. */
+.app-mark {
+  inline-size: var(--brand-mark-size);
+  block-size: var(--brand-mark-size);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  object-fit: contain;
+  /* 픽셀 아트라서 축소·확대 시 보간을 끕니다. */
+  image-rendering: pixelated;
+}
