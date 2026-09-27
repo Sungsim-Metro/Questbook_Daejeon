@@ -194,6 +194,30 @@ def translate_recommendation_texts(
                 place_reference["placeName"] = english_place_name
 
 
+def attach_place_images(payload: dict[str, Any], repository: QuestbookRepository) -> None:
+    """
+    입력: 추천 응답 딕셔너리, 저장소.
+    출력: 없음. payload를 제자리에서 수정한다.
+    역할: 대부분의 장소는 TourAPI 목록 응답의 대표 사진(imageUrl)이 이미 들어 있다. 비어 있는
+          장소만 매일 배치(catalog_sync.sync_place_images)가 관광사진 정보에서 채워 둔
+          place_images 캐시로 보충한다 — 요청 경로에서는 외부 호출이 전혀 없다.
+    호출 예시: attach_place_images(payload, state.repository)
+    """
+    # 변수 의미: 대표 사진이 비어 있는 장소 객체 목록이다.
+    missing_places = [
+        item["place"] for item in payload.get("recommendations", [])
+        if isinstance(item.get("place"), dict) and item["place"].get("contentId")
+        and not item["place"].get("imageUrl")
+    ]
+    if not missing_places:
+        return
+    images = repository.get_place_images([str(place["contentId"]) for place in missing_places])
+    for place in missing_places:
+        cached = images.get(str(place["contentId"]))
+        if cached:
+            place["imageUrl"] = cached
+
+
 def is_safe_oauth_nonce(value: str) -> bool:
     """
     입력: 브라우저가 생성한 OAuth nonce 후보.
@@ -477,6 +501,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                         force_refresh,
                         mode,
                     )
+                    attach_place_images(recommendations_payload, state.repository)
                     translate_recommendation_texts(recommendations_payload, state.repository, language)
                     self._send_json(HTTPStatus.OK, recommendations_payload)
                     return
@@ -492,6 +517,7 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     place_recommendations_payload = state.service.get_place_recommendations(
                         user_id, category_key, force_refresh,
                     )
+                    attach_place_images(place_recommendations_payload, state.repository)
                     translate_recommendation_texts(place_recommendations_payload, state.repository, language)
                     self._send_json(HTTPStatus.OK, place_recommendations_payload)
                     return

@@ -35,6 +35,8 @@ class TourPlaceCandidate:
     source: str
     # 변수 의미: TourAPI contentTypeId다. 장소 상세(detailIntro2) 조회에 필요하며 없으면 빈 문자열이다.
     content_type_id: str = ""
+    # 변수 의미: 대표 사진 https URL이다. TourAPI firstimage 또는 관광사진 캐시에서 채우며 없으면 빈 문자열이다.
+    image_url: str = ""
 
     def to_public_dict(self) -> dict[str, Any]:
         """
@@ -54,6 +56,7 @@ class TourPlaceCandidate:
             "distanceMeters": self.distance_meters,
             "source": self.source,
             "contentTypeId": self.content_type_id,
+            "imageUrl": self.image_url,
         }
 
 

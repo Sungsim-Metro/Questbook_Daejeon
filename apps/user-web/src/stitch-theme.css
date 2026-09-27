@@ -3035,3 +3035,120 @@ body[data-record-sheet-open="true"] {
     animation: none;
   }
 }
+
+/* ────────────────────────────────────────────────
+   관광지 사진 (한국관광공사 TourAPI 대표 사진 / 관광사진 정보)
+   ──────────────────────────────────────────────── */
+
+/* 퀘스트 카드 맨 위 사진입니다. 비율을 고정해 사진마다 카드 높이가 들쭉날쭉하지 않게 한다. */
+.card-photo {
+  aspect-ratio: 16 / 9;
+  margin-block-end: var(--u2);
+  overflow: hidden;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+/* 퀘스트 상세 시트 맨 위 사진입니다. 출처 캡션을 사진 오른쪽 아래에 겹쳐 둔다.
+   시트 본문은 스크롤되는 flex 열이라, overflow:hidden 자식이 0 높이로 눌리지 않게 flex-shrink를 끈다. */
+.quest-sheet__photo {
+  position: relative;
+  flex-shrink: 0;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--px-panel-muted);
+  border: 2px solid var(--px-outline);
+}
+
+/* 실제 사진이라 픽셀아트용 보간 끄기를 적용하지 않는다. */
+.card-photo img,
+.quest-sheet__photo img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+}
+
+.quest-sheet__photo-credit {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  padding: 2px var(--u2);
+  font-size: 10px;
+  color: #fff;
+  background: rgba(20, 14, 10, 0.6);
+}
+
+/* ────────────────────────────────────────────────
+   화면별 스포트라이트 튜토리얼
+   화면을 처음(또는 "다시 보지 않기" 전까지 매번) 보여줄 때, 소개할 버튼 주위를
+   밝은 테두리로 감싸고 나머지는 어둡게 덮어 게임 튜토리얼처럼 안내한다.
+   ──────────────────────────────────────────────── */
+
+#view-tutorial-layer[hidden] {
+  display: none;
+}
+
+.tutorial-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(20, 14, 10, 0.72);
+}
+
+/* 소개 대상 버튼 자리에 겹쳐 그리는 테두리입니다. JS가 대상의 위치·크기에 맞춰
+   top/left/width/height를 그때그때 지정한다. */
+.tutorial-highlight {
+  position: fixed;
+  z-index: 151;
+  border: 3px solid var(--px-gold);
+  border-radius: 12px;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.35), 0 0 16px rgba(253, 188, 41, 0.85);
+  pointer-events: none;
+}
+
+/* 설명 카드입니다. 대상 위치에 따라 화면 곳곳에 걸치지 않도록, 항상 화면 하단
+   고정 자리에 둔다. */
+.tutorial-callout {
+  position: fixed;
+  z-index: 152;
+  inset-inline: var(--gutter-page);
+  inset-block-end: calc(var(--safe-bottom) + var(--u3));
+  max-inline-size: calc(var(--shell-max-width) - var(--gutter-page) * 2);
+  margin-inline: auto;
+  padding: var(--u3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--u2);
+  background: var(--px-panel);
+  border: 2px solid var(--px-outline);
+  border-radius: 10px;
+  box-shadow: var(--px-shadow);
+}
+
+.tutorial-callout__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
+.tutorial-callout__text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--px-ink-sub);
+}
+
+.tutorial-callout__dismiss {
+  display: flex;
+  align-items: center;
+  gap: var(--u2);
+  font-size: 12px;
+  color: var(--px-ink-sub);
+  cursor: pointer;
+}
+
+.tutorial-callout__confirm {
+  align-self: flex-end;
+  min-inline-size: 96px;
+}

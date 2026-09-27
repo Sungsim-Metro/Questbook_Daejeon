@@ -183,6 +183,36 @@ const LEGACY_VIEW_MAP = {
   notes: "me",
 };
 
+// 화면마다 처음(또는 "다시 보지 않기" 전까지 매번) 보여 줄 스포트라이트 안내입니다.
+// targetSelector가 가리키는 요소만 밝게 남기고 나머지는 어둡게 덮어 게임 튜토리얼처럼 보여 줍니다.
+const VIEW_TUTORIAL_TIPS = {
+  home: {
+    targetSelector: "#map-location-button",
+    title: "현재 위치로 이동",
+    text: "지도가 다른 곳을 보고 있어도 이 버튼을 누르면 바로 내 위치로 돌아와요.",
+  },
+  adventure: {
+    targetSelector: "[data-adventure-sort]",
+    title: "정렬 기준 바꾸기",
+    text: "가까운 순·시작한 순으로 진행 중인 퀘스트 순서를 바꿔볼 수 있어요.",
+  },
+  quests: {
+    targetSelector: "[data-quests-view]",
+    title: "보기 방식 바꾸기",
+    text: "카드형·목록형으로 퀘스트 목록 보는 방식을 바꿀 수 있어요.",
+  },
+  collection: {
+    targetSelector: "#collection-photo-button",
+    title: "꿈돌이와 사진 찍기",
+    text: "여기를 누르면 보유한 꿈돌이를 골라 바로 사진을 찍을 수 있어요.",
+  },
+  me: {
+    targetSelector: "#me-record-open",
+    title: "나의 모험 기록",
+    text: "여기서 완료한 퀘스트를 월별로 모아 다시 볼 수 있어요.",
+  },
+};
+
 // NAVER Maps JavaScript SDK URL입니다.
 const NAVER_MAPS_SDK_URL = "https://oapi.map.naver.com/openapi/v3/maps.js";
 
@@ -487,6 +517,9 @@ const APP_SETTINGS_KEY = "questbook:user-web:app-settings";
 
 // 마이페이지의 모션 줄이기 설정을 저장하는 키입니다.
 const REDUCED_MOTION_KEY = "questbook:user-web:reduced-motion";
+
+// 화면별 첫 안내(스포트라이트 튜토리얼)를 "다시 보지 않기"로 끈 화면 id 목록을 저장하는 키입니다.
+const VIEW_TUTORIAL_DISMISSED_KEY = "questbook:user-web:view-tutorial-dismissed";
 
 // 브라우저에 저장할 baseline access token 키입니다.
 const ACCESS_TOKEN_KEY = "questbook:user-web:access-token";
@@ -2093,6 +2126,11 @@ function setConsentPanelVisible(isVisible) {
   }
   if (isVisible) {
     closeDrawer();
+  } else {
+    // 동의 화면이 사라지고 실제 화면이 처음 보이는 순간입니다. setActiveView()의
+    // isSameView 판정(초기 activeView와 첫 setActiveView 호출 값이 같아 걸러짐)에
+    // 걸리지 않는 유일한 지점이라, 첫 화면 소개는 여기서 직접 띄웁니다.
+    maybeShowViewTutorial(state.activeView);
   }
 }
 
@@ -2631,6 +2669,8 @@ function normalizeRecommendation(rawItem) {
     // 관광지 상세 모달 조회에 쓰는 TourAPI 식별자입니다.
     placeContentId: String(item.placeContentId || place.contentId || item.contentId || ""),
     placeContentTypeId: String(item.placeContentTypeId || place.contentTypeId || item.contentTypeId || ""),
+    // 관광지 대표 사진입니다. 카드와 상세 시트에 쓰며, 없으면 사진 없이 그립니다.
+    placeImageUrl: toSafeImageUrl(item.placeImageUrl || place.imageUrl),
     category: normalizeCategory(
       quest.rewardCategory || item.rewardCategory || item.category || item.categoryCode || quest.categoryCode || place.categoryCode || "all",
     ),
@@ -2668,6 +2708,35 @@ function normalizeRecommendation(rawItem) {
     // 실제 수행할 수 있는 행사 회차 목록입니다. (명세 §11.1, §16.2)
     festivalTargets: unwrapList(item.festivalTargets || quest.festivalTargets).map(normalizeFestivalTarget),
   };
+}
+
+/**
+ * 입력: 서버가 준 이미지 URL 후보.
+ * 출력: https 또는 같은 출처(/로 시작) URL. 아니면 "".
+ * 역할: 관광지 사진 주소로 쓸 수 있는 값만 남긴다.
+ * 호출 예시: toSafeImageUrl("https://tong.visitkorea.or.kr/a.jpg")
+ */
+function toSafeImageUrl(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  return url.startsWith("https://") || (url.startsWith("/") && !url.startsWith("//")) ? url : "";
+}
+
+/**
+ * 입력: 사진 URL, CSS 클래스, 대체 텍스트.
+ * 출력: 관광지 사진 요소.
+ * 역할: 사진을 늦게 불러오고, 주소가 깨졌으면 빈 자리를 남기지 않고 요소를 지운다.
+ * 호출 예시: createPlacePhoto(url, "card-photo", "")
+ */
+function createPlacePhoto(url, className, altText) {
+  const frame = createElement("div", className);
+  const image = document.createElement("img");
+  image.src = url;
+  image.alt = altText;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.addEventListener("error", () => frame.remove(), { once: true });
+  frame.append(image);
+  return frame;
 }
 
 /**
@@ -3729,6 +3798,12 @@ function setActiveView(viewId, shouldUpdateHash = true, isBackNavigation = false
   renderAppHeader();
   renderDrawerNavigation();
 
+  if (!isSameView) {
+    // 이전 화면의 소개가 떠 있으면 닫고(다시 보지 않기는 저장하지 않음), 새 화면 소개를 띄웁니다.
+    closeViewTutorial(false);
+    maybeShowViewTutorial(viewId);
+  }
+
   if (shouldUpdateHash) {
     window.history.replaceState(null, "", `#view-${viewId}`);
   }
@@ -3764,6 +3839,166 @@ function goToPreviousView() {
     return;
   }
   setActiveView(previousView, true, true);
+}
+
+// 현재 열려 있는 화면 스포트라이트 튜토리얼입니다({ viewId, target } 또는 null).
+let activeViewTutorial = null;
+
+/**
+ * 입력: 없음.
+ * 출력: "다시 보지 않기"로 끈 화면 id를 key로 하는 객체.
+ * 역할: 저장된 스포트라이트 튜토리얼 해제 상태를 읽는다.
+ * 호출 예시: const dismissed = readDismissedViewTutorials()
+ */
+function readDismissedViewTutorials() {
+  try {
+    const saved = JSON.parse(readStorageValue(VIEW_TUTORIAL_DISMISSED_KEY) || "{}");
+    return saved && typeof saved === "object" ? saved : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * 입력: 화면 id.
+ * 출력: 없음.
+ * 역할: 해당 화면의 스포트라이트 튜토리얼을 앞으로 다시 보여 주지 않도록 저장한다.
+ * 호출 예시: dismissViewTutorial("home")
+ */
+function dismissViewTutorial(viewId) {
+  const dismissed = readDismissedViewTutorials();
+  dismissed[viewId] = true;
+  writeStorageValue(VIEW_TUTORIAL_DISMISSED_KEY, JSON.stringify(dismissed));
+}
+
+/**
+ * 입력: 화면 id.
+ * 출력: 없음.
+ * 역할: 이 화면에 등록된 스포트라이트 안내가 있고 "다시 보지 않기"로 끄지 않았다면 보여 준다.
+ * 로그인 전(온보딩 화면)이나 정적 미리보기 모드에서는 계정별 설정이 의미가 없어 건너뛴다.
+ * 호출 예시: maybeShowViewTutorial("home")
+ */
+function maybeShowViewTutorial(viewId) {
+  const tip = VIEW_TUTORIAL_TIPS[viewId];
+  if (!tip || !state.accessToken || IS_DESIGN_PREVIEW || IS_HOSTED_STATIC_PREVIEW) {
+    return;
+  }
+  if (readDismissedViewTutorials()[viewId]) {
+    return;
+  }
+
+  // 화면 전환(책장 넘김) 애니메이션이 끝나고 대상 요소가 자리 잡은 뒤 위치를 잽니다.
+  window.requestAnimationFrame(() => {
+    // 백그라운드 탭에서는 이 콜백이 한참 뒤에 돌 수 있어, 그 사이 화면이 바뀌었으면 띄우지 않습니다.
+    if (state.activeView !== viewId) {
+      return;
+    }
+    const target = document.querySelector(`[data-view-panel="${viewId}"] ${tip.targetSelector}`);
+    if (!target) {
+      return;
+    }
+    activeViewTutorial = { viewId, target };
+    renderViewTutorial();
+  });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: activeViewTutorial 상태에 맞춰 스포트라이트 오버레이를 그리거나 지운다.
+ * 호출 예시: renderViewTutorial()
+ */
+function renderViewTutorial() {
+  const layer = select("#view-tutorial-layer");
+  if (!layer) {
+    return;
+  }
+
+  if (!activeViewTutorial) {
+    layer.hidden = true;
+    layer.replaceChildren();
+    window.removeEventListener("resize", repositionViewTutorialHighlight);
+    return;
+  }
+
+  const tip = VIEW_TUTORIAL_TIPS[activeViewTutorial.viewId];
+  layer.hidden = false;
+  layer.replaceChildren();
+
+  // 배경을 어둡게 덮는 층입니다. 눌러도 확인과 같은 효과(체크 안 한 채 닫기)입니다.
+  const scrim = createElement("div", "tutorial-scrim");
+  scrim.addEventListener("click", () => closeViewTutorial(false));
+
+  // 소개 대상 버튼 주위의 밝은 테두리입니다. 위치는 repositionViewTutorialHighlight가 잡습니다.
+  const highlight = createElement("div", "tutorial-highlight");
+  highlight.id = "view-tutorial-highlight";
+
+  const callout = createElement("section", "tutorial-callout");
+  callout.setAttribute("role", "dialog");
+  callout.setAttribute("aria-modal", "true");
+
+  const title = createElement("h2", "tutorial-callout__title", tip.title);
+  title.id = "view-tutorial-title";
+  callout.setAttribute("aria-labelledby", "view-tutorial-title");
+
+  const text = createElement("p", "tutorial-callout__text", tip.text);
+
+  const dismissRow = createElement("label", "tutorial-callout__dismiss");
+  const dismissCheckbox = document.createElement("input");
+  dismissCheckbox.type = "checkbox";
+  dismissRow.append(dismissCheckbox, createElement("span", "", "다시 보지 않기"));
+
+  const confirmButton = createElement("button", "px-button px-button--primary tutorial-callout__confirm", "확인");
+  confirmButton.type = "button";
+  confirmButton.addEventListener("click", () => closeViewTutorial(dismissCheckbox.checked));
+
+  callout.append(title, text, dismissRow, confirmButton);
+
+  layer.append(scrim, highlight, callout);
+
+  repositionViewTutorialHighlight();
+  window.addEventListener("resize", repositionViewTutorialHighlight);
+  confirmButton.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 대상 요소의 최신 위치에 맞춰 스포트라이트 테두리를 다시 그린다(화면 회전·리사이즈 대응).
+ * 호출 예시: repositionViewTutorialHighlight()
+ */
+function repositionViewTutorialHighlight() {
+  if (!activeViewTutorial) {
+    return;
+  }
+  const highlight = select("#view-tutorial-highlight");
+  if (!highlight) {
+    return;
+  }
+  // 하이라이트 테두리와 대상 버튼 사이의 여유 간격입니다.
+  const padding = 8;
+  const rect = activeViewTutorial.target.getBoundingClientRect();
+  highlight.style.top = `${rect.top - padding}px`;
+  highlight.style.left = `${rect.left - padding}px`;
+  highlight.style.width = `${rect.width + padding * 2}px`;
+  highlight.style.height = `${rect.height + padding * 2}px`;
+}
+
+/**
+ * 입력: "다시 보지 않기" 체크 여부.
+ * 출력: 없음.
+ * 역할: 스포트라이트 튜토리얼을 닫는다. 체크했으면 이 화면에서는 다시 뜨지 않는다.
+ * 호출 예시: closeViewTutorial(true)
+ */
+function closeViewTutorial(dontShowAgain) {
+  if (!activeViewTutorial) {
+    return;
+  }
+  if (dontShowAgain) {
+    dismissViewTutorial(activeViewTutorial.viewId);
+  }
+  activeViewTutorial = null;
+  renderViewTutorial();
 }
 
 /**
@@ -4330,6 +4565,11 @@ function createRecommendationCard(recommendation, options = {}) {
     createElement("span", "px-counter", formatDuration(recommendation.estimatedMinutes)),
     createMiniBadge(recommendation),
   );
+
+  // 관광지 사진이 있으면 카드 맨 위에 둡니다. 장소명이 바로 아래 있어 대체 텍스트는 비웁니다.
+  if (recommendation.placeImageUrl) {
+    body.append(createPlacePhoto(recommendation.placeImageUrl, "card-photo", ""));
+  }
 
   body.append(topline, title, place, summary);
 
@@ -4953,6 +5193,13 @@ function createQuestSheetHead(quest, questStatus) {
 function createQuestSheetBody(quest, questStatus) {
   // 스크롤되는 본문 영역입니다.
   const body = createElement("div", "quest-sheet__body");
+
+  // 0. 관광지 사진. 한국관광공사 사진은 출처 표시가 이용 조건이라 캡션을 함께 둡니다.
+  if (quest.placeImageUrl) {
+    const photo = createPlacePhoto(quest.placeImageUrl, "quest-sheet__photo", `${quest.placeName} 사진`);
+    photo.append(createElement("span", "quest-sheet__photo-credit", "사진 제공: 한국관광공사"));
+    body.append(photo);
+  }
 
   // 1. 관광지명, 2. 장소명과 도로명주소, 주소 복사
   body.append(createQuestPlacePanel(quest));
