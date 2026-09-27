@@ -1333,6 +1333,42 @@ class QuestbookRepository(QuestCatalogRepositoryMixin):
                 unlocked.append(dict(variant))
         return unlocked, {category: len(times) for category, times in completion_times.items()}
 
+    def unlock_everything_for_testing(self, user_id: str) -> None:
+        """
+        입력: 격리된 테스트 전용 사용자 ID.
+        출력: 없음.
+        역할: 실제 퀘스트 완료 없이 모든 뱃지와 모든 꿈돌이를 즉시 지급한다. 완료 이력(
+              quest_completions)을 조작하지 않고 보상 테이블(user_badges, user_ggumdori)만
+              직접 채우므로, 통계·완료 횟수 등 실제 사용자 데이터에 영향이 없다.
+              호출자가 이 user_id가 격리된 테스트 계정인지 확인해야 한다.
+        호출 예시: repository.unlock_everything_for_testing("test-unlock-user")
+        """
+        with self._lock, self._connection.transaction():
+            self._connection.execute("SELECT id FROM users WHERE id = %s FOR UPDATE", (user_id,))
+            completed_at = now_iso()
+            # 모든 뱃지를 만점 진행도로 즉시 획득 처리한다.
+            badge_rows = self._connection.execute("SELECT id, required_xp FROM badge_definitions").fetchall()
+            for badge_row in badge_rows:
+                self._connection.execute(
+                    """
+                    INSERT INTO user_badges(id, user_id, badge_definition_id, progress_xp, earned_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id, badge_definition_id) DO UPDATE SET
+                      progress_xp = EXCLUDED.progress_xp, earned_at = EXCLUDED.earned_at
+                    """,
+                    (make_id("ub"), user_id, badge_row["id"], badge_row["required_xp"], completed_at),
+                )
+            # 모든 꿈돌이(기본 제외)를 즉시 해금 처리한다.
+            for variant_id in ACTIVE_VARIANT_IDS:
+                self._connection.execute(
+                    """
+                    INSERT INTO user_ggumdori(id, user_id, variant_id, unlocked_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (user_id, variant_id) DO NOTHING
+                    """,
+                    (make_id("ug"), user_id, variant_id, completed_at),
+                )
+
     def list_badges(self, user_id: str) -> list[dict[str, Any]]:
         """
         입력: 사용자 ID.

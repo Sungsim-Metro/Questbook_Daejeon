@@ -207,6 +207,9 @@ class AppSettings:
     # 변수 의미: 기상청 단기예보(getVilageFcst) 서비스 키다. 비어 있으면 /api/weather가
     # 항상 unavailable로 응답한다.
     kma_weather_service_key: str = ""
+    # 변수 의미: 닉네임 단계에서 이 값을 입력하면 모든 꿈돌이·뱃지가 해금된 격리 테스트 계정으로
+    # 전환한다. 비어 있으면 기능이 꺼진다. 저장소에 올라가지 않는 서버 .env에만 둔다.
+    test_account_nickname: str = ""
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -295,4 +298,5 @@ class AppSettings:
             naver_api_hub_key_id=get_env("NAVER_API_HUB_KEY_ID"),
             naver_api_hub_key=get_env("NAVER_API_HUB_KEY"),
             kma_weather_service_key=get_env("KMA_WEATHER_SERVICE_KEY"),
+            test_account_nickname=get_env("QUESTBOOK_TEST_ACCOUNT_NICKNAME"),
         )

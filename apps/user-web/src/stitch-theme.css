@@ -2631,6 +2631,9 @@ body[data-catalog-sheet-open="true"] {
   background: var(--px-panel-muted);
   border: 2px solid var(--px-outline);
   touch-action: none;
+  /* 꿈돌이를 끌 때 무대 안 글자가 선택되지 않게 한다. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .photo-source,
@@ -2661,6 +2664,97 @@ body[data-catalog-sheet-open="true"] {
   object-fit: contain;
   image-rendering: pixelated;
   pointer-events: none;
+}
+
+/* 조절 중인 꿈돌이는 맨 앞에 두고, 여러 명일 때는 점선 테두리로 누가 선택됐는지 알린다. */
+.photo-overlay.is-active {
+  z-index: 2;
+}
+
+.photo-overlay.is-marked {
+  outline: 2px dashed var(--px-gold);
+  outline-offset: 2px;
+}
+
+/* 사진에 올린 꿈돌이 목록 줄입니다. 눌러서 조절 대상을 고르고, ×로 빼고, +로 더한다. */
+.photo-cast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--u2);
+}
+
+.photo-cast__chip {
+  display: flex;
+  align-items: stretch;
+  border: 2px solid var(--px-outline);
+  background: var(--px-panel);
+}
+
+.photo-cast__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--u1);
+  min-block-size: var(--touch-min);
+  padding: var(--u1) var(--u2);
+  font: inherit;
+  font-size: 12px;
+  color: var(--px-ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.photo-cast__pick[aria-pressed="true"] {
+  background: var(--px-gold);
+}
+
+.photo-cast__pick img {
+  inline-size: 28px;
+  block-size: 28px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.photo-cast__remove {
+  display: grid;
+  place-items: center;
+  inline-size: 32px;
+  padding: 0;
+  color: var(--px-ink);
+  background: var(--px-panel-muted);
+  border: 0;
+  border-inline-start: 2px solid var(--px-outline);
+  cursor: pointer;
+}
+
+.photo-cast__add {
+  min-block-size: var(--touch-min);
+}
+
+/* 꿈돌이 선택 시트에서 고른 카드와 고른 순서 번호입니다. */
+.catalog-card.is-selected {
+  background: var(--px-gold);
+}
+
+.catalog-card:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.catalog-card__pick-order {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
+  display: grid;
+  place-items: center;
+  inline-size: 22px;
+  block-size: 22px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: var(--px-panel);
+  background: var(--px-ink);
+  border-radius: 50%;
 }
 
 .photo-slider {

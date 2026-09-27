@@ -732,6 +732,10 @@ const state = {
   ggumdoriPickerOpen: false,
   // 꿈돌이 선택 시트를 열기 직전에 포커스가 있던 요소입니다.
   ggumdoriPickerReturnFocus: null,
+  // 선택 시트가 새로 찍기("new")인지, 찍고 있는 화면에 더하기("add")인지입니다.
+  ggumdoriPickerMode: "new",
+  // 선택 시트에서 지금까지 고른 꿈돌이 식별자입니다. 고른 순서대로 무대에 섭니다.
+  ggumdoriPickerSelection: [],
   // S05 퀘스트 목록의 보기 방식입니다. 목록형과 카드형이 같은 데이터를 씁니다. (명세 §10 S05)
   questsViewMode: "card",
   // S05 난이도 필터입니다. "all" 이면 전체입니다. (명세 §4.2, §10 S05)
@@ -3401,8 +3405,12 @@ function getGgumdoriImageRef(item, detail = false, animated = false) {
 }
 
 // 새 기본 이미지까지 실패하면 기존 기본 SVG로 대체하며 무한 재요청을 막는다.
+// 움직이는 GIF가 없는 꿈돌이(culture-1 등 옛 그림)는 기본 꿈돌이로 넘어가기 전에 같은 이름의
+// 정지 PNG를 먼저 시도해 다른 캐릭터로 보이지 않게 한다.
 function setGgumdoriImageSource(image, primaryRef) {
-  const sources = [...new Set([primaryRef || DEFAULT_GGUMDORI_IMAGE, DEFAULT_GGUMDORI_IMAGE])];
+  const primary = primaryRef || DEFAULT_GGUMDORI_IMAGE;
+  const stillFallback = primary.replace(/\.gif(\?.*)?$/i, ".png$1");
+  const sources = [...new Set([primary, stillFallback, DEFAULT_GGUMDORI_IMAGE])];
   let index = 0;
   const onError = () => {
     if (index + 1 < sources.length) image.src = sources[++index];
@@ -5084,6 +5092,13 @@ function renderPlaceDetailSheet() {
 
   const body = createElement("div", "quest-sheet__body");
 
+  // 관광지 사진입니다. 퀘스트 상세와 같은 모양·출처 표시를 씁니다.
+  if (place.placeImageUrl) {
+    const photo = createPlacePhoto(place.placeImageUrl, "quest-sheet__photo", `${place.placeName} 사진`);
+    photo.append(createElement("span", "quest-sheet__photo-credit", "사진 제공: 한국관광공사"));
+    body.append(photo);
+  }
+
   // 설명을 문장 단위로 나눠 미리 보기와 전체 보기를 구분합니다.
   const descriptionSentences = splitDescriptionSentences(description);
   const shouldTruncateDescription = status !== "loading" && descriptionSentences.length > DESCRIPTION_PREVIEW_SENTENCE_COUNT;
@@ -5359,6 +5374,10 @@ function createRewardPairPanel(quest, _questStatus) {
   const ggumdori = state.ggumdori
     .filter((item) => normalizeCategory(item.themeCategory) === category && item.unlocked)
     .sort((left, right) => right.tier - left.tier)[0];
+  // 이 카테고리에서 다음으로 해금할 수 있는(가장 낮은 단계의 잠긴) 꿈돌이입니다.
+  const nextGgumdori = state.ggumdori
+    .filter((item) => normalizeCategory(item.themeCategory) === category && !item.unlocked)
+    .sort((left, right) => left.tier - right.tier)[0];
 
   const panel = createElement("section", "px-panel");
   const heading = createElement("div", "context-row");
@@ -5371,16 +5390,21 @@ function createRewardPairPanel(quest, _questStatus) {
     createElement("p", "data-note", "이 카테고리의 퀘스트를 누적 1·2·3회 성공하면 꿈돌이 Lv.1·2·3이 해금됩니다. 뱃지는 기존 XP 기준으로 지급됩니다."),
   );
 
-  if (badge || ggumdori) {
+  if (badge || ggumdori || nextGgumdori) {
     const pair = createElement("div", "reward-pair");
     if (badge) {
       pair.append(createRewardSlot("보유 뱃지", badge.name, badge.imageRef || "", true, category));
     }
     if (ggumdori) {
-      pair.append(createRewardSlot("보유 꿈돌이", ggumdori.name, toAnimatedGgumdoriRef(ggumdori.imageRef), true, category));
+      pair.append(createRewardSlot("보유 꿈돌이", ggumdori.name, getGgumdoriImageRef(ggumdori, false, true), true, category));
+    }
+    // 아직 잠긴 다음 꿈돌이는 회색 GIF와 자물쇠로 미리 보여 줍니다.
+    if (nextGgumdori) {
+      pair.append(createRewardSlot("해금 가능 꿈돌이", nextGgumdori.name, getGgumdoriImageRef(nextGgumdori, false, true), false, category));
     }
     panel.append(pair);
-  } else {
+  }
+  if (!badge && !ggumdori) {
     panel.append(createElement("p", "data-note", "현재 이 카테고리에서 해금한 보상은 없습니다."));
   }
 
@@ -5402,7 +5426,12 @@ function createRewardSlot(slotLabel, rewardName, imageRef, isEarned, category) {
   const art = createElement("div", "reward-slot__art");
   if (imageRef) {
     const image = document.createElement("img");
-    image.src = imageRef;
+    // 꿈돌이 GIF가 없으면 같은 이름의 정지 PNG로 대체합니다.
+    if (/\.gif(\?.*)?$/i.test(imageRef)) {
+      setGgumdoriImageSource(image, imageRef);
+    } else {
+      image.src = imageRef;
+    }
     image.alt = "";
     image.dataset.pixelArt = "true";
     image.loading = "lazy";
@@ -5679,7 +5708,7 @@ function renderAdventure() {
   });
 
   // S09 상단 "사진 찍기": 보유 꿈돌이를 골라 바로 촬영 시트(S11)로 넘어갑니다.
-  select("#collection-photo-button")?.addEventListener("click", openGgumdoriPickerSheet);
+  select("#collection-photo-button")?.addEventListener("click", () => openGgumdoriPickerSheet("new"));
 
   // S09 획득 상태 필터입니다. (명세 §10 S09)
   document.querySelectorAll("[data-collection-filter]").forEach((button) => {
@@ -8048,16 +8077,73 @@ function getCatalogSheetTarget() {
 }
 
 /**
- * 입력: 없음.
+ * 입력: "new"(도감에서 새로 찍기) 또는 "add"(찍고 있는 화면에 더하기).
  * 출력: 없음.
- * 역할: 도감 상단 "사진 찍기"로 꿈돌이 선택 시트를 연다. 여기서 고르면 바로 촬영
- * 시트(S11)로 넘어간다. (명세 §10 S09, §10 S11)
- * 호출 예시: openGgumdoriPickerSheet()
+ * 역할: 꿈돌이 선택 시트를 연다. 여러 명을 골라 한 사진에 함께 세울 수 있다. (명세 §10 S09, §10 S11)
+ * 호출 예시: openGgumdoriPickerSheet("new")
  */
-function openGgumdoriPickerSheet() {
+function openGgumdoriPickerSheet(mode = "new") {
   state.ggumdoriPickerReturnFocus = document.activeElement;
   state.ggumdoriPickerOpen = true;
+  state.ggumdoriPickerMode = mode === "add" ? "add" : "new";
+  state.ggumdoriPickerSelection = [];
   renderGgumdoriPickerSheet();
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 이번 선택에서 더 고를 수 있는 꿈돌이 수.
+ * 역할: 더하기 모드면 이미 무대에 있는 수를 빼고 최대 수까지만 고르게 한다.
+ * 호출 예시: getGgumdoriPickerRoom()
+ */
+function getGgumdoriPickerRoom() {
+  const onStage = state.ggumdoriPickerMode === "add" ? state.photo.overlays.length : 0;
+  return Math.max(0, MAX_PHOTO_OVERLAYS - onStage);
+}
+
+/**
+ * 입력: 꿈돌이 식별자.
+ * 출력: 없음.
+ * 역할: 선택 시트에서 꿈돌이를 고르거나 푼다. 고를 수 있는 수를 넘으면 무시한다.
+ * 호출 예시: toggleGgumdoriPickerSelection("science-1")
+ */
+function toggleGgumdoriPickerSelection(ggumdoriId) {
+  const selection = state.ggumdoriPickerSelection;
+  if (selection.includes(ggumdoriId)) {
+    state.ggumdoriPickerSelection = selection.filter((id) => id !== ggumdoriId);
+  } else if (selection.length < getGgumdoriPickerRoom()) {
+    state.ggumdoriPickerSelection = [...selection, ggumdoriId];
+  } else {
+    return;
+  }
+  // 다시 그려도 보던 위치와 누른 카드의 포커스를 유지합니다.
+  const scrollTop = select("#ggumdori-picker-sheet .quest-sheet__body")?.scrollTop || 0;
+  renderGgumdoriPickerSheet();
+  const body = select("#ggumdori-picker-sheet .quest-sheet__body");
+  if (body) {
+    body.scrollTop = scrollTop;
+  }
+  select(`[data-picker-target="${ggumdoriId}"]`)?.focus({ preventScroll: true });
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 없음.
+ * 역할: 고른 꿈돌이들로 촬영을 시작하거나(새로 찍기), 찍고 있는 화면에 더한다(더하기).
+ * 호출 예시: confirmGgumdoriPickerSelection()
+ */
+function confirmGgumdoriPickerSelection() {
+  const selection = [...state.ggumdoriPickerSelection];
+  const mode = state.ggumdoriPickerMode;
+  if (selection.length === 0) {
+    return;
+  }
+  closeGgumdoriPickerSheet();
+  if (mode === "add" && state.photo.open) {
+    addPhotoOverlays(selection);
+  } else {
+    openPhotoSheet(selection);
+  }
 }
 
 /**
@@ -8113,10 +8199,15 @@ function renderGgumdoriPickerSheet() {
 
   const head = createElement("header", "quest-sheet__head px-dialog__bar");
   const titleGroup = createElement("div", "quest-sheet__title-group");
+  const isAddMode = state.ggumdoriPickerMode === "add";
+  const room = getGgumdoriPickerRoom();
+  const selection = state.ggumdoriPickerSelection;
   const title = createElement(
     "h2",
     "px-label",
-    localize("사진 찍을 꿈돌이 선택", "Choose a Ggumdori to photograph"),
+    isAddMode
+      ? localize("함께 찍을 꿈돌이 추가", "Add Ggumdori to the photo")
+      : localize("사진 찍을 꿈돌이 선택", "Choose Ggumdori to photograph"),
   );
   title.id = "ggumdori-picker-title";
   title.tabIndex = -1;
@@ -8142,20 +8233,30 @@ function renderGgumdoriPickerSheet() {
       createElement("p", "empty-message", "아직 획득한 꿈돌이가 없어요. 퀘스트를 완료해 꿈돌이를 모아보세요."),
     );
   } else {
+    body.append(createElement(
+      "p",
+      "data-note",
+      `여러 명을 골라 한 사진에 함께 세울 수 있어요. (최대 ${room}명)`,
+    ));
     const grid = createElement("div", "ggumdori-grid");
     earnedEntries.forEach((entry) => {
-      // 선택 카드입니다. 도감 카드와 같은 모양이지만 잠금·대표 표시는 필요 없습니다.
-      const card = createElement("button", "catalog-card");
+      // 선택 카드입니다. 누를 때마다 고르고 풀며, 고른 순서를 번호로 보여 줍니다.
+      const order = selection.indexOf(entry.ggumdoriId) + 1;
+      const card = createElement("button", `catalog-card${order ? " is-selected" : ""}`);
       card.type = "button";
       card.dataset.category = entry.category;
+      card.dataset.pickerTarget = entry.ggumdoriId;
+      card.setAttribute("aria-pressed", String(order > 0));
+      card.disabled = !order && selection.length >= room;
 
       const art = createElement("div", "catalog-card__art");
-      if (entry.ggumdoriImageRef) {
-        const image = document.createElement("img");
-        setGgumdoriImageSource(image, getGgumdoriImageRef(entry, false, true));
-        image.alt = "";
-        image.loading = "lazy";
-        art.append(image);
+      const image = document.createElement("img");
+      setGgumdoriImageSource(image, getGgumdoriImageRef(entry, false, true));
+      image.alt = "";
+      image.loading = "lazy";
+      art.append(image);
+      if (order) {
+        art.append(createElement("span", "catalog-card__pick-order", String(order)));
       }
       card.append(art);
 
@@ -8163,17 +8264,28 @@ function renderGgumdoriPickerSheet() {
       meta.append(createElement("span", "catalog-card__name", entry.ggumdoriName));
       card.append(meta);
 
-      card.addEventListener("click", () => {
-        closeGgumdoriPickerSheet();
-        openPhotoSheet(entry.ggumdoriId);
-      });
+      card.addEventListener("click", () => toggleGgumdoriPickerSelection(entry.ggumdoriId));
 
       grid.append(card);
     });
     body.append(grid);
   }
 
-  panel.append(head, body);
+  // 하단 고정 버튼입니다. 한 명 이상 골라야 누를 수 있습니다.
+  const footer = createElement("div", "quest-sheet__cta");
+  const confirmButton = createElement(
+    "button",
+    "px-button px-button--primary",
+    selection.length === 0
+      ? "꿈돌이를 골라주세요"
+      : isAddMode ? `${selection.length}명 추가하기` : `${selection.length}명과 사진 찍기`,
+  );
+  confirmButton.type = "button";
+  confirmButton.disabled = selection.length === 0;
+  confirmButton.addEventListener("click", confirmGgumdoriPickerSelection);
+  footer.append(confirmButton);
+
+  panel.append(head, body, footer);
   sheet.append(scrim, panel);
   // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
   trapFocus(panel);
@@ -8603,6 +8715,18 @@ async function saveNickname(nickname) {
     }
     if (!payload.user?.nickname) {
       throw new Error("missing saved nickname");
+    }
+    // 서버가 새 토큰을 주면 테스트 계정으로 전환된 것입니다. 로그인할 때처럼 세션을 바꾸고
+    // 그 계정의 도감·뱃지를 다시 불러옵니다.
+    if (payload.accessToken) {
+      state.nicknamePending = false;
+      state.sessionVersion += 1;
+      state.accessToken = payload.accessToken;
+      writeStorageValue(ACCESS_TOKEN_KEY, payload.accessToken);
+      state.user = { ...state.user, nickname: payload.user.nickname };
+      state.accountMessage = "테스트 계정으로 전환했어요.";
+      await loadInitialData(true);
+      return true;
     }
     state.requestVersions.user += 1;
     state.user = { ...state.user, nickname: payload.user.nickname };
@@ -9957,24 +10081,32 @@ function isAdditionalFestivalVisit(quest) {
    합성은 기기 안 Canvas 에서 하고, 인증 사진은 절대 자동으로 불러오지 않는다. (§15.2)
    ────────────────────────────────────────────── */
 
-/**
- * 입력: 꿈돌이 식별자.
- * 출력: 없음.
- * 역할: 획득한 꿈돌이만 촬영 화면을 연다. (명세 §10 S11)
- * 호출 예시: openPhotoSheet("science-1")
- */
-function openPhotoSheet(ggumdoriId) {
-  // 촬영에 쓸 도감 항목입니다.
-  const entry = state.catalog.entries.find((item) => item.ggumdoriId === ggumdoriId);
+// 한 사진에 함께 올릴 수 있는 꿈돌이 최대 수입니다.
+const MAX_PHOTO_OVERLAYS = 5;
 
-  if (!entry || entry.state !== "earned") {
+/**
+ * 입력: 꿈돌이 식별자 하나 또는 목록.
+ * 출력: 없음.
+ * 역할: 획득한 꿈돌이만 골라 촬영 화면을 연다. 여러 명이면 가로로 나란히 세운다. (명세 §10 S11)
+ * 호출 예시: openPhotoSheet(["science-1", "bread-1"])
+ */
+function openPhotoSheet(ggumdoriIds) {
+  // 촬영에 쓸 수 있는(획득한) 꿈돌이 식별자입니다. 순서를 지키고 최대 수까지만 씁니다.
+  const ids = (Array.isArray(ggumdoriIds) ? ggumdoriIds : [ggumdoriIds])
+    .filter((id) => state.catalog.entries.some((item) => item.ggumdoriId === id && item.state === "earned"))
+    .slice(0, MAX_PHOTO_OVERLAYS);
+
+  if (ids.length === 0) {
     return;
   }
 
+  // 무대에 올릴 꿈돌이들입니다. 처음에는 가로로 고르게 나눠 세웁니다.
+  const overlays = ids.map((id, index) => createPhotoOverlay(id, index, ids.length));
   state.photo = {
     ...createEmptyPhotoState(),
     open: true,
-    ggumdoriId,
+    overlays,
+    activeOverlayKey: overlays[overlays.length - 1].key,
     returnFocus: document.activeElement,
   };
 
@@ -9991,14 +10123,12 @@ function openPhotoSheet(ggumdoriId) {
 function createEmptyPhotoState() {
   return {
     open: false,
-    ggumdoriId: "",
     // idle | camera | file | denied
     source: "idle",
-    // 캐릭터 크기 배율과 좌우·상하 위치(0~100%)입니다. offsetY는 캐릭터 발(아래쪽 끝)이
-    // 무대 높이의 몇 %에 오는지를 뜻합니다. (명세 §10 S11)
-    scale: 40,
-    offsetX: 50,
-    offsetY: 96,
+    // 무대에 올린 꿈돌이들입니다. 각자 크기·위치를 따로 가집니다(createPhotoOverlay 참고).
+    overlays: [],
+    // 손가락·슬라이더로 지금 조절하고 있는 꿈돌이의 key입니다.
+    activeOverlayKey: "",
     // 셔터를 누른 뒤 만들어진 정지 PNG 입니다.
     resultDataUrl: "",
     message: "",
@@ -10006,6 +10136,110 @@ function createEmptyPhotoState() {
     pickedImageUrl: "",
     returnFocus: null,
   };
+}
+
+/**
+ * 입력: 꿈돌이 식별자, 무대에서의 순서, 함께 세울 전체 수.
+ * 출력: 무대에 올릴 꿈돌이 한 명의 상태.
+ * 역할: 크기 배율과 좌우·상하 위치(0~100%)를 정한다. offsetY는 캐릭터 발(아래쪽 끝)이
+ *       무대 높이의 몇 %에 오는지를 뜻한다. 여러 명이면 겹치지 않게 조금 작게, 나란히 세운다.
+ * 호출 예시: createPhotoOverlay("science-1", 0, 2)
+ */
+function createPhotoOverlay(ggumdoriId, index, total) {
+  return {
+    key: createClientId("overlay"),
+    ggumdoriId,
+    scale: total > 1 ? 32 : 40,
+    offsetX: total > 1 ? Math.round(20 + (60 * index) / (total - 1)) : 50,
+    offsetY: 96,
+  };
+}
+
+/**
+ * 입력: 없음.
+ * 출력: 지금 조절 중인 꿈돌이 상태 또는 null.
+ * 역할: 선택이 비었거나 사라졌으면 맨 위(마지막) 꿈돌이를 조절 대상으로 본다.
+ * 호출 예시: const overlay = getActivePhotoOverlay()
+ */
+function getActivePhotoOverlay() {
+  const { overlays, activeOverlayKey } = state.photo;
+  return overlays.find((overlay) => overlay.key === activeOverlayKey) || overlays[overlays.length - 1] || null;
+}
+
+/**
+ * 입력: 바꿀 값(scale/offsetX/offsetY 일부).
+ * 출력: 없음.
+ * 역할: 지금 조절 중인 꿈돌이 하나만 바꾸고 화면에 바로 반영한다.
+ * 호출 예시: updateActivePhotoOverlay({ scale: 50 })
+ */
+function updateActivePhotoOverlay(patch) {
+  const active = getActivePhotoOverlay();
+  if (!active) {
+    return;
+  }
+  state.photo = {
+    ...state.photo,
+    overlays: state.photo.overlays.map((overlay) => (overlay.key === active.key ? { ...overlay, ...patch } : overlay)),
+  };
+  syncPhotoControls();
+}
+
+/**
+ * 입력: 꿈돌이 식별자.
+ * 출력: 촬영 무대에 띄울 이미지 경로.
+ * 역할: 도감 카드·홈과 똑같은 그림(움직이는 GIF, 기본 꿈돌이는 default-1)을 쓴다.
+ *       도감 데이터의 원본 image_ref를 그대로 쓰면 기본 꿈돌이가 옛 그림(nature-1.png)으로
+ *       나오는 등 사용자가 고른 꿈돌이와 다른 그림이 합성됐다.
+ * 호출 예시: getPhotoOverlayImageRef("science-1")
+ */
+function getPhotoOverlayImageRef(ggumdoriId) {
+  const entry = state.catalog.entries.find((item) => item.ggumdoriId === ggumdoriId);
+  return getGgumdoriImageRef(entry, false, true);
+}
+
+/**
+ * 입력: 추가할 꿈돌이 식별자 목록.
+ * 출력: 없음.
+ * 역할: 이미 찍고 있는 화면에 꿈돌이를 더 올린다. 새로 올린 꿈돌이는 가운데 근처에 조금씩
+ *       비켜 세우고, 마지막으로 올린 꿈돌이를 바로 조절할 수 있게 한다.
+ * 호출 예시: addPhotoOverlays(["bread-1"])
+ */
+function addPhotoOverlays(ggumdoriIds) {
+  const room = MAX_PHOTO_OVERLAYS - state.photo.overlays.length;
+  const added = ggumdoriIds.slice(0, Math.max(0, room)).map((id, index) => ({
+    ...createPhotoOverlay(id, 0, 1),
+    scale: 32,
+    offsetX: Math.min(80, 40 + index * 10),
+  }));
+  if (added.length === 0) {
+    return;
+  }
+  state.photo = {
+    ...state.photo,
+    overlays: [...state.photo.overlays, ...added],
+    activeOverlayKey: added[added.length - 1].key,
+    message: "",
+  };
+  renderPhotoSheet();
+}
+
+/**
+ * 입력: 뺄 꿈돌이의 key.
+ * 출력: 없음.
+ * 역할: 무대에서 꿈돌이 하나를 내린다. 마지막 한 명은 내릴 수 없다.
+ * 호출 예시: removePhotoOverlay("overlay-abc")
+ */
+function removePhotoOverlay(key) {
+  if (state.photo.overlays.length <= 1) {
+    return;
+  }
+  const overlays = state.photo.overlays.filter((overlay) => overlay.key !== key);
+  state.photo = {
+    ...state.photo,
+    overlays,
+    activeOverlayKey: state.photo.activeOverlayKey === key ? overlays[overlays.length - 1].key : state.photo.activeOverlayKey,
+  };
+  renderPhotoSheet();
 }
 
 /**
@@ -10142,62 +10376,62 @@ async function capturePhoto() {
   }
 
   // 배경의 원본 크기입니다.
-  const sourceWidth = source.videoWidth || source.naturalWidth || 0;
-  const sourceHeight = source.videoHeight || source.naturalHeight || 0;
+  const rawWidth = source.videoWidth || source.naturalWidth || 0;
+  const rawHeight = source.videoHeight || source.naturalHeight || 0;
 
-  if (!sourceWidth || !sourceHeight) {
+  if (!rawWidth || !rawHeight) {
     state.photo = { ...state.photo, message: "사진을 아직 불러오는 중이에요." };
     renderPhotoSheet();
     return;
   }
+
+  // 미리보기 무대는 배경을 object-fit: cover로 잘라 보여 주므로, 결과도 무대 비율로 똑같이
+  // 잘라야 꿈돌이 위치(무대 대비 %)가 미리보기와 일치합니다.
+  const stageRect = select(".photo-stage")?.getBoundingClientRect();
+  const stageAspect = stageRect?.width && stageRect?.height ? stageRect.width / stageRect.height : 3 / 4;
+  const cropWidth = rawWidth / rawHeight > stageAspect ? Math.round(rawHeight * stageAspect) : rawWidth;
+  const cropHeight = rawWidth / rawHeight > stageAspect ? rawHeight : Math.round(rawWidth / stageAspect);
+  const sourceWidth = cropWidth;
+  const sourceHeight = cropHeight;
 
   // 합성 캔버스입니다. 기기 안에서만 처리합니다. (명세 §10 S11)
   const canvas = document.createElement("canvas");
   canvas.width = sourceWidth;
   canvas.height = sourceHeight;
   const context = canvas.getContext("2d");
-  context.drawImage(source, 0, 0, sourceWidth, sourceHeight);
+  context.drawImage(
+    source,
+    (rawWidth - cropWidth) / 2, (rawHeight - cropHeight) / 2, cropWidth, cropHeight,
+    0, 0, sourceWidth, sourceHeight,
+  );
 
-  // 합성할 꿈돌이 그림입니다. 정지 PNG라서 미리보기와 결과물이 항상 같은 그림입니다. (명세 §10 S11)
-  const entry = state.catalog.entries.find((item) => item.ggumdoriId === state.photo.ggumdoriId);
-  if (entry?.ggumdoriImageRef) {
-    try {
-      const art = await loadImageElement(entry.ggumdoriImageRef);
-      // 캐릭터 높이는 사진 높이의 scale% 입니다.
-      const drawHeight = (sourceHeight * state.photo.scale) / 100;
-      const drawWidth = art.naturalWidth ? (drawHeight * art.naturalWidth) / art.naturalHeight : drawHeight;
-      // 좌우 위치는 offsetX% 지점을 중심으로 둡니다.
-      const drawX = (sourceWidth * state.photo.offsetX) / 100 - drawWidth / 2;
-      // 상하 위치는 offsetY% 지점에 발(아래쪽 끝)이 오게 둡니다.
-      const drawY = (sourceHeight * state.photo.offsetY) / 100 - drawHeight;
-      context.drawImage(art, drawX, drawY, drawWidth, drawHeight);
-    } catch (error) {
-      state.photo = { ...state.photo, message: "꿈돌이 그림을 불러오지 못했어요." };
+  // 픽셀아트 꿈돌이는 확대할 때 흐려지지 않게 보간을 끕니다(배경 사진은 이미 그렸음).
+  context.imageSmoothingEnabled = false;
+  // 미리보기와 같은 앞뒤 순서로 그립니다. 조절 중인 꿈돌이는 화면에서 맨 앞에 있으므로 마지막에 그립니다.
+  const active = getActivePhotoOverlay();
+  const drawOrder = [...state.photo.overlays.filter((overlay) => overlay !== active), ...(active ? [active] : [])];
+  for (const overlay of drawOrder) {
+    // 무대에 떠 있는 바로 그 그림 요소를 씁니다. 미리보기에서 본 그림(대체 이미지 포함)이
+    // 그대로 합성되고, 움직이는 GIF는 첫 장면이 그려집니다.
+    const art = document.querySelector(`.photo-overlay[data-overlay-key="${overlay.key}"]`);
+    if (!art?.complete || !art.naturalWidth) {
+      state.photo = { ...state.photo, message: "꿈돌이 그림을 아직 불러오는 중이에요. 잠시 뒤 다시 눌러주세요." };
       renderPhotoSheet();
       return;
     }
+    // 캐릭터 높이는 사진 높이의 scale% 입니다.
+    const drawHeight = (sourceHeight * overlay.scale) / 100;
+    const drawWidth = (drawHeight * art.naturalWidth) / art.naturalHeight;
+    // 좌우 위치는 offsetX% 지점을 중심으로 둡니다.
+    const drawX = (sourceWidth * overlay.offsetX) / 100 - drawWidth / 2;
+    // 상하 위치는 offsetY% 지점에 발(아래쪽 끝)이 오게 둡니다.
+    const drawY = (sourceHeight * overlay.offsetY) / 100 - drawHeight;
+    context.drawImage(art, drawX, drawY, drawWidth, drawHeight);
   }
 
   stopPhotoCamera();
   state.photo = { ...state.photo, resultDataUrl: canvas.toDataURL("image/png"), message: "" };
   renderPhotoSheet();
-}
-
-/**
- * 입력: 이미지 경로.
- * 출력: 로드된 이미지 요소 Promise.
- * 역할: Canvas 에 그리기 전에 이미지가 준비되기를 기다린다.
- * 호출 예시: const art = await loadImageElement("/assets/ggumdori/science-1.png")
- */
-function loadImageElement(source) {
-  return new Promise((resolve, reject) => {
-    // 합성에 쓸 이미지입니다.
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.addEventListener("load", () => resolve(image), { once: true });
-    image.addEventListener("error", reject, { once: true });
-    image.src = source;
-  });
 }
 
 /**
@@ -10217,6 +10451,20 @@ function retakePhoto() {
 
 /**
  * 입력: 없음.
+ * 출력: 저장·공유용 파일 이름.
+ * 역할: 한 명이면 그 꿈돌이 id를, 여러 명이면 인원수를 파일 이름에 넣는다.
+ * 호출 예시: getPhotoFileName()
+ */
+function getPhotoFileName() {
+  const { overlays } = state.photo;
+  if (overlays.length === 1) {
+    return `questbook-${overlays[0].ggumdoriId}.png`;
+  }
+  return overlays.length > 1 ? `questbook-ggumdori-${overlays.length}.png` : "questbook-ggumdori.png";
+}
+
+/**
+ * 입력: 없음.
  * 출력: 저장 Promise.
  * 역할: 합성한 PNG 를 기기에 내려받는다. (명세 §10 S11)
  * 호출 예시: savePhoto()
@@ -10229,7 +10477,7 @@ function savePhoto() {
   // 내려받기용 임시 링크입니다.
   const link = document.createElement("a");
   link.href = state.photo.resultDataUrl;
-  link.download = `questbook-${state.photo.ggumdoriId || "ggumdori"}.png`;
+  link.download = getPhotoFileName();
   document.body.append(link);
   link.click();
   link.remove();
@@ -10252,7 +10500,7 @@ async function sharePhoto() {
   try {
     // dataURL 을 공유 가능한 파일로 바꿉니다.
     const blob = await (await fetch(state.photo.resultDataUrl)).blob();
-    const file = new File([blob], `questbook-${state.photo.ggumdoriId || "ggumdori"}.png`, { type: "image/png" });
+    const file = new File([blob], getPhotoFileName(), { type: "image/png" });
 
     // 파일 공유를 지원하는 기기에서만 공유창을 엽니다. (명세 §10 S11)
     if (navigator.canShare?.({ files: [file] }) && navigator.share) {
@@ -10295,8 +10543,10 @@ function renderPhotoSheet() {
     return;
   }
 
-  // 촬영에 쓰는 꿈돌이입니다.
-  const entry = state.catalog.entries.find((item) => item.ggumdoriId === state.photo.ggumdoriId);
+  // 무대에 올린 꿈돌이들과 지금 조절 중인 꿈돌이입니다.
+  const { overlays } = state.photo;
+  const active = getActivePhotoOverlay();
+  const firstEntry = state.catalog.entries.find((item) => item.ggumdoriId === overlays[0]?.ggumdoriId);
 
   sheet.hidden = false;
   document.body.dataset.photoSheetOpen = "true";
@@ -10314,11 +10564,13 @@ function renderPhotoSheet() {
   const head = createElement("header", "quest-sheet__head px-dialog__bar");
   const titleGroup = createElement("div", "quest-sheet__title-group");
   // 변수 의미: 사진 찍기 대상 꿈돌이 이름입니다(고정된 이름 집합이라 UI_STRINGS_EN에도 등록돼 있음).
-  const photoGgumdoriName = entry?.ggumdoriName || "꿈돌이";
+  const photoGgumdoriName = firstEntry?.ggumdoriName || "꿈돌이";
   const title = createElement(
     "h2",
     "px-label",
-    localize(`${photoGgumdoriName}와 사진 찍기`, `Take a photo with ${UI_STRINGS_EN[photoGgumdoriName] || photoGgumdoriName}`),
+    overlays.length > 1
+      ? localize(`꿈돌이 ${overlays.length}명과 사진 찍기`, `Take a photo with ${overlays.length} Ggumdori`)
+      : localize(`${photoGgumdoriName}와 사진 찍기`, `Take a photo with ${UI_STRINGS_EN[photoGgumdoriName] || photoGgumdoriName}`),
   );
   title.id = "photo-sheet-title";
   title.tabIndex = -1;
@@ -10356,6 +10608,11 @@ function renderPhotoSheet() {
       video.autoplay = true;
       video.playsInline = true;
       video.muted = true;
+      // 꿈돌이를 더하거나 빼느라 시트를 다시 그려도 켜져 있는 카메라 영상을 그대로 잇습니다.
+      if (photoStream) {
+        video.srcObject = photoStream;
+        video.play().catch(() => {});
+      }
       stage.append(video);
     } else if (state.photo.pickedImageUrl) {
       const picked = document.createElement("img");
@@ -10368,30 +10625,34 @@ function renderPhotoSheet() {
       stage.append(createElement("p", "photo-placeholder", "카메라를 켜거나 사진을 골라주세요."));
     }
 
-    // 미리보기 위에 얹는 꿈돌이입니다. 정지 PNG라서 손가락으로 옮기는 동안에도
-    // 촬영 결과와 똑같은 그림을 보여줍니다. (명세 §5.4)
-    if (entry?.ggumdoriImageRef) {
-      const overlay = document.createElement("img");
-      overlay.className = "photo-overlay";
-      overlay.src = entry.ggumdoriImageRef;
-      overlay.alt = "";
-      overlay.style.height = `${state.photo.scale}%`;
-      overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
-      overlay.style.insetBlockStart = `${state.photo.offsetY}%`;
-      stage.append(overlay);
+    // 미리보기 위에 얹는 꿈돌이들입니다. 도감 카드와 같은 그림을 쓰고, 촬영 때는 이 요소를
+    // 그대로 캔버스에 그려 미리보기와 결과가 같게 합니다. (명세 §5.4)
+    overlays.forEach((overlay) => {
+      const image = document.createElement("img");
+      image.className = "photo-overlay";
+      image.dataset.overlayKey = overlay.key;
+      image.alt = "";
+      image.draggable = false;
+      setGgumdoriImageSource(image, getPhotoOverlayImageRef(overlay.ggumdoriId));
+      stage.append(image);
+    });
+    if (overlays.length > 0) {
       // 손가락 하나로 옮기고 두 손가락으로 오므리고 벌려서 크기를 바꿉니다. (명세 §10 S11)
       attachPhotoStageGestures(stage);
     }
 
     body.append(stage);
 
+    // 무대에 올린 꿈돌이 목록입니다. 눌러서 조절할 꿈돌이를 고르고, 빼거나 더할 수 있습니다.
+    body.append(createPhotoCastRow(overlays, active));
+
     // 크기·좌우·상하 위치 조절입니다. 슬라이더는 터치 제스처가 어려운 경우(마우스,
-    // 스크린리더)를 위한 보조 수단으로 함께 둡니다. (명세 §10 S11)
+    // 스크린리더)를 위한 보조 수단으로 함께 둡니다. 지금 고른 꿈돌이에만 적용됩니다. (명세 §10 S11)
     const controls = createElement("section", "px-panel");
     controls.append(createElement("h3", "section-title", "캐릭터 조절"));
-    controls.append(createPhotoSlider("크기", "scale", 15, 90, state.photo.scale));
-    controls.append(createPhotoSlider("좌우 위치", "offsetX", 5, 95, state.photo.offsetX));
-    controls.append(createPhotoSlider("상하 위치", "offsetY", 15, 98, state.photo.offsetY));
+    controls.append(createPhotoSlider("크기", "scale", 15, 90));
+    controls.append(createPhotoSlider("좌우 위치", "offsetX", 5, 95));
+    controls.append(createPhotoSlider("상하 위치", "offsetY", 15, 98));
     body.append(controls);
   }
 
@@ -10444,18 +10705,20 @@ function renderPhotoSheet() {
 
   panel.append(head, body, footer);
   sheet.append(scrim, panel);
+  // 꿈돌이 위치·크기와 슬라이더 값을 지금 상태에 맞춥니다.
+  syncPhotoControls();
   // 열린 시트 안에 포커스를 가둡니다. (명세 §13.3-5)
   trapFocus(panel);
   panel.querySelector("#photo-sheet-title")?.focus({ preventScroll: true });
 }
 
 /**
- * 입력: 라벨, 상태 키, 최솟값, 최댓값, 현재 값.
+ * 입력: 라벨, 상태 키, 최솟값, 최댓값.
  * 출력: 슬라이더 행 요소.
- * 역할: 캐릭터 크기와 좌우 위치를 같은 모양으로 조절한다. (명세 §10 S11)
- * 호출 예시: createPhotoSlider("크기", "scale", 15, 90, 40)
+ * 역할: 지금 고른 꿈돌이의 크기와 위치를 같은 모양으로 조절한다. 값은 syncPhotoControls가 채운다. (명세 §10 S11)
+ * 호출 예시: createPhotoSlider("크기", "scale", 15, 90)
  */
-function createPhotoSlider(label, key, min, max, value) {
+function createPhotoSlider(label, key, min, max) {
   // 슬라이더 한 줄입니다.
   const row = createElement("div", "photo-slider");
   const labelElement = createElement("label", "photo-slider__label", label);
@@ -10464,13 +10727,12 @@ function createPhotoSlider(label, key, min, max, value) {
   const input = document.createElement("input");
   input.type = "range";
   input.id = `photo-slider-${key}`;
+  input.dataset.photoSlider = key;
   input.min = String(min);
   input.max = String(max);
-  input.value = String(value);
   input.addEventListener("input", (event) => {
-    state.photo = { ...state.photo, [key]: Number(event.target.value) };
     // 미리보기만 즉시 갱신해 슬라이더 조작이 끊기지 않게 합니다.
-    syncPhotoOverlayStyle();
+    updateActivePhotoOverlay({ [key]: Number(event.target.value) });
   });
 
   row.append(labelElement, input);
@@ -10478,26 +10740,118 @@ function createPhotoSlider(label, key, min, max, value) {
 }
 
 /**
+ * 입력: 무대에 올린 꿈돌이 목록, 지금 조절 중인 꿈돌이.
+ * 출력: 꿈돌이 목록 줄 요소.
+ * 역할: 눌러서 조절할 꿈돌이를 고르고(무대에서 직접 눌러도 됨), ×로 빼고, +로 더한다.
+ * 호출 예시: createPhotoCastRow(state.photo.overlays, getActivePhotoOverlay())
+ */
+function createPhotoCastRow(overlays, active) {
+  const row = createElement("div", "photo-cast");
+  row.setAttribute("role", "group");
+  row.setAttribute("aria-label", "사진에 올린 꿈돌이");
+
+  overlays.forEach((overlay) => {
+    const entry = state.catalog.entries.find((item) => item.ggumdoriId === overlay.ggumdoriId);
+    const name = entry?.ggumdoriName || "꿈돌이";
+    const chip = createElement("div", "photo-cast__chip");
+
+    // 조절 대상으로 고르는 버튼입니다. 고른 상태는 aria-pressed와 테두리로 함께 알립니다.
+    const pick = createElement("button", "photo-cast__pick");
+    pick.type = "button";
+    pick.dataset.castKey = overlay.key;
+    pick.setAttribute("aria-pressed", String(overlay.key === active?.key));
+    const thumb = document.createElement("img");
+    thumb.alt = "";
+    setGgumdoriImageSource(thumb, getPhotoOverlayImageRef(overlay.ggumdoriId));
+    pick.append(thumb, createElement("span", "photo-cast__name", name));
+    pick.addEventListener("click", () => {
+      state.photo = { ...state.photo, activeOverlayKey: overlay.key };
+      syncPhotoControls();
+    });
+    chip.append(pick);
+
+    // 두 명 이상일 때만 뺄 수 있습니다.
+    if (overlays.length > 1) {
+      const remove = createElement("button", "photo-cast__remove");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `${name} 빼기`);
+      const removeIcon = createElement("span", "px-icon px-icon--sm", "close");
+      removeIcon.setAttribute("aria-hidden", "true");
+      remove.append(removeIcon);
+      remove.addEventListener("click", () => removePhotoOverlay(overlay.key));
+      chip.append(remove);
+    }
+    row.append(chip);
+  });
+
+  if (overlays.length < MAX_PHOTO_OVERLAYS) {
+    const add = createElement("button", "px-button px-button--ghost photo-cast__add");
+    add.type = "button";
+    const addIcon = createElement("span", "px-icon px-icon--sm", "add");
+    addIcon.setAttribute("aria-hidden", "true");
+    add.append(addIcon, createElement("span", "", "꿈돌이 추가"));
+    add.addEventListener("click", () => openGgumdoriPickerSheet("add"));
+    row.append(add);
+  }
+
+  return row;
+}
+
+/**
  * 입력: 없음.
  * 출력: 없음.
- * 역할: state.photo(scale/offsetX/offsetY)를 화면의 .photo-overlay 스타일에 반영한다.
- * 슬라이더 조작과 터치 제스처가 이 함수 하나로 같은 갱신 로직을 공유한다. (명세 §10 S11)
- * 호출 예시: syncPhotoOverlayStyle()
+ * 역할: 꿈돌이들의 위치·크기, 조절 중 표시, 목록 줄 선택 상태, 슬라이더 값을 state.photo에 맞춘다.
+ * 시트를 다시 그리지 않고 바꾸므로, 손가락으로 옮기는 도중에도 끊기지 않는다. (명세 §10 S11)
+ * 호출 예시: syncPhotoControls()
  */
-function syncPhotoOverlayStyle() {
-  const overlay = select(".photo-overlay");
-  if (!overlay) {
-    return;
+function syncPhotoControls() {
+  const active = getActivePhotoOverlay();
+  // 두 명 이상일 때만 누가 조절 대상인지 표시합니다.
+  const showActive = state.photo.overlays.length > 1;
+  state.photo.overlays.forEach((overlay) => {
+    const image = document.querySelector(`.photo-overlay[data-overlay-key="${overlay.key}"]`);
+    if (image) {
+      image.style.height = `${overlay.scale}%`;
+      image.style.insetInlineStart = `${overlay.offsetX}%`;
+      image.style.insetBlockStart = `${overlay.offsetY}%`;
+      image.classList.toggle("is-active", overlay.key === active?.key);
+      image.classList.toggle("is-marked", showActive && overlay.key === active?.key);
+    }
+  });
+  document.querySelectorAll("[data-cast-key]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.castKey === active?.key));
+  });
+  if (active) {
+    document.querySelectorAll("[data-photo-slider]").forEach((input) => {
+      input.value = String(active[input.dataset.photoSlider]);
+    });
   }
-  overlay.style.height = `${state.photo.scale}%`;
-  overlay.style.insetInlineStart = `${state.photo.offsetX}%`;
-  overlay.style.insetBlockStart = `${state.photo.offsetY}%`;
+}
+
+/**
+ * 입력: 화면 좌표.
+ * 출력: 그 자리에 보이는 꿈돌이 key 또는 "".
+ * 역할: 무대를 누른 곳의 꿈돌이를 찾는다. 앞에 보이는 꿈돌이(조절 중인 꿈돌이, 그다음 나중에
+ *       올린 순서)를 먼저 검사한다.
+ * 호출 예시: findPhotoOverlayAt(120, 340)
+ */
+function findPhotoOverlayAt(clientX, clientY) {
+  const active = getActivePhotoOverlay();
+  const candidates = [active, ...[...state.photo.overlays].reverse().filter((overlay) => overlay !== active)];
+  for (const overlay of candidates) {
+    const rect = overlay && document.querySelector(`.photo-overlay[data-overlay-key="${overlay.key}"]`)?.getBoundingClientRect();
+    if (rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+      return overlay.key;
+    }
+  }
+  return "";
 }
 
 /**
  * 입력: 사진 촬영 무대(.photo-stage) 요소.
  * 출력: 없음.
- * 역할: 손가락 하나로는 캐릭터를 옮기고, 두 손가락으로 오므리고 벌리면 크기를 바꾼다.
+ * 역할: 꿈돌이를 누르면 그 꿈돌이가 조절 대상이 된다. 손가락 하나로는 옮기고, 두 손가락으로
+ * 오므리고 벌리면 크기를 바꾼다. 빈 곳을 누르면 지금 고른 꿈돌이를 그대로 조절한다.
  * 세 손가락 이상은 무시한다. (명세 §10 S11)
  * 호출 예시: attachPhotoStageGestures(stage)
  */
@@ -10506,7 +10860,7 @@ function attachPhotoStageGestures(stage) {
   const pointers = new Map();
   // 핀치 시작 시점의 두 손가락 사이 거리와 그때의 캐릭터 크기입니다. 핀치 중 배율 계산의 기준입니다.
   let pinchStartDistance = 0;
-  let pinchStartScale = state.photo.scale;
+  let pinchStartScale = getActivePhotoOverlay()?.scale || 40;
 
   // 현재 누르고 있는 두 손가락 사이 거리입니다.
   const measurePinchDistance = () => {
@@ -10522,11 +10876,19 @@ function attachPhotoStageGestures(stage) {
     if (pointers.size >= 2) {
       return;
     }
+    // 첫 손가락이 꿈돌이 위에 닿았으면 그 꿈돌이를 조절 대상으로 바꿉니다.
+    if (pointers.size === 0) {
+      const touchedKey = findPhotoOverlayAt(event.clientX, event.clientY);
+      if (touchedKey && touchedKey !== state.photo.activeOverlayKey) {
+        state.photo = { ...state.photo, activeOverlayKey: touchedKey };
+        syncPhotoControls();
+      }
+    }
     stage.setPointerCapture(event.pointerId);
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.size === 2) {
       pinchStartDistance = measurePinchDistance();
-      pinchStartScale = state.photo.scale;
+      pinchStartScale = getActivePhotoOverlay()?.scale || 40;
     }
   });
 
@@ -10540,28 +10902,28 @@ function attachPhotoStageGestures(stage) {
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (pinchStartDistance > 0) {
         const distance = measurePinchDistance();
-        state.photo = {
-          ...state.photo,
+        updateActivePhotoOverlay({
           scale: Math.round(clamp((pinchStartScale * distance) / pinchStartDistance, 15, 90)),
-        };
-        syncPhotoOverlayStyle();
+        });
       }
       return;
     }
 
     // 손가락 하나면 이전 위치와의 차이만큼 캐릭터를 옮깁니다(무대 크기 대비 %).
+    const active = getActivePhotoOverlay();
+    if (!active) {
+      return;
+    }
     const rect = stage.getBoundingClientRect();
     const previous = pointers.get(event.pointerId);
     const deltaXPercent = ((event.clientX - previous.x) / rect.width) * 100;
     const deltaYPercent = ((event.clientY - previous.y) / rect.height) * 100;
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
-    state.photo = {
-      ...state.photo,
-      offsetX: clamp(state.photo.offsetX + deltaXPercent, 5, 95),
-      offsetY: clamp(state.photo.offsetY + deltaYPercent, 15, 98),
-    };
-    syncPhotoOverlayStyle();
+    updateActivePhotoOverlay({
+      offsetX: clamp(active.offsetX + deltaXPercent, 5, 95),
+      offsetY: clamp(active.offsetY + deltaYPercent, 15, 98),
+    });
   });
 
   const releasePointer = (event) => {
@@ -11552,7 +11914,11 @@ function trapFocus(panel) {
  * 호출 예시: if (closeTopOverlay()) return;
  */
 function closeTopOverlay() {
-  // 나중에 연 것이 위에 있으므로 이 순서로 검사합니다.
+  // 나중에 연 것이 위에 있으므로 이 순서로 검사합니다. 꿈돌이 선택 시트는 촬영 화면 위에도 뜹니다.
+  if (state.ggumdoriPickerOpen) {
+    closeGgumdoriPickerSheet();
+    return true;
+  }
   if (state.photo.open) {
     closePhotoSheet();
     return true;
@@ -12999,6 +13365,11 @@ function bindEvents() {
     // 보상 모달 다음으로 퀘스트 상세 시트를 닫습니다. (명세 §7.4)
     if (event.key === "Escape" && state.recordSheetOpen) {
       closeRecordSheet();
+      return;
+    }
+
+    if (event.key === "Escape" && state.ggumdoriPickerOpen) {
+      closeGgumdoriPickerSheet();
       return;
     }
 

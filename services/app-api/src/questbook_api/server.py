@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import hmac
 import json
 import math
 import re
@@ -216,6 +217,26 @@ def attach_place_images(payload: dict[str, Any], repository: QuestbookRepository
         cached = images.get(str(place["contentId"]))
         if cached:
             place["imageUrl"] = cached
+
+
+# 변수 의미: 비밀 닉네임으로 전환하는 격리 테스트 계정의 고정 ID다. 공용 체험 계정(demo-user)과
+# 실제 소셜 계정의 데이터는 절대 건드리지 않고 이 계정에만 보상을 지급한다.
+TEST_ACCOUNT_USER_ID = "test-account"
+# 변수 의미: 테스트 계정 화면에 표시할 닉네임이다. 비밀 닉네임 자체는 화면·DB에 남기지 않는다.
+TEST_ACCOUNT_DISPLAY_NICKNAME = "테스트 계정"
+
+
+def is_test_account_nickname(candidate: Any, secret: str) -> bool:
+    """
+    입력: 사용자가 입력한 닉네임 후보, 서버 .env의 비밀 닉네임.
+    출력: 테스트 계정 전환 요청인지 여부.
+    역할: 비밀 값이 설정된 경우에만, 앞뒤 공백을 뺀 입력이 정확히 같을 때 참이다.
+          비교 시간으로 값을 추측하지 못하게 상수 시간 비교를 쓴다.
+    호출 예시: is_test_account_nickname("abc", state.settings.test_account_nickname)
+    """
+    if not secret or not isinstance(candidate, str):
+        return False
+    return hmac.compare_digest(candidate.strip().encode("utf-8"), secret.strip().encode("utf-8"))
 
 
 def is_safe_oauth_nonce(value: str) -> bool:
@@ -616,6 +637,10 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     user_id = self._required_user_id()
                     # 변수 의미: 저장할 닉네임 요청 본문이다.
                     payload = self._read_json_body()
+                    # 비밀 닉네임이면 지금 계정의 닉네임은 바꾸지 않고 격리 테스트 계정으로 전환한다.
+                    if is_test_account_nickname(payload.get("nickname"), state.settings.test_account_nickname):
+                        self._send_json(HTTPStatus.OK, self._switch_to_test_account())
+                        return
                     self._send_json(
                         HTTPStatus.OK,
                         {"user": state.service.update_nickname(user_id, payload)},
@@ -875,6 +900,32 @@ def create_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 "provider": "demo-social",
                 "user": state.repository.get_user(user_id),
                 "consent": consent,
+            }
+
+        def _switch_to_test_account(self) -> dict[str, Any]:
+            """
+            입력: 없음. 호출 전에 요청자가 로그인(동의 완료) 상태이고 비밀 닉네임이 맞는지 확인했어야 한다.
+            출력: 테스트 계정 access token과 사용자 상태.
+            역할: 모든 꿈돌이·뱃지가 해금된 격리 테스트 계정을 준비(없으면 생성)하고 그 계정 토큰을 준다.
+                  요청자의 원래 계정(공용 체험 계정 포함)은 전혀 바꾸지 않는다. 몇 번을 불러도 같은 계정이다.
+            호출 예시: response = self._switch_to_test_account()
+            """
+            state.repository.ensure_user(TEST_ACCOUNT_USER_ID)
+            state.repository.record_user_consent(
+                user_id=TEST_ACCOUNT_USER_ID,
+                age_confirmed=True,
+                privacy_consent=True,
+                location_consent=True,
+                consent_version="baseline-2026-07",
+            )
+            state.repository.unlock_everything_for_testing(TEST_ACCOUNT_USER_ID)
+            # 변수 의미: 표시용 닉네임으로 저장한 테스트 계정 프로필이다.
+            user = state.repository.update_nickname(TEST_ACCOUNT_USER_ID, TEST_ACCOUNT_DISPLAY_NICKNAME)
+            return {
+                "accessToken": create_access_token(TEST_ACCOUNT_USER_ID, "test-account", state.settings.jwt_secret),
+                "tokenType": "Bearer",
+                "provider": "test-account",
+                "user": user,
             }
 
         def _provider_credentials(self, provider: str) -> tuple[str, str]:
